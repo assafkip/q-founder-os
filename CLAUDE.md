@@ -51,6 +51,16 @@ A portable founder operating system for Claude Code. Strategy, execution, relati
 - Build daily schedule: `bash q-system/marketing/templates/build-schedule.sh <json> <html>`
 - Audit morning routine: `python3 q-system/.q-system/audit-morning.py q-system/output/morning-log-YYYY-MM-DD.json`
 
+## Token Discipline (NON-NEGOTIABLE)
+
+- If a tool call fails, do NOT retry the same call. Diagnose why it failed first. Change the approach.
+- After 10 tool calls, pause and check: "Am I closer to the goal than 10 calls ago?" If not, stop and tell the founder.
+- Never spawn an Explore/research agent for something a single Grep or Glob could answer.
+- Before spawning any Agent, ask: "Is this worth 50K+ tokens?" If the answer is "maybe," use direct tools instead.
+- If you've read 5+ files without writing anything, stop and tell the founder what you're looking for and why.
+- Never hold large API responses in context. Process and discard immediately.
+- When blocked, do NOT brute-force. Try a different approach or ask the founder.
+
 ## Tool Preferences
 - Use project-scoped Notion API server for CRM (not workspace-wide plugins)
 - Use Apify for data scraping, Chrome for interactive/DMs only
