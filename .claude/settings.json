@@ -51,11 +51,11 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Edit|Write",
+        "matcher": ".*",
         "hooks": [
           {
             "type": "command",
-            "command": "if echo \"$CLAUDE_TOOL_INPUT\" | grep -qiE '\\.(env|pem|key|credentials)'; then echo 'BLOCK: Attempted to modify sensitive file (.env, .pem, .key, or credentials)' >&2; exit 2; fi"
+            "command": "python3 q-system/.q-system/token-guard.py"
           }
         ]
       }
