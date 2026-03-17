@@ -62,6 +62,8 @@ def audit(log_path):
             "4_tl_linkedin",
             "4_tl_x",
         })
+    if day_of_week == 'wednesday':
+        expected.add("4_kipi_promo")
     if day_of_week == 'monday':
         expected.add("4_medium_draft")
 

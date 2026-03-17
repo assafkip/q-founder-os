@@ -16,7 +16,7 @@ Every tool the morning routine depends on, its exact test, known limitations, an
 | **Gmail** | `mcp__claude_ai_Gmail__gmail_search_messages` with `q: "after:YYYY/M/D"` (yesterday) | Returns `messages` array | None known | None. Halt. |
 | **Notion API** | `mcp__notion_api__API-post-database-query` on Contacts DB `cabba10d-cd5d-4cff-b042-3241a2be18b5` with `page_size: 1` | Returns `results` array | **`API-patch-page` only updates `title` property.** Cannot update Role, Company, Status, DP Status, Last Contact, What They Care About, Strategic Value, Follow-up Action, Pushback, Email, or any other field. For full property updates, use `mcp__claude_ai_Notion__notion-update-page` IF the workspace matches (see known issues). | None for reads. For writes, see Known Issues #1. |
 | **Chrome** | `mcp__claude-in-chrome__tabs_context_mcp` | Returns tab list | Alerts/dialogs block all further commands. Avoid triggering them. | None. Halt. |
-| **Apify** | Check if any `mcp__apify__*` tool is available via ToolSearch. If not, test REST: `curl -s "https://api.apify.com/v2/acts?token=$APIFY_TOKEN&limit=1"` | MCP: tool schema returned. REST: JSON with `data` array. | MCP tools sometimes don't load in a session. REST API always works. Token in settings.json (see your .env or settings.json for the actual token) | **REST API fallback.** All actors callable via `curl -X POST "https://api.apify.com/v2/acts/ACTOR_ID/runs?token=$APIFY_TOKEN&waitForFinish=120"`. Confirmed working actors listed below. |
+| **Apify** | Check if any `mcp__apify__*` tool is available via ToolSearch. If not, test REST: `curl -s "https://api.apify.com/v2/acts?token=$APIFY_TOKEN&limit=1"` | MCP: tool schema returned. REST: JSON with `data` array. | MCP tools sometimes don't load in a session. REST API always works. Token in settings.json: `YOUR_APIFY_TOKEN` | **REST API fallback.** All actors callable via `curl -X POST "https://api.apify.com/v2/acts/ACTOR_ID/runs?token=$APIFY_TOKEN&waitForFinish=120"`. Confirmed working actors listed below. |
 
 ### Non-Critical (ask founder before proceeding without)
 
@@ -248,7 +248,7 @@ Certain steps MUST NOT start until all prior steps are done or explicitly skippe
 Before Step 8 can proceed, Claude MUST verify these deliverables exist in today's action cards or output files. Not "step logged" but "output produced."
 
 **Day-invariant (every day):**
-- [ ] At least 3 pipeline follow-up items (Step 5.85) with copy-paste text
+- [ ] At least 3 pipeline follow-up items (Step 5.85) with copy-paste text. This means: Notion Contacts DB queried for warm/active contacts with Last Contact > 7 days, follow-up DMs/emails drafted for each, added to HTML. Checking who replied to YESTERDAY's messages is NOT the same as following up with the existing pipeline.
 - [ ] LinkedIn engagement comments with copy-paste text (Step 5.9b)
 - [ ] Connection requests with copy-paste notes (Step 5.9b)
 - [ ] LinkedIn Comments tab was checked (Step 3) - log must say "comments tab" not just "posts"
@@ -281,6 +281,24 @@ Before Step 8 can proceed, Claude MUST verify these deliverables exist in today'
 
 ---
 
+### Echo of Prompt (REQUIRED before every step)
+
+Before executing ANY step, Claude MUST run the step loader to re-inject that step's requirements into context:
+```bash
+bash q-system/.q-system/step-loader.sh <step_number>
+```
+This combats "Lost in the Middle" - the research-proven phenomenon where LLMs forget instructions from earlier in the conversation. The step loader extracts the specific step definition from commands.md and prints it fresh. Claude MUST read this output before executing the step. This is NOT optional. Skipping the step loader is equivalent to skipping the step itself.
+
+### HTML Build Verification (AUTOMATIC)
+
+The build script (`build-schedule.sh`) automatically runs `verify-schedule.py` before generating HTML. If verification fails, the HTML is NOT built. Claude cannot bypass this. The verification checks:
+- Pipeline follow-ups section exists with 3+ items with copy-paste text
+- Day-specific content exists (signals Mon/Wed/Fri, TL Tue/Thu, Medium Mon, Kipi Wed)
+- Section ordering is correct (follow-ups before new leads)
+- Items have energy tags
+
+If the build is blocked, Claude must go back and complete the missing work, then rebuild.
+
 ### How Gates Work
 
 Before starting any gate step, Claude MUST:
@@ -302,10 +320,16 @@ Options:
 
 A step can only be marked `skipped` if:
 - It's day-conditional and today isn't the right day (e.g., Monday-only steps on a Friday)
-- A dependency failed (e.g., VC Pipeline API down, so warm intro matching skipped)
+- A dependency failed (e.g., VC Pipeline API down) - BUT Claude must notify the founder and wait for the founder to decide next steps. Claude does not self-decide the fallback.
 - The founder explicitly says "skip it"
 
-Claude cannot self-authorize skipping a required step.
+**Claude cannot self-authorize skipping a required step. EVER.** This means:
+- Claude cannot decide "this is lower priority today" and skip a step
+- Claude cannot decide "we did this yesterday so we don't need it today" and skip a step
+- Claude cannot decide "context is running low" and skip a step
+- If Claude thinks a step should be skipped, it MUST ask the founder first: "Step X is next. Do you want me to run it or skip it today?"
+- If the founder doesn't respond, the step runs. The default is ALWAYS run, never skip.
+- Skipping without asking is a rule violation that gets flagged in the audit.
 
 ---
 

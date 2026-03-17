@@ -99,11 +99,13 @@ kipi-system/
 ├── .q-system/
 │   ├── commands.md          # 35+ step morning routine and all workflows
 │   ├── loop-tracker.sh      # Opens, escalates, and closes loops
+│   ├── verify-schedule.py   # Blocks HTML build if required sections missing
+│   ├── step-loader.sh       # Re-injects step requirements before execution (EOP)
 │   ├── session-start.py     # Auto-loads context on first use each day
 │   ├── audit-morning.py     # Catches skipped steps and missing content
 │   ├── token-guard.py       # Stops runaway AI token consumption
 │   ├── log-step.sh          # Flight recorder for every step
-│   └── preflight.md         # Tool manifest and known issues
+│   └── preflight.md         # Tool manifest, known issues, and verification rules
 │
 ├── canonical/               # Source of truth (updates from every conversation)
 │   ├── talk-tracks.md       # What to say, tested and tagged by audience
@@ -161,6 +163,30 @@ Works standalone with local files. Each integration adds capability:
 | Apify | LinkedIn/X/Reddit scraping for lead sourcing |
 | Chrome | LinkedIn DMs, analytics, interactive browsing |
 | Slack | Notifications, approval workflows |
+
+---
+
+## The AI needs scaffolding too
+
+Here's something nobody talks about: the AI running this system has the same executive function problems you do.
+
+Research calls it "Lost in the Middle" (Stanford, 2023). In long conversations, LLMs forget instructions from earlier in the context. They rush to produce output and skip boring middle steps. They self-report completion without verifying. They pattern-match from old sessions instead of reading current requirements.
+
+Sound familiar?
+
+So the system has guardrails for the AI, not just for you:
+
+**Verification gate.** Before the HTML builds, a script checks the JSON output. Are pipeline follow-ups there? Does day-specific content exist? Are sections in the right order? If verification fails, the build is blocked. The AI can't bypass it.
+
+**Echo of Prompt.** Before each step executes, a script re-injects that step's requirements fresh into context. Combats the attention drift that makes the AI "forget" what a step actually requires by the time it runs it.
+
+**No self-authorized skipping.** The AI cannot decide on its own to skip a step. It must ask you first. The default is always run.
+
+**Structured deliverables, not text summaries.** The system logs what was actually produced (number of follow-ups, number of copy blocks) not just "done."
+
+The research basis: "Lost in the Middle" (Stanford), "Context Degradation Syndrome," "LLMs Get Lost in Multi-Turn Conversation" (Laban et al. 2025), and "Echo of Prompt" refocusing mechanisms.
+
+Building a system for a brain that drops things, then discovering the AI brain drops things the same way, then building a system for the system. It's turtles all the way down.
 
 ---
 
