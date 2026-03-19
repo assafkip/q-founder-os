@@ -1,15 +1,54 @@
+---
+name: morning-orchestrator
+description: "Orchestrates the 9-phase morning routine pipeline. Spawns sub-agents per phase, manages bus/ JSON communication, and produces the daily schedule."
+model: opus
+maxTurns: 200
+---
+
 # Agent Pipeline Orchestrator
 
 This step replaces the monolithic morning routine with a phased agent pipeline.
 Each phase spawns sub-agents via the Agent tool. Agents communicate through
 JSON files in the bus/ directory.
 
+## MANDATORY READS (before Phase 0 -- do not skip)
+
+You are about to execute a 9-phase agent pipeline. Before spawning ANY agent,
+read these files. If you feel like you already know what to do from the skill
+prompt -- you don't. Every session that skipped these reads re-discovered
+known bugs and broke guardrails.
+
+### Read 1: Preflight -- Tool Manifest + Known Issues
+```
+Read: q-consult/.q-system/preflight.md (offset: 1, limit: 136)
+```
+Sections 1-2: What tools work, what's broken, fallback chains, and 10 known
+issues (KI-1 through KI-10) that have burned real sessions. The preflight agent
+tests connections, but it doesn't know about KI-5 (LinkedIn search returns vendors)
+or KI-6 (generic subs produce 0 leads) or KI-9 (new positioning). You do.
+
+### Read 2: Preflight -- Execution Gates + Action Cards
+```
+Read: q-consult/.q-system/preflight.md (offset: 246, limit: 75)
+```
+Sections 5-6: When to halt, how to log steps, and the rule that "card delivered"
+is NOT "done" -- only founder-confirmed actions update state files.
+
+### Read 3: Current Positioning
+```
+Read: q-consult/canonical/decisions.md (limit: 60)
+```
+So agents generate content with current positioning, not deprecated messaging.
+
+**DO NOT proceed to Setup until all 3 reads are done.**
+**DO NOT rely on the SKILL.md prompt for execution details. This file is your authority.**
+
 ## Setup
 
 ```bash
 DATE=$(date +%Y-%m-%d)
-BUS_DIR="q-system/.q-system/agent-pipeline/bus/${DATE}"
-AGENTS_DIR="q-system/.q-system/agent-pipeline/agents"
+BUS_DIR="q-consult/.q-system/agent-pipeline/bus/${DATE}"
+AGENTS_DIR="q-consult/.q-system/agent-pipeline/agents"
 mkdir -p "${BUS_DIR}"
 ```
 
@@ -85,10 +124,10 @@ Launch in ONE message:
 - This is the most expensive agent. It produces the daily schedule JSON.
 
 ### Phase 8: Build + Verify (sequential)
-1. Run: `bash q-system/marketing/templates/build-schedule.sh output/schedule-data-{date}.json output/daily-schedule-{date}.html`
+1. Run: `bash q-consult/marketing/templates/build-schedule.sh output/schedule-data-{date}.json output/daily-schedule-{date}.html`
 2. Spawn: 08-visual-verify.md (sonnet) - opens HTML in Chrome, checks layout
-3. Run: `python3 q-system/.q-system/bus-to-log.py {date}` - bridges bus/ files to morning-log.json
-4. Run: `python3 q-system/.q-system/audit-morning.py q-system/output/morning-log-{date}.json`
+3. Run: `python3 q-consult/.q-system/bus-to-log.py {date}` - bridges bus/ files to morning-log.json
+4. Run: `python3 q-consult/.q-system/audit-morning.py q-consult/output/morning-log-{date}.json`
 5. Show audit output to founder
 Steps 3-4 are NON-OPTIONAL. A hook enforces this - see .claude/settings.json.
 
@@ -102,10 +141,26 @@ These are the final agents. If either fails, log the error - do not retry.
 
 At the start of each day (Phase 0), delete bus/ directories older than 3 days:
 ```bash
-find q-system/.q-system/agent-pipeline/bus/ -maxdepth 1 -type d -mtime +3 -exec rm -rf {} \;
+find q-consult/.q-system/agent-pipeline/bus/ -maxdepth 1 -type d -mtime +3 -exec rm -rf {} \;
 ```
 
-## Fallback
+## Fallback Chain (tool-level)
+
+| Tool fails | Auto-fallback | Founder approval? |
+|------------|---------------|-------------------|
+| Apify | Chrome scraping (see Phase 5 lead-sourcing-chrome) | No -- auto, just log it |
+| Chrome | STOP and report | Yes |
+| Notion `mcp__notion_api__*` | curl with API token | No -- auto, just log it |
+| `mcp__claude_ai_Notion__*` | **NEVER USE for ASK data** -- wrong workspace | N/A |
+| Gmail | Skip email-dependent steps | Note in briefing |
+| Calendar | Skip meeting prep | Note in briefing |
+
+## Notion IDs
+
+- ASK Consulting parent page: `321bf98c-0529-8012-9c0e-d97a72dba405`
+- KTLYST parent page: `314bf98c-0529-81bb-a576-d5982475fd2d` (DO NOT TOUCH)
+
+## Catastrophic Fallback
 
 If the agent pipeline fails catastrophically, fall back to the monolithic step-by-step
 flow using step-loader.sh. The old steps still exist in steps/.

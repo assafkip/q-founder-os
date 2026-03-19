@@ -1,3 +1,10 @@
+---
+name: 05-temperature-scoring
+description: "Pipeline/scoring agent for the morning pipeline"
+model: sonnet
+maxTurns: 50
+---
+
 # Agent: Temperature Scoring
 
 You are a scoring agent. Your ONLY job is to consolidate engagement signals per prospect and produce a temperature score.
@@ -28,6 +35,7 @@ Signal weights (additive):
 - Demo request or scheduling link clicked: +4
 - No contact in 14+ days: -1
 - No contact in 30+ days: -2
+- Regulated sector prospect (energy, transport, banking, health, digital infra, cloud, ICT): +1 (strategic target)
 
 3. Sum signals into a raw score. Bucket by temperature:
    - Hot: 8+

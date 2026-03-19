@@ -1,3 +1,10 @@
+---
+name: 07-synthesize
+description: "Synthesis agent. Reads all bus/ files and produces the daily schedule JSON."
+model: opus
+maxTurns: 50
+---
+
 # Agent: Morning Synthesis (Opus)
 
 You are the synthesis agent. You read ALL bus/ outputs from prior agents and produce the daily schedule JSON.
@@ -24,6 +31,16 @@ You are the synthesis agent. You read ALL bus/ outputs from prior agents and pro
 6. Write output to: {{QROOT}}/output/schedule-data-{{DATE}}.json
 
 7. Also write a brief morning briefing (text, 10-15 lines max) to {{BUS_DIR}}/briefing.md
+
+## Post Visuals (ENFORCED)
+
+When building the "Posts" section, check `{{BUS_DIR}}/post-visuals.json`. For every post item, attach the `visuals` object from that file to the corresponding schedule item. The visuals object includes:
+- `recommended`: "hero_image" or "carousel"
+- `heroImage`: Image generation URLs (for signals, single-take, founder posts)
+- `carousel`: Gamma carousel URL + PDF export (for multi-point, data, regulatory posts)
+- `socialCard`: Gamma fallback
+
+See schedule-data-schema.md "Post Visuals" section for the full schema. Every post MUST have at least one visual option. If post-visuals.json is missing or incomplete, add a `needsEyes` note: "Visual generation failed - post manually or regenerate."
 
 ## Key context files (read ONLY if needed for specific items)
 - {{QROOT}}/canonical/talk-tracks.md (for meeting prep talk tracks)
