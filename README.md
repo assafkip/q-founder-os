@@ -97,15 +97,48 @@ The system walks you through setup. Who you are, what you're building, how you t
 ```
 kipi-system/
 ├── .q-system/
-│   ├── commands.md          # 35+ step morning routine and all workflows
-│   ├── loop-tracker.sh      # Opens, escalates, and closes loops
-│   ├── verify-schedule.py   # Blocks HTML build if required sections missing
-│   ├── step-loader.sh       # Re-injects step requirements before execution (EOP)
-│   ├── session-start.py     # Auto-loads context on first use each day
-│   ├── audit-morning.py     # Catches skipped steps and missing content
-│   ├── token-guard.py       # Stops runaway AI token consumption
-│   ├── log-step.sh          # Flight recorder for every step
-│   └── preflight.md         # Tool manifest, known issues, and verification rules
+│   ├── agent-pipeline/
+│   │   ├── agents/              # 25 agent prompt files (one per task)
+│   │   │   ├── 00-preflight.md          # Verify all tools respond
+│   │   │   ├── 01-calendar-pull.md      # Fetch calendar events
+│   │   │   ├── 01-gmail-pull.md         # Fetch flagged emails
+│   │   │   ├── 01-notion-pull.md        # Fetch CRM data
+│   │   │   ├── 01-vc-pipeline-pull.md   # Fetch VC pipeline (optional)
+│   │   │   ├── 02-meeting-prep.md       # Prep today's meetings
+│   │   │   ├── 02-warm-intro-match.md   # Cross-ref warm intro paths
+│   │   │   ├── 03-linkedin-posts.md     # Scan LinkedIn feed
+│   │   │   ├── 03-linkedin-dms.md       # Scan DMs + connection accepts
+│   │   │   ├── 03-prospect-pipeline.md  # Count prospects by status
+│   │   │   ├── 04-signals-content.md    # Find signals, draft posts
+│   │   │   ├── 04-value-routing.md      # Match signals to prospects
+│   │   │   ├── 04-post-visuals.md       # Generate visual assets (Gamma/image gen)
+│   │   │   ├── 04-founder-brand-post.md # Weekly founder brand post
+│   │   │   ├── 05-temperature-scoring.md # Score prospect engagement
+│   │   │   ├── 05-lead-sourcing.md      # Run Apify lead scraping
+│   │   │   ├── 05-lead-sourcing-chrome.md # Chrome fallback for leads
+│   │   │   ├── 05-pipeline-followup.md  # Draft overdue follow-ups
+│   │   │   ├── 05-loop-review.md        # Flag stale loops
+│   │   │   ├── 05-engagement-hitlist.md # Copy-paste engagement actions
+│   │   │   ├── 06-compliance-check.md   # Check content vs rules
+│   │   │   ├── 06-positioning-check.md  # Audit talk tracks + objections
+│   │   │   ├── 07-synthesize.md         # Produce daily schedule JSON
+│   │   │   ├── 08-visual-verify.md      # Open HTML, check layout
+│   │   │   ├── 09-notion-push.md        # Push actions to Notion
+│   │   │   ├── 10-daily-checklists.md   # Update Notion checklist pages
+│   │   │   ├── _auto-fail-checklist.md  # Voice/content rules
+│   │   │   └── _cadence-config.md       # Posting/outreach timing
+│   │   └── bus/                 # Inter-agent JSON (per-date directories)
+│   │
+│   ├── steps/               # Monolithic step files (fallback)
+│   ├── commands.md           # Full workflow definitions
+│   ├── audit-morning.py      # Catches skipped steps
+│   ├── bus-to-log.py         # Bridges bus/ files to morning log
+│   ├── log-step.sh           # Flight recorder for every step
+│   ├── loop-tracker.sh       # Opens, escalates, closes loops
+│   ├── step-loader.sh        # Re-injects step requirements (EOP)
+│   ├── verify-schedule.py    # Blocks HTML if sections missing
+│   ├── token-guard.py        # Stops runaway token consumption
+│   └── preflight.md          # Tool manifest and known issues
 │
 ├── canonical/               # Source of truth (updates from every conversation)
 │   ├── talk-tracks.md       # What to say, tested and tagged by audience
@@ -125,10 +158,14 @@ kipi-system/
 │   └── graph.jsonl          # Who knows whom, who cares about what
 │
 ├── marketing/               # Content templates, guardrails, voice matching
+│   └── templates/
+│       ├── build-schedule.sh          # JSON -> HTML build script
+│       ├── daily-schedule-template.html # AUDHD-optimized HTML template
+│       └── schedule-data-schema.md    # JSON schema (with post visuals)
+│
 ├── methodology/             # Debrief template, operating modes
 │
 └── output/
-    ├── open-loops.json      # Every tracked loop with escalation state
     ├── daily-schedule-*.html # Your daily action plan
     └── morning-log-*.json   # Audit trail
 ```
