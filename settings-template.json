@@ -21,6 +21,18 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Agent|Bash|WebSearch|WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/q-system/.q-system/tool-counter.sh\" 2>/dev/null || true",
+            "timeout": 5000
+          }
+        ]
+      }
     ]
   },
   "mcpServers": {

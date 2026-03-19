@@ -258,10 +258,23 @@ Time-stratified memory in `memory/`:
 - `working/` - session-scoped, ephemeral (<48h). Auto-cleaned during `/q-morning` Step 0a.
 - `weekly/` - 7-day rolling window. Reviewed during Monday morning routine.
 - `monthly/` - persistent insights. Reviewed on 1st of month.
+- `sessions/` - one file per session (session-YYYY-MM-DD-HHMM.md). Contains session log, tool calls, key decisions.
 - `graph.jsonl` - entity-relationship triples for cross-contact queries.
 - `last-handoff.md` - session continuity note from `/q-handoff`.
 
+**Session separation rule:** Never mix session history into state files. State files (`my-project/current-state.md`, `my-project/progress.md`) = "where are we now." Session files = "what happened when." This prevents state files from growing unbounded and keeps them scannable.
+
 During Step 0c, read `last-handoff.md` for prior session context.
+
+## Token Discipline (behavioral layer)
+
+These rules complement the automated token-guard.py and tool-counter.sh:
+- After every 10 tool calls during collection, pause and ask: "Am I closer to answering the primary question than 10 calls ago?"
+- If the answer is no for 2 consecutive checks, STOP and either switch approaches or ask the founder
+- Browser automation (Chrome MCP) is the most expensive operation. Plan exactly what you need before opening a page.
+- Before spawning any Agent, ask: "Is this worth 50K+ tokens?" If the answer is "maybe," use direct tools instead.
+- Never retry a failed tool call without diagnosing why it failed first
+- After initial collection sweep, pause and ask: "What questions should we ask the founder before burning more tokens?" The founder often knows answers that would take 50+ tool calls to research.
 
 ## Session Continuity
 
