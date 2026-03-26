@@ -18,8 +18,11 @@ import os
 import sys
 from datetime import datetime
 
+# Resolve {{QROOT}} relative to this script's location (../ from .q-system/)
+QROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+
 def verify(date, phase):
-    bus_dir = f"q-system/.q-system/agent-pipeline/bus/{date}"
+    bus_dir = os.path.join(QROOT, ".q-system", "agent-pipeline", "bus", date)
 
     if not os.path.isdir(bus_dir):
         print(f"FAIL: Bus directory does not exist: {bus_dir}")
@@ -59,7 +62,7 @@ def verify(date, phase):
         },
         4: {
             "required": ["signals.json"],
-            "optional": ["value-routing.json", "post-visuals.json", "kipi-promo.json"],
+            "optional": ["value-routing.json", "post-visuals.json", "promo.json", "tl-content.json"],
             "checks": {
                 "signals.json": lambda d: "selected_signal" in d or "linkedin_draft" in d,
             }
@@ -97,8 +100,16 @@ def verify(date, phase):
         return True
 
     spec = phase_files[phase]
-    required = spec.get("required", [])
-    optional = spec.get("optional", [])
+    required = list(spec.get("required", []))
+    optional = list(spec.get("optional", []))
+
+    # Day-of-week enforcement: tl-content.json required on Tue/Thu
+    day_of_week = datetime.strptime(date, "%Y-%m-%d").strftime("%A").lower()
+    if phase == 4 and day_of_week in ("tuesday", "thursday"):
+        if "tl-content.json" in optional:
+            optional.remove("tl-content.json")
+        if "tl-content.json" not in required:
+            required.append("tl-content.json")
     checks = spec.get("checks", {})
 
     all_pass = True

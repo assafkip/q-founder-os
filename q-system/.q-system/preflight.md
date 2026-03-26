@@ -22,7 +22,7 @@ Every tool the morning routine depends on, its exact test, known limitations, an
 
 | Tool | Test Command | Pass Criteria | Known Limitations | Fallback |
 |------|-------------|---------------|-------------------|----------|
-| **VC Pipeline API** | `curl -s http://localhost:5050/api/pipeline` via Bash | Returns JSON with pipeline data | Must be running locally. Founder needs to start it: `cd /Users/assafkip/Desktop/Assafs_Qs/VC_Reachout/q-VC-Sourcing/ && python app.py` | Skip Steps 1.5 (warm intro matching). Note in briefing. |
+| **VC Pipeline API** | `curl -s http://localhost:5050/api/pipeline` via Bash | Returns JSON with pipeline data | Must be running locally. Founder needs to start the local pipeline server. | Skip Steps 1.5 (warm intro matching). Note in briefing. |
 | **NotebookLM** | `mcp__notebooklm__list_notebooks` | Returns notebook list | Session-based, may need re-auth. | Skip deep research in Step 2. Use Apify for profile data instead. |
 
 ### Confirmed Working Apify Actors (validated Mar 10-11, 2026)
@@ -50,8 +50,8 @@ Every tool the morning routine depends on, its exact test, known limitations, an
 Things we've hit before. Never re-discover these.
 
 ### KI-1: Notion has two MCP servers connected to different workspaces
-- `mcp__notion_api__*` connects to assaf@ktlystlabs.com (KTLYST CRM) - CORRECT for reads
-- `mcp__claude_ai_Notion__*` connects to AI Consulting workspace - WRONG for KTLYST data
+- `mcp__notion_api__*` connects to the founder's Notion workspace (CRM) - CORRECT for reads
+- `mcp__claude_ai_Notion__*` connects to a different workspace - WRONG for CRM data
 - **Rule:** Use `mcp__notion_api__*` for all database queries. Use `mcp__claude_ai_Notion__notion-update-page` ONLY if the page is accessible (test first with a read). If 404, fall back to manual update instructions.
 
 ### KI-2: Notion API-patch-page only updates title
@@ -76,7 +76,7 @@ Things we've hit before. Never re-discover these.
 
 ### KI-6: VC Pipeline API requires local server
 - `http://localhost:5050/api/pipeline` only works if the Python app is running
-- Location: `/Users/assafkip/Desktop/Assafs_Qs/VC_Reachout/q-VC-Sourcing/`
+- Location: configured in `my-project/founder-profile.md` or local project directory
 - `WebFetch` returns "Invalid URL" for localhost URLs
 - **Rule:** Use `curl` via Bash tool, not WebFetch. If server is down, ask founder to start it or proceed without warm intro matching.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI query helper for the KTLYST metrics database."""
+"""CLI query helper for the metrics database."""
 
 import sqlite3
 import json
@@ -8,7 +8,7 @@ import os
 import hashlib
 from datetime import datetime, timedelta
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "ktlyst-metrics.db")
+DB_PATH = os.path.join(os.path.dirname(__file__), "metrics.db")
 
 def get_db():
     if not os.path.exists(DB_PATH):
