@@ -121,7 +121,7 @@ This step auto-detects DM replies and connection accepts so the founder never ne
 - Chrome (interactive + DMs): `mcp__claude-in-chrome__*` - Use for: LinkedIn DM reading (Step 3.8), posting comments/replies, checking notifications, LinkedIn Comments tab, Google Analytics, visual content review. NOT for profile/post scraping (use Apify).
 - VC Pipeline Manager: `http://localhost:5050/api/pipeline` (GET) - Returns full VC pipeline with 66+ contacts, warm intro paths, tiers, statuses. Use `WebFetch` to pull. Data source for warm intro matching (Step 1.5) and cross-referencing connectors. App at `http://localhost:5050/`.
 - NotebookLM: `mcp__notebooklm__add_notebook`, `mcp__notebooklm__ask_question`, `mcp__notebooklm__search_notebooks`
-- Signals: `WebFetch` on `https://{{YOUR_DOMAIN}}/signals`
+- Signals: `WebFetch` on `{{YOUR_SIGNALS_URL}}`
 - Google Analytics (Mondays): `mcp__claude-in-chrome__*` on `analytics.google.com` (authuser=2, property a385692819p526076376)
 - Gamma: `mcp__gamma__generate_gamma`, `mcp__gamma__get_gamma_generation`
 
@@ -135,7 +135,7 @@ This step auto-detects DM replies and connection accepts so the founder never ne
 
 1. **Scrape all platforms via Apify** (`mcp__apify__*`):
    - **LinkedIn:** LinkedIn Posts Scraper actor on founder's profile. Pull last 30 days of posts. Extract: text, impressions, likes, comments, reposts, date/time posted.
-   - **X/Twitter:** Twitter/X Scraper actor on @{{YOUR_X_HANDLE}}. Pull last 30 days. Extract: text, impressions, likes, retweets, replies, quotes, date/time.
+   - **X/Twitter:** Twitter/X Scraper actor on {{YOUR_X_HANDLE}}. Pull last 30 days. Extract: text, impressions, likes, retweets, replies, quotes, date/time.
    - **Medium:** Web Scraper actor on {{YOUR_MEDIUM_PROFILE}}. Pull all articles. Extract: title, reads, claps, read ratio, responses, publish date.
    - **Reddit:** Reddit Scraper actor on founder's posts. Pull last 30 days. Extract: title, subreddit, upvotes, comments, upvote ratio.
    - **Substack:** Web Scraper actor on {{YOUR_SUBSTACK_PROFILE}}. Pull newsletter stats. Extract: title, open rate, click rate, subscriber count.
@@ -220,7 +220,7 @@ Run `/q-content-intel score` with a draft post. Scores it 1-5 on hook strength, 
 **Workflow:**
 
 1. **Pull current state:**
-   - Read Investor Pipeline DB (see `my-project/notion-ids.md` for DB ID) for all VCs with status != Passed
+   - Read Investor Pipeline DB (DB fd92016f-7890-40c3-abe9-154c864e05b3) for all VCs with status != Passed
    - Read `my-project/relationships.md` for anyone tagged "quarterly update list"
    - Read `my-project/progress.md` for recent milestones since last update
    - Read `memory/morning-state.md` -> "Investor Update Tracker" for last update date and content
@@ -260,7 +260,7 @@ Run `/q-content-intel score` with a draft post. Scores it 1-5 on hook strength, 
      - [Intro to a specific person, feedback on a specific thing]
 
      Thanks for following along.
-     {{FOUNDER_FIRST_NAME}}
+     Assaf
      ```
    - **Rules:**
      - Under 300 words. VCs scan, they don't read.
@@ -480,10 +480,10 @@ Workflow for each type:
 - Content Pipeline DB: (created by /q-market-plan first run)
 - Editorial Calendar DB: (created by /q-market-plan first run)
 - Asset Library DB: (created by /q-market-assets first run)
-- Parent page: (see `my-project/notion-ids.md`)
+- Parent page: 314bf98c-0529-81bb-a576-d5982475fd2d (CRM parent)
 
 **NotebookLM:**
-- Marketing Knowledge Base notebook: (see `my-project/notion-ids.md` or configure during setup)
+- Marketing Knowledge Base notebook: bb6ae0cb-0677-4611-84ab-dde086461668
 
 **Gamma MCP:**
 - `mcp__gamma__generate_gamma` — generate presentations, documents, social cards
