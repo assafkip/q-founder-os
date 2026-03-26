@@ -1,6 +1,6 @@
 # Conversation Debrief Template
 
-This template is the **primary workflow** of the Q Instance. Use it after every conversation with a VC, CISO, design partner, advisor, or potential recruit.
+This template is the **primary workflow** of the Q Founder OS. Use it after every conversation with a VC, CISO, design partner, advisor, or potential recruit.
 
 ## How to Trigger
 
@@ -262,7 +262,7 @@ After completing the template and implications analysis, route insights to canon
   {"s":"Person Name","p":"works_at","o":"Company","t":"2026-03-12"}
   {"s":"Person Name","p":"cares_about","o":"cross-silo coordination","t":"2026-03-12"}
   {"s":"Person Name","p":"objected_to","o":"why not just use Claude","t":"2026-03-12"}
-  {"s":"Person Name","p":"resonated_with","o":"{{YOUR_METAPHOR}}","t":"YYYY-MM-DD"}
+  {"s":"Person Name","p":"resonated_with","o":"nervous system metaphor","t":"2026-03-12"}
   {"s":"Connector Name","p":"introduced","o":"Person Name","t":"2026-03-12"}
   ```
 
@@ -296,7 +296,7 @@ After completing the template and implications analysis, route insights to canon
 - [ ] Resonance phrases are verbatim (their words)
 - [ ] Objections have a proposed response (even if imperfect)
 - [ ] Next step is concrete (not "follow up" - specify what, when, via what channel)
-- [ ] Misclassification risk is assessed even if none detected ("None - they understood the category framing")
+- [ ] Misclassification risk is assessed even if none detected ("None - they understood SLCP framing")
 - [ ] Signal quality check completed with signal level assigned
 - [ ] If "thesis nod" only: noted, no over-investment in follow-up
 - [ ] If "pain confirmed" or higher: switching friction questions queued for next conversation

@@ -1,6 +1,6 @@
 # Q Instance Commands
 
-> These are conventions for interacting with the Q Instance. Use them as natural language triggers — they tell Claude which mode to enter and what to do.
+> These are conventions for interacting with the Q Founder OS. Use them as natural language triggers — they tell Claude which mode to enter and what to do.
 
 | Command | Purpose | Mode |
 |---------|---------|------|
@@ -309,6 +309,6 @@ When founder reports an action, the system immediately:
 1. `/q-sync-notion` — push local changes to Notion, pull Notion changes to local
    - **Local → Notion:** New debriefs → Interactions, updated contacts → Contact properties, pipeline changes → Investor Pipeline
    - **Notion → Local:** Follow-up dates changed in Notion → relationships.md, pipeline stage changes → current-state.md
-   - **Notion IDs:** See `my-project/notion-ids.md` for all database IDs
+   - **Notion IDs:** See `my-project/progress.md` entry "2026-02-27 — Notion Founder CRM Built" for all database data_source_ids
 
 ### Morning briefing (`/q-morning`):

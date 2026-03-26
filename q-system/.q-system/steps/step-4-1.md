@@ -20,7 +20,7 @@ Send today's signals directly to people who would be AFFECTED by them. Not prosp
   - Fetch the signals page, identify the individual report URLs, use those in messages.
   - If no individual URL exists for a signal, link to the signals page with an anchor or the closest match.
 
-- **MESSAGE FORMAT (copy-paste ready, run through /founder-voice):**
+- **MESSAGE FORMAT (copy-paste ready, run through /assaf-voice):**
   - LinkedIn DM and email versions for each.
   - Reference the specific signal and WHY it matters to THEM.
   - Link to the specific report.
@@ -61,10 +61,10 @@ Send today's signals directly to people who would be AFFECTED by them. Not prosp
   - NO {{YOUR_PRODUCT}} pitch. Zero. This is a practitioner sharing intel with their network.
   - Max 1 per person per week (don't spam)
   - The signal must be genuinely relevant to their specific situation. "Would their Tuesday change?" If no, don't send.
-  - All copy goes through /founder-voice before output. Casual, direct, helpful.
+  - All copy goes through /assaf-voice before output. Casual, direct, helpful.
   - Log to Notion LinkedIn Tracker DB after sending (Type: Outreach DM, note: "Intel drop - [signal topic]", UTM link)
   - After 3 intel drops with no response AND no link clicks in GA, stop. They're not reading them.
-  - **Email sign-off:** just "{{FOUNDER_FIRST_NAME}}" (no Best/Cheers/Regards)
+  - **Email sign-off:** just "Assaf" (no Best/Cheers/Regards)
 
 - **Create Actions** for each intel drop: (Energy: Quick Win, Time: 2 min, Priority: Today, Type: LinkedIn or Follow-up Email)
 
