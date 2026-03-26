@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Initialize the KTLYST metrics SQLite database. Idempotent."""
+"""Initialize the metrics SQLite database. Idempotent."""
 
 import sqlite3
 import os
 import sys
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "ktlyst-metrics.db")
+DB_PATH = os.path.join(os.path.dirname(__file__), "metrics.db")
 
 SCHEMA = """
 -- Content performance tracking

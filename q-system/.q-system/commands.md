@@ -1,6 +1,6 @@
 # Q Instance Commands
 
-> These are conventions for interacting with the KTLYST Q Instance. Use them as natural language triggers — they tell Claude which mode to enter and what to do.
+> These are conventions for interacting with the Q Founder OS. Use them as natural language triggers — they tell Claude which mode to enter and what to do.
 
 | Command | Purpose | Mode |
 |---------|---------|------|
@@ -98,11 +98,11 @@ For prospects with DP Status = Prospect who have NOT been contacted yet:
    - What they post/comment about (topics, themes, pain points)
    - Specific recent posts (quotes, subjects)
    - Professional focus areas and what they care about
-   - Any angles connecting to KTLYST's positioning
+   - Any angles connecting to {{YOUR_PRODUCT}}'s positioning
 2. **Personalize** using the `cold-email` marketing skill: For each prospect, craft:
    - Touch 1 comment (if they have recent posts to comment on)
    - Connection request (under 300 chars) referencing something specific from their activity
-   - Follow-up DM (under 500 chars) referencing their specific work, asking a genuine question, with UTM-tagged demo link as async CTA (e.g., `demo.ktlystlabs.com?utm_source=linkedin&utm_medium=dm&utm_campaign=cold-outreach&utm_content=[prospect-slug]`)
+   - Follow-up DM (under 500 chars) referencing their specific work, asking a genuine question, with UTM-tagged demo link as async CTA (e.g., `demo.{{YOUR_DOMAIN}}?utm_source=linkedin&utm_medium=dm&utm_campaign=cold-outreach&utm_content=[prospect-slug]`)
 3. **Save** all messages to `output/design-partner/personalized-outreach-YYYY-MM-DD.md`
 4. **Update Notion** contacts with research findings (What They Care About, Follow-up Action, Strategic Value)
 5. **Output** execution sequence (who to contact first, Touch 1 vs Touch 2)
@@ -122,7 +122,7 @@ When founder shares a LinkedIn post screenshot at any time (no command needed):
 4. **Market intelligence check** — Before generating a comment, evaluate the POST CONTENT for canonical value using the same 6 lenses from Step 2.5 (problem language, category signal, objection preview, competitive intel, buyer process, narrative check). If the post has canonical value, log to `canonical/market-intelligence.md`. This happens regardless of whether we comment.
 5. **Generate 1 best comment** — The system picks the best style (Insight / Connector / Question) based on pool, context, and post content. No options to choose from, no decision paralysis. If the founder wants alternatives, they can ask. Grounded in:
    - The post's actual content
-   - KTLYST's canonical positioning
+   - {{YOUR_PRODUCT}}'s canonical positioning
    - Person's pool and what matters to them
    - Prior interaction history (if any)
 6. **Log to Notion** (after founder picks a comment):
@@ -131,7 +131,7 @@ When founder shares a LinkedIn post screenshot at any time (no command needed):
    - Set Follow-up Date: 5-7 days out on LinkedIn Tracker entry
 
 **Rules (from `canonical/engagement-playbook.md`):**
-- Never pitch KTLYST in comments unless directly asked
+- Never pitch {{YOUR_PRODUCT}} in comments unless directly asked
 - Max 3-4 sentences per comment
 - One comment per person per week (unless they reply)
 - Every engagement logged to Notion — no exceptions
@@ -158,7 +158,7 @@ LinkedIn post (save to `output/marketing/linkedin/linkedin-process-improvement-Y
 - Result: What my day looks like now vs before (1-2 sentences)
 - Angle: AI-native founder building in public. "This is what building a startup looks like when your co-founder is an AI."
 - Tone: Honest, specific, vulnerable. Not "I'm so productive" - more "I have ADHD and this is how I cope with running a startup."
-- NO KTLYST pitch. This is about the founder journey, not the product.
+- NO {{YOUR_PRODUCT}} pitch. This is about the founder journey, not the product.
 - End with a question to drive comments (e.g., "What's the most tedious part of your workflow that you wish was automated?")
 
 X post (save to same file):
@@ -472,7 +472,7 @@ Uses VC Pipeline data from Step 1 + Notion Contacts DB to find warm intro paths 
 - **VC call prep brief (for VC/investor meetings only):**
   - Use the `sales-enablement` skill with the VC call prep template (`references/vc-call-prep-template.md`)
   - Research: the person, the fund, portfolio companies (especially security/compliance/infrastructure), venture partners, recent investments, their stated thesis language
-  - Every brief must have specific hooks showing why THIS fund specifically matters for KTLYST (portfolio company names, venture partner backgrounds, thesis alignment)
+  - Every brief must have specific hooks showing why THIS fund specifically matters for {{YOUR_PRODUCT}} (portfolio company names, venture partner backgrounds, thesis alignment)
   - The goal: make the founder feel like they chose this VC on purpose, not that they're running a spray-and-pray process
   - Save to `output/meeting-prep/[fund]-[person]-YYYY-MM-DD.md`
 - **Fundability signal check (also for VC meetings):**
@@ -493,7 +493,7 @@ Uses VC Pipeline data from Step 1 + Notion Contacts DB to find warm intro paths 
   ```
 
 **Step 2.5 — X activity review:**
-- **Apify** (`mcp__apify__*`): Use Twitter/X Scraper actor to pull @KTLYST_labs recent posts with engagement metrics (impressions, likes, retweets, replies, quotes). Also scrape recent posts from target accounts (@DanielMiessler, @SwiftOnSecurity, @GossiTheDog, @thegrugq) for QT/reply targets.
+- **Apify** (`mcp__apify__*`): Use Twitter/X Scraper actor to pull {{YOUR_X_HANDLE}} recent posts with engagement metrics (impressions, likes, retweets, replies, quotes). Also scrape recent posts from target accounts (@DanielMiessler, @SwiftOnSecurity, @GossiTheDog, @thegrugq) for QT/reply targets.
 - **Chrome browser** (`mcp__claude-in-chrome__*`): Use ONLY for checking notifications (new followers, DMs) and posting replies, since Apify can't interact with X, only read.
 - **Engagement opportunities:** Flag accounts that engaged with your posts for DM follow-up (warm leads)
 - **Reply to comments:** If any posts from yesterday have replies, draft quick responses (first 30 min engagement matters)
@@ -597,10 +597,10 @@ Detects content published directly (not through Q) and updates tracking to match
 **Step 3.7 — Content intelligence pull (weekly, Mondays):**
 - **Apify scrape own content** across all platforms:
   - LinkedIn: Use LinkedIn Posts Scraper on founder's profile URL to pull all posts from last 7 days with engagement metrics
-  - X: Use Twitter/X Scraper on @KTLYST_labs to pull all tweets from last 7 days with impressions, likes, retweets, replies
-  - Medium: Use Web Scraper actor on KTLYST Medium profile to pull article stats (reads, claps, read ratio)
+  - X: Use Twitter/X Scraper on {{YOUR_X_HANDLE}} to pull all tweets from last 7 days with impressions, likes, retweets, replies
+  - Medium: Use Web Scraper actor on {{YOUR_MEDIUM_PROFILE}} to pull article stats (reads, claps, read ratio)
   - Reddit: Use Reddit Scraper actor to pull posts by founder from last 7 days with upvotes, comments
-  - Substack: Use Web Scraper actor on KTLYST Substack to pull newsletter stats
+  - Substack: Use Web Scraper actor on {{YOUR_SUBSTACK_PROFILE}} to pull newsletter stats
 - **Analyze patterns:**
   - Rank all posts by engagement rate (not raw numbers)
   - Identify top 3 and bottom 3 performers
@@ -652,18 +652,18 @@ Detects content published directly (not through Q) and updates tracking to match
 - **Never generate all content types on the same day.** This is the single biggest context waster in Step 4.
 
 - **Before generating any content:** Read `canonical/content-intelligence.md` for current patterns. Use high-performing language/formats. Avoid low-performing patterns. Score each draft against the Content Scoring Model before finalizing.
-- **Fetch ktlystlabs.com/signals (Mon/Wed/Fri only):** Use `WebFetch` to pull the latest signals from the KTLYST Signals page
+- **Fetch {{YOUR_DOMAIN}}/signals (Mon/Wed/Fri only):** Use `WebFetch` to pull the latest signals from the signals page
 - **Pick 2-4 top signals** that are: (a) breaking news, high severity, actively exploited, or big-name brands, (b) trending or viral potential (data leaks, source code dumps, major CVEs), (c) interesting to security and fraud practitioners
-- **Generate LinkedIn post:** Breaking news roundup format. Lead with the most attention-grabbing signal. List 2-4 signals with key facts (numbers, affected products, what happened). End with link to ktlystlabs.com/signals and total signals analyzed. Goal: drive traffic to the signals page, NOT thought leadership or KTLYST positioning.
-- **Generate X signals post:** 1-2 sentences or a thread hook (280 char max for the lead). Punchier, headline-style. End with link to ktlystlabs.com/signals.
-- **Generate X hot take:** Scan security news (from signals + trending X topics) for something to react to. One tweet, no thread. Sharp, opinionated, practitioner voice. Connect to institutional memory, learning failure, or nervous system framing without naming KTLYST. Examples:
+- **Generate LinkedIn post:** Breaking news roundup format. Lead with the most attention-grabbing signal. List 2-4 signals with key facts (numbers, affected products, what happened). End with link to {{YOUR_DOMAIN}}/signals and total signals analyzed. Goal: drive traffic to the signals page, NOT thought leadership or {{YOUR_PRODUCT}} positioning.
+- **Generate X signals post:** 1-2 sentences or a thread hook (280 char max for the lead). Punchier, headline-style. End with link to {{YOUR_DOMAIN}}/signals.
+- **Generate X hot take:** Scan security news (from signals + trending X topics) for something to react to. One tweet, no thread. Sharp, opinionated, practitioner voice. Connect to institutional memory, learning failure, or nervous system framing without naming {{YOUR_PRODUCT}}. Examples:
   - Vendor announces "AI-powered detection" -> "You can't prompt-engineer a nervous system."
   - Major breach -> Connect to institutional memory failure
   - VC posts security thesis -> Engage with practitioner perspective
   - Industry report -> Contrarian take on what the data actually means
 - **Output:**
   ```
-  SIGNALS POST (from ktlystlabs.com/signals)
+  SIGNALS POST (from {{YOUR_DOMAIN}}/signals)
 
   Signal: [title / CVE / threat actor]
   Why it matters: [one line]
@@ -678,7 +678,7 @@ Detects content published directly (not through Q) and updates tracking to match
   [1 tweet, opinionated, practitioner voice]
   Topic: [what triggered it]
   ```
-- **Rules:** No "AI-powered" or "cutting-edge." No KTLYST pitch or positioning angle. This is a BREAKING NEWS post. Founder sharing signals to drive traffic to ktlystlabs.com/signals, not thought leadership. Write like a practitioner sharing news, not a vendor framing narratives. NEVER use emdashes in posts. Hot takes can reference the nervous system metaphor but should NOT name KTLYST directly. Hot takes should aim for under 100 characters when possible.
+- **Rules:** No "AI-powered" or "cutting-edge." No {{YOUR_PRODUCT}} pitch or positioning angle. This is a BREAKING NEWS post. Founder sharing signals to drive traffic to {{YOUR_DOMAIN}}/signals, not thought leadership. Write like a practitioner sharing news, not a vendor framing narratives. NEVER use emdashes in posts. Hot takes can reference the nervous system metaphor but should NOT name {{YOUR_PRODUCT}} directly. Hot takes should aim for under 100 characters when possible.
 - **Generate X behind-the-scenes post (Mon/Wed/Fri):** Building-in-public content. One tweet about the founder journey, a decision made, something learned from a CISO conversation (anonymized), or a challenge being faced. Vulnerable, honest, specific. Use Pratfall Effect - showing imperfection makes you more relatable.
 - **Generate X visual post idea (Wed):** Suggest a visual to create - screenshot of demo output, simple diagram, breach timeline. Founder creates the visual, Claude drafts the caption. Images stop the scroll; text delivers value.
 - **Generate Gamma visual for signals post:** Call `mcp__gamma__generate_gamma` with format "social", inputText = top signal headline + key stat (e.g., "3.4M patients exposed - Cognizant TriZetto breach"). Use brand kit colors (dark bg, indigo accent). Save Gamma URL in the signals post file. This image gets posted alongside the LinkedIn and X signals posts.
@@ -702,7 +702,7 @@ Send today's signals directly to people who would be AFFECTED by them. Not prosp
 
 - **LINK TO SPECIFIC REPORT (mandatory):**
   - Every value-drop DM/email MUST link to the specific report URL on the signals page, not the homepage.
-  - Format: `https://ktlystlabs.com/signals/[report-slug]?utm_source=[source]&utm_medium=[medium]&utm_campaign=value-intel&utm_content=[person-slug]`
+  - Format: `https://{{YOUR_DOMAIN}}/signals/[report-slug]?utm_source=[source]&utm_medium=[medium]&utm_campaign=value-intel&utm_content=[person-slug]`
   - Fetch the signals page, identify the individual report URLs, use those in messages.
   - If no individual URL exists for a signal, link to the signals page with an anchor or the closest match.
 
@@ -710,12 +710,12 @@ Send today's signals directly to people who would be AFFECTED by them. Not prosp
   - LinkedIn DM and email versions for each.
   - Reference the specific signal and WHY it matters to THEM.
   - Link to the specific report.
-  - No pitch. No KTLYST mention. Pure intel sharing.
+  - No pitch. No {{YOUR_PRODUCT}} mention. Pure intel sharing.
   ```
   INTEL DROPS TO SEND TODAY
 
   SIGNAL: [breach/CVE/advisory title]
-  Report: [specific URL on ktlystlabs.com/signals/report-slug]
+  Report: [specific URL on {{YOUR_DOMAIN}}/signals/report-slug]
 
   SEND TO (LinkedIn DM):
   1. [Name] ([Company], [Role]) - why: [they run the affected tool / in the affected industry]
@@ -736,7 +736,7 @@ Send today's signals directly to people who would be AFFECTED by them. Not prosp
 
 - **UTM link generation (MANDATORY for all outreach):**
   - Every link sent MUST include UTM parameters for tracking
-  - Format: `https://ktlystlabs.com/signals/[report-slug]?utm_source=[source]&utm_medium=[medium]&utm_campaign=value-intel&utm_content=[person-slug]`
+  - Format: `https://{{YOUR_DOMAIN}}/signals/[report-slug]?utm_source=[source]&utm_medium=[medium]&utm_campaign=value-intel&utm_content=[person-slug]`
   - **utm_source:** `linkedin`, `email`, `twitter`
   - **utm_medium:** `dm`, `email`, `comment`
   - **utm_campaign:** `value-intel` (replaces old `value-drop` - this is intel sharing, not dropping)
@@ -744,7 +744,7 @@ Send today's signals directly to people who would be AFFECTED by them. Not prosp
   - Log the UTM link in Notion LinkedIn Tracker entry so we know which link was sent to whom
 
 - **RULES:**
-  - NO KTLYST pitch. Zero. This is a practitioner sharing intel with their network.
+  - NO {{YOUR_PRODUCT}} pitch. Zero. This is a practitioner sharing intel with their network.
   - Max 1 per person per week (don't spam)
   - The signal must be genuinely relevant to their specific situation. "Would their Tuesday change?" If no, don't send.
   - All copy goes through /assaf-voice before output. Casual, direct, helpful.
@@ -872,7 +872,7 @@ Stitches together ALL engagement signals from today's morning routine into one s
   | Clicked UTM link to /signals | +2 | Step 5.5 (GA, Mondays) or carry forward |
   | Accepted connection request | +2 | Step 3.8 (DM check) |
   | Viewed your LinkedIn profile | +1 | Step 3 (if visible in "Who viewed your profile") |
-  | Posted about KTLYST-shaped problem | +3 | Step 5.9 (problem-language search) |
+  | Posted about {{YOUR_PRODUCT}}-shaped problem | +3 | Step 5.9 (problem-language search) |
   | You sent outreach, no response | -1 per touch | Step 3.5 (pipeline check) |
   | No activity in 14+ days | -3 | Step 3.5 (last contact date) |
 
@@ -1001,7 +1001,7 @@ bash q-system/.q-system/log-step.sh DATE 5.86_loop_review done "X loops reviewed
 **Step 5.9 - Lead sourcing: find people screaming about the problem we solve (daily):**
 > **HARNESS:** Log as `5.9_lead_sourcing`. Result = query count + platform count + qualified prospect count. Must include ALL platforms (LinkedIn, Reddit, X, Medium). If any platform was skipped, log as `partial` with reason. Save raw results to `output/lead-gen/` immediately (context-saving rule). Create action cards for each Tier A/B prospect's outreach message.
 
-This step finds practitioners and leaders who are actively feeling the pain KTLYST solves. The goal is to produce 5-10 qualified prospects per day with copy-paste-ready, personalized outreach - like the Mar 9 run that found Paul Hutelmyer (built Detect Hub at Target), Chris Long (created DetectionLab), and Aaron Martin ("Detection engineering doesn't scale just because you write more rules").
+This step finds practitioners and leaders who are actively feeling the pain {{YOUR_PRODUCT}} solves. The goal is to produce 5-10 qualified prospects per day with copy-paste-ready, personalized outreach - like the Mar 9 run that found Paul Hutelmyer (built Detect Hub at Target), Chris Long (created DetectionLab), and Aaron Martin ("Detection engineering doesn't scale just because you write more rules").
 
 **THIS STEP HAS 4 PHASES. DO NOT SKIP ANY. DO NOT REPLACE CLAUDE QUALIFICATION WITH A KEYWORD FILTER.**
 
@@ -1057,7 +1057,7 @@ Run Apify actors to gather raw posts. Save all raw results to `output/lead-gen/[
 
 **QUERY LIBRARY (6 pain categories matching the 6 teams in demo2):**
 
-**CRITICAL:** KTLYST is NOT a detection tool. The demo produces 7 artifacts across 6 teams: IAM, Endpoint/EDR, SOC, Threat Hunting, Email Security, IR, and GRC/Compliance. Queries MUST span all 6 pain surfaces, not just detection. Comments MUST match the person's actual pain - never steer toward detection if they posted about IAM, compliance, or IR.
+**CRITICAL:** {{YOUR_PRODUCT}} is NOT a single-use tool. Queries MUST span all pain surfaces defined in `my-project/current-state.md`, not just one vertical. Comments MUST match the person's actual pain - never steer toward one area if they posted about a different one.
 
 **CATEGORY 1 - SOC / Detection Engineering:**
 - `"built internally" detection management` OR `"built our own" detection`
@@ -1103,7 +1103,7 @@ Run Apify actors to gather raw posts. Save all raw results to `output/lead-gen/[
 - `"left security" burnout` OR `"quit" CISO` OR `"career change" cybersecurity`
 - `"what's the point" security` OR `"nothing changes" security operations`
 
-**Why this category matters:** These people are the internal champions who would push for KTLYST bottom-up. They see the pattern, can't fix it structurally, and are posting about their frustration. They're also the people Assaf was. Highest authenticity for engagement because the founder lived this.
+**Why this category matters:** These people are the internal champions who would push for {{YOUR_PRODUCT}} bottom-up. They see the pattern, can't fix it structurally, and are posting about their frustration. Highest authenticity for engagement because the founder lived this.
 
 **CROSS-CATEGORY (highest signal - spans multiple teams):**
 - `"security silos"` OR `"teams don't talk"` OR `"nobody connects"`
@@ -1172,7 +1172,7 @@ Discard immediately if ANY of these are true:
 | **First-person proof** | "We built" / "Our team" / names their company | "I've seen" / "In my experience" | Third-person or hypothetical |
 | **Role fit** | Security leader/practitioner at enterprise (CISO, Dir SecOps, Det Eng Lead, IR Manager, GRC Lead) | Security IC or adjacent role (SOC analyst, compliance analyst, AppSec) | Non-security role tangentially discussing security |
 | **Engagement opportunity** | Post has a question or open problem we can genuinely add value to | Post has a take we can build on with a thoughtful comment | Post is closed/declarative, hard to add value without pitching |
-| **Multi-team pain** | Describes cross-silo problem (exactly KTLYST's value prop) | Describes single-team problem KTLYST solves (detection OR IR OR compliance etc.) | Single-tool problem (e.g., "how do I write a Splunk query") |
+| **Multi-team pain** | Describes cross-silo problem (exactly {{YOUR_PRODUCT}}'s value prop) | Describes single-team problem {{YOUR_PRODUCT}} solves (detection OR IR OR compliance etc.) | Single-tool problem (e.g., "how do I write a Splunk query") |
 
 **Composite score = sum of 5 dimensions (max 25)**
 
@@ -1309,7 +1309,7 @@ DISCOVERY (5.9) -> QUALIFY -> CREATE CONTACT -> CREATE TRACKER ENTRY -> ENGAGEME
    - On timeout (10 days no accept): deprioritized
 
 **Re-engagement for existing contacts:**
-If someone already in Contacts DB posts about a KTLYST problem:
+If someone already in Contacts DB posts about a {{YOUR_PRODUCT}} problem:
 1. Update Contact notes with new post URL + date
 2. Flag in morning briefing: "[Name] just posted about [topic] - they're feeling the pain right now"
 3. Add to Step 5.9b engagement hitlist as TOP PRIORITY
@@ -1326,7 +1326,7 @@ For prospects found in the last 14 days (Status: Prospect or Outreach Sent):
 
 **RULES:**
 - Max 5 new connection requests per day from this step (LinkedIn jail prevention)
-- Connection requests reference THEIR words, not KTLYST. No pitch.
+- Connection requests reference THEIR words, not {{YOUR_PRODUCT}}. No pitch.
 - Reddit comments must be genuinely helpful. No pitch. Share experience.
 - **Full post text required:** During Phase 2 qualification, pull and save the FULL text of every qualified prospect's post. Outreach copy in Phase 3 must be written against the actual post, never a summary. If the Apify result doesn't include full text, re-fetch the specific post URL.
 - **No resume name-dropping:** Never list company names (Google, Meta, ElevenLabs) or years of experience in outreach copy. Use "everywhere I've worked" instead.
@@ -1400,7 +1400,7 @@ This step generates the founder's daily engagement actions with zero searching r
 
 - **Generate copy-paste comments** for each post found:
   - Style by pool: VCs get domain insight, practitioners get peer validation, connectors get amplification
-  - 2-3 sentences max, no KTLYST pitch
+  - 2-3 sentences max, no {{YOUR_PRODUCT}} pitch
   - Reference something specific from their post (not generic "great insights")
   - Must pass test: "Does this comment add value to the conversation?"
   - **VOICE RULE: Stay on the person's topic. Do NOT steer every comment toward detection engineering.** The founder's credibility is 12 years of security operations leadership (Google, Meta, ElevenLabs), not "detection engineering" specifically. If someone posts about ownership gaps, comment about ownership gaps. If someone posts about governance, comment about governance. If someone posts about silos, comment about silos. Only mention detection if THEY mentioned detection. The goal is to be a thoughtful practitioner voice on THEIR topic, not to position yourself as a detection expert. Detection is the wedge artifact, not the founder's identity.
@@ -1602,7 +1602,7 @@ OUTREACH:
 Total: [X] actions ([Y] Quick Wins, [Z] Deep Focus, [W] People, [V] Admin), ~[X] min
 
 🔎 PROBLEM-LANGUAGE PROSPECTS (from Step 5.9)
-[new qualified decision-makers + champions talking about KTLYST's problem]
+[new qualified decision-makers + champions talking about {{YOUR_PRODUCT}}'s problem]
 [draft connection requests for each with inline copy-paste text and Copy button]
 [Reddit threads with inline copy-paste comments and Copy button]
 
@@ -1898,7 +1898,7 @@ This step auto-detects DM replies and connection accepts so the founder never ne
      - What they said (full message text)
      - Their profile/role/what they care about (from Contact)
      - Current relationship stage (aim toward next stage)
-     - KTLYST positioning rules (no pitch unless they ask)
+     - {{YOUR_PRODUCT}} positioning rules (no pitch unless they ask)
   4. Add to morning briefing hitlist under "REPLIES TO CONTINUE" with their message + suggested reply
   5. If reply indicates interest in a call/demo: flag as HIGH PRIORITY, generate scheduling message
 
@@ -1960,7 +1960,7 @@ This step auto-detects DM replies and connection accepts so the founder never ne
 - Chrome (interactive + DMs): `mcp__claude-in-chrome__*` - Use for: LinkedIn DM reading (Step 3.8), posting comments/replies, checking notifications, LinkedIn Comments tab, Google Analytics, visual content review. NOT for profile/post scraping (use Apify).
 - VC Pipeline Manager: `http://localhost:5050/api/pipeline` (GET) - Returns full VC pipeline with 66+ contacts, warm intro paths, tiers, statuses. Use `WebFetch` to pull. Data source for warm intro matching (Step 1.5) and cross-referencing connectors. App at `http://localhost:5050/`.
 - NotebookLM: `mcp__notebooklm__add_notebook`, `mcp__notebooklm__ask_question`, `mcp__notebooklm__search_notebooks`
-- Signals: `WebFetch` on `https://ktlystlabs.com/signals`
+- Signals: `WebFetch` on `https://{{YOUR_DOMAIN}}/signals`
 - Google Analytics (Mondays): `mcp__claude-in-chrome__*` on `analytics.google.com` (authuser=2, property a385692819p526076376)
 - Gamma: `mcp__gamma__generate_gamma`, `mcp__gamma__get_gamma_generation`
 
@@ -1974,10 +1974,10 @@ This step auto-detects DM replies and connection accepts so the founder never ne
 
 1. **Scrape all platforms via Apify** (`mcp__apify__*`):
    - **LinkedIn:** LinkedIn Posts Scraper actor on founder's profile. Pull last 30 days of posts. Extract: text, impressions, likes, comments, reposts, date/time posted.
-   - **X/Twitter:** Twitter/X Scraper actor on @KTLYST_labs. Pull last 30 days. Extract: text, impressions, likes, retweets, replies, quotes, date/time.
-   - **Medium:** Web Scraper actor on KTLYST Medium profile. Pull all articles. Extract: title, reads, claps, read ratio, responses, publish date.
+   - **X/Twitter:** Twitter/X Scraper actor on {{YOUR_X_HANDLE}}. Pull last 30 days. Extract: text, impressions, likes, retweets, replies, quotes, date/time.
+   - **Medium:** Web Scraper actor on {{YOUR_MEDIUM_PROFILE}}. Pull all articles. Extract: title, reads, claps, read ratio, responses, publish date.
    - **Reddit:** Reddit Scraper actor on founder's posts. Pull last 30 days. Extract: title, subreddit, upvotes, comments, upvote ratio.
-   - **Substack:** Web Scraper actor on KTLYST Substack. Pull newsletter stats. Extract: title, open rate, click rate, subscriber count.
+   - **Substack:** Web Scraper actor on {{YOUR_SUBSTACK_PROFILE}}. Pull newsletter stats. Extract: title, open rate, click rate, subscriber count.
 
 2. **Normalize and rank:**
    - Calculate engagement rate per post: (likes + comments + reposts) / impressions
@@ -2077,11 +2077,11 @@ Run `/q-content-intel score` with a draft post. Scores it 1-5 on hook strength, 
    - **Format:** Plain text email. No HTML, no fancy formatting. Founder-to-investor voice.
    - **Structure:**
      ```
-     Subject: KTLYST Update - [Month] [Year] - [1 headline]
+     Subject: {{YOUR_PRODUCT}} Update - [Month] [Year] - [1 headline]
 
      Hi [first name],
 
-     Quick update on KTLYST since we last talked.
+     Quick update on {{YOUR_PRODUCT}} since we last talked.
 
      HIGHLIGHT (1 sentence - the single biggest thing)
      [The one thing that moves the needle most]
@@ -2461,7 +2461,7 @@ Read `.claude/skills/session-handoff/SKILL.md` for the full spec.
 3. **Challenge each claim category:**
 
    **Positioning challenges:**
-   - "You say KTLYST is a nervous system. What if enterprises already have this and you're solving a problem that doesn't exist at your target scale?"
+   - "You say {{YOUR_PRODUCT}} is {{YOUR_METAPHOR}}. What if enterprises already have this and you're solving a problem that doesn't exist at your target scale?"
    - "You say detection is one of seven artifact types. Can you name a customer who cares about artifact type #5 (email transport rules)?"
    - "What if the 'governance wedge' only matters to compliance-heavy industries and the broader market doesn't care?"
 
@@ -2662,7 +2662,7 @@ memory/
 
 **Rule (added to Step 0 of /q-morning and enforced globally):**
 
-Before ANY output that makes a factual claim about KTLYST, the system MUST:
+Before ANY output that makes a factual claim about {{YOUR_PRODUCT}}, the system MUST:
 
 1. **Check the claim against canonical files:**
    - Capability claims -> `my-project/current-state.md`

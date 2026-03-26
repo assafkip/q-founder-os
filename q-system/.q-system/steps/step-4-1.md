@@ -16,7 +16,7 @@ Send today's signals directly to people who would be AFFECTED by them. Not prosp
 
 - **LINK TO SPECIFIC REPORT (mandatory):**
   - Every value-drop DM/email MUST link to the specific report URL on the signals page, not the homepage.
-  - Format: `https://ktlystlabs.com/signals/[report-slug]?utm_source=[source]&utm_medium=[medium]&utm_campaign=value-intel&utm_content=[person-slug]`
+  - Format: `https://{{YOUR_DOMAIN}}/signals/[report-slug]?utm_source=[source]&utm_medium=[medium]&utm_campaign=value-intel&utm_content=[person-slug]`
   - Fetch the signals page, identify the individual report URLs, use those in messages.
   - If no individual URL exists for a signal, link to the signals page with an anchor or the closest match.
 
@@ -24,12 +24,12 @@ Send today's signals directly to people who would be AFFECTED by them. Not prosp
   - LinkedIn DM and email versions for each.
   - Reference the specific signal and WHY it matters to THEM.
   - Link to the specific report.
-  - No pitch. No KTLYST mention. Pure intel sharing.
+  - No pitch. No {{YOUR_PRODUCT}} mention. Pure intel sharing.
   ```
   INTEL DROPS TO SEND TODAY
 
   SIGNAL: [breach/CVE/advisory title]
-  Report: [specific URL on ktlystlabs.com/signals/report-slug]
+  Report: [specific URL on {{YOUR_DOMAIN}}/signals/report-slug]
 
   SEND TO (LinkedIn DM):
   1. [Name] ([Company], [Role]) - why: [they run the affected tool / in the affected industry]
@@ -50,7 +50,7 @@ Send today's signals directly to people who would be AFFECTED by them. Not prosp
 
 - **UTM link generation (MANDATORY for all outreach):**
   - Every link sent MUST include UTM parameters for tracking
-  - Format: `https://ktlystlabs.com/signals/[report-slug]?utm_source=[source]&utm_medium=[medium]&utm_campaign=value-intel&utm_content=[person-slug]`
+  - Format: `https://{{YOUR_DOMAIN}}/signals/[report-slug]?utm_source=[source]&utm_medium=[medium]&utm_campaign=value-intel&utm_content=[person-slug]`
   - **utm_source:** `linkedin`, `email`, `twitter`
   - **utm_medium:** `dm`, `email`, `comment`
   - **utm_campaign:** `value-intel` (replaces old `value-drop` - this is intel sharing, not dropping)
@@ -58,7 +58,7 @@ Send today's signals directly to people who would be AFFECTED by them. Not prosp
   - Log the UTM link in Notion LinkedIn Tracker entry so we know which link was sent to whom
 
 - **RULES:**
-  - NO KTLYST pitch. Zero. This is a practitioner sharing intel with their network.
+  - NO {{YOUR_PRODUCT}} pitch. Zero. This is a practitioner sharing intel with their network.
   - Max 1 per person per week (don't spam)
   - The signal must be genuinely relevant to their specific situation. "Would their Tuesday change?" If no, don't send.
   - All copy goes through /assaf-voice before output. Casual, direct, helpful.

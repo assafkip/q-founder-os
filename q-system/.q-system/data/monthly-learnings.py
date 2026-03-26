@@ -7,7 +7,7 @@ import sys
 from datetime import datetime, timedelta
 from collections import Counter
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "ktlyst-metrics.db")
+DB_PATH = os.path.join(os.path.dirname(__file__), "metrics.db")
 MEMORY_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "memory")
 
 def analyze_edits(days=30):
