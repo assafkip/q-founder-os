@@ -4,7 +4,7 @@ Generate marketing content for any channel. Reads canonical files, applies templ
 
 ## Setup guard
 
-**FIRST:** Read `~/.config/kipi/founder-profile.md`. If it contains `{{SETUP_NEEDED}}`, STOP and tell the user:
+**FIRST:** Read `{config_dir}/founder-profile.md`. If it contains `{{SETUP_NEEDED}}`, STOP and tell the user:
 
 > This system hasn't been configured yet. Run `/q-setup` first to set up your profile, integrations, and canonical files.
 
@@ -13,9 +13,9 @@ Do not proceed with any other steps.
 ## Path resolution
 
 Read the `kipi://paths` MCP resource to get resolved directories. Key directories:
-- **Config** (`~/.config/kipi/`): founder-profile, enabled-integrations, canonical/, voice/, marketing/
-- **Data** (`~/.local/share/kipi/`): my-project/, memory/
-- **State** (`~/.local/state/kipi/`): output/, bus/
+- **Config** (`{config_dir}`): founder-profile, enabled-integrations, canonical/, voice/, marketing/
+- **Data** (`{data_dir}`): my-project/, memory/
+- **State** (`{state_dir}`): output/, bus/
 - **Repo**: system code (agents, templates, steps) stays in the git repo
 
 ## Arguments
@@ -27,13 +27,13 @@ Types: linkedin, x, medium, one-pager, outreach, deck, follow-up
 ## Preconditions
 
 Read these files:
-1. `~/.config/kipi/enabled-integrations.md`
-2. `~/.config/kipi/founder-profile.md`
-3. `~/.config/kipi/canonical/talk-tracks.md`
-4. `~/.config/kipi/canonical/market-intelligence.md`
-5. `~/.config/kipi/marketing/content-themes.md` — current theme rotation
-6. `~/.config/kipi/marketing/brand-voice.md` — per-channel voice rules
-7. `~/.config/kipi/marketing/content-guardrails.md` — validation rules
+1. `{config_dir}/enabled-integrations.md`
+2. `{config_dir}/founder-profile.md`
+3. `{config_dir}/canonical/talk-tracks.md`
+4. `{config_dir}/canonical/market-intelligence.md`
+5. `{config_dir}/marketing/content-themes.md` — current theme rotation
+6. `{config_dir}/marketing/brand-voice.md` — per-channel voice rules
+7. `{config_dir}/marketing/content-guardrails.md` — validation rules
 8. `q-system/marketing/assets/` — reusable boilerplate, bios, stats, proof points
 
 ## Integration checks

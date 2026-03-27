@@ -4,7 +4,7 @@ Generate a context note for the next session. Run before ending a session, when 
 
 ## Setup guard
 
-**FIRST:** Read `~/.config/kipi/founder-profile.md`. If it contains `{{SETUP_NEEDED}}`, STOP and tell the user:
+**FIRST:** Read `{config_dir}/founder-profile.md`. If it contains `{{SETUP_NEEDED}}`, STOP and tell the user:
 
 > This system hasn't been configured yet. Run `/q-setup` first to set up your profile, integrations, and canonical files.
 
@@ -13,15 +13,15 @@ Do not proceed with any other steps.
 ## Path resolution
 
 Read the `kipi://paths` MCP resource to get resolved directories. Key directories:
-- **Config** (`~/.config/kipi/`): founder-profile, enabled-integrations, canonical/, voice/, marketing/
-- **Data** (`~/.local/share/kipi/`): my-project/, memory/
-- **State** (`~/.local/state/kipi/`): output/, bus/
+- **Config** (`{config_dir}`): founder-profile, enabled-integrations, canonical/, voice/, marketing/
+- **Data** (`{data_dir}`): my-project/, memory/
+- **State** (`{state_dir}`): output/, bus/
 - **Repo**: system code (agents, templates, steps) stays in the git repo
 
 ## Preconditions
 
 Read these files:
-1. `~/.config/kipi/founder-profile.md`
+1. `{config_dir}/founder-profile.md`
 2. Current session context (what was worked on, decisions made, files changed)
 
 ## Integration checks
@@ -36,7 +36,7 @@ No external integrations required.
    - Files created or modified
    - What's pending / in-progress
    - Any blockers or open questions
-2. Write to `~/.local/share/kipi/memory/last-handoff.md` with this structure:
+2. Write to `{data_dir}/memory/last-handoff.md` with this structure:
    ```
    # Session Handoff - {date}
 

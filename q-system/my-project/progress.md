@@ -1,7 +1,3 @@
-# Progress Log
-
-> Session-by-session log of what changed. Auto-updated by `/q-checkpoint` and `/q-end`.
-
-## Log
-
-(entries added automatically)
+# Progress
+{{SETUP_NEEDED}}
+<!-- Run /q-setup to populate this file -->

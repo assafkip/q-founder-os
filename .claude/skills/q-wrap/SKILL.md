@@ -4,7 +4,7 @@
 
 ## Setup guard
 
-**FIRST:** Read `~/.config/kipi/founder-profile.md`. If it contains `{{SETUP_NEEDED}}`, STOP and tell the user:
+**FIRST:** Read `{config_dir}/founder-profile.md`. If it contains `{{SETUP_NEEDED}}`, STOP and tell the user:
 
 > This system hasn't been configured yet. Run `/q-setup` first to set up your profile, integrations, and canonical files.
 
@@ -13,18 +13,18 @@ Do not proceed with any other steps.
 ## Path resolution
 
 Read the `kipi://paths` MCP resource to get resolved directories. Key directories:
-- **Config** (`~/.config/kipi/`): founder-profile, enabled-integrations, canonical/, voice/, marketing/
-- **Data** (`~/.local/share/kipi/`): my-project/, memory/
-- **State** (`~/.local/state/kipi/`): output/, bus/
+- **Config** (`{config_dir}`): founder-profile, enabled-integrations, canonical/, voice/, marketing/
+- **Data** (`{data_dir}`): my-project/, memory/
+- **State** (`{state_dir}`): output/, bus/
 - **Repo**: system code (agents, templates, steps) stays in the git repo
 
 ## Preconditions
 
 Read these files:
-1. `~/.config/kipi/enabled-integrations.md`
-2. `~/.config/kipi/founder-profile.md`
-3. `~/.local/state/kipi/output/morning-log-{today}.json` — what happened today
-4. `~/.local/share/kipi/my-project/relationships.md` — check for unprocessed conversations
+1. `{config_dir}/enabled-integrations.md`
+2. `{config_dir}/founder-profile.md`
+3. `{state_dir}/output/morning-log-{today}.json` — what happened today
+4. `{data_dir}/my-project/relationships.md` — check for unprocessed conversations
 
 ## Integration checks
 

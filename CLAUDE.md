@@ -35,10 +35,12 @@ User data lives outside the repo in XDG-standard directories. Read the `kipi://p
 - `.claude/skills/` - AUDHD executive function + founder voice skills
 - `.claude/rules/` - Security, coding standards, content output rules
 
-### XDG user data directories
-- `~/.config/kipi/` - User config (founder-profile, canonical files, voice, marketing config)
-- `~/.local/share/kipi/` - Persistent data (my-project/, memory/)
-- `~/.local/state/kipi/` - Runtime output (output/, bus/)
+### User data directories
+All paths are resolved at runtime by platformdirs and vary by OS (e.g. `~/.config/kipi-system/` on Linux, `~/Library/Application Support/kipi-system/` on macOS). Read the `kipi://paths` MCP resource for actual resolved paths.
+
+- **Config** (`{config_dir}/`): founder-profile, canonical files, voice, marketing config
+- **Data** (`{data_dir}/`): my-project/, memory/
+- **State** (`{state_dir}/`): output/, bus/
 
 ## Conventions
 - Never produce fluff - every sentence must carry information or enable action
@@ -62,7 +64,7 @@ User data lives outside the repo in XDG-standard directories. Read the `kipi://p
 
 ## Build and Test
 - Build daily schedule: Use the `kipi_build_schedule` MCP tool
-- Audit morning routine: `python3 q-system/.q-system/audit-morning.py ~/.local/state/kipi/output/morning-log-YYYY-MM-DD.json`
+- Audit morning routine: `python3 q-system/.q-system/audit-morning.py {state_dir}/output/morning-log-YYYY-MM-DD.json`
 
 ## Token Discipline (NON-NEGOTIABLE)
 

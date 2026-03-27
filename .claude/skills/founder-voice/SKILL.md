@@ -5,16 +5,16 @@ You are writing as the founder. Your job is to transform any content into their 
 ## Path resolution
 
 Read the `kipi://paths` MCP resource to get resolved directories. Key directories:
-- **Config** (`~/.config/kipi/`): founder-profile, enabled-integrations, canonical/, voice/, marketing/
-- **Data** (`~/.local/share/kipi/`): my-project/, memory/
-- **State** (`~/.local/state/kipi/`): output/, bus/
+- **Config** (`{config_dir}`): founder-profile, enabled-integrations, canonical/, voice/, marketing/
+- **Data** (`{data_dir}`): my-project/, memory/
+- **State** (`{state_dir}`): output/, bus/
 - **Repo**: system code (agents, templates, steps) stays in the git repo
 
 ## Before Writing
 
 **Always read these files first:**
-1. `~/.config/kipi/voice/voice-dna.md` - the voice profile
-2. `~/.config/kipi/voice/writing-samples.md` - real examples
+1. `{config_dir}/voice/voice-dna.md` - the voice profile
+2. `{config_dir}/voice/writing-samples.md` - real examples
 
 If these files are empty/template, the voice skill cannot run. Ask the founder to complete setup Step 4 first.
 

@@ -25,33 +25,33 @@ You are a lead sourcing agent. Your ONLY job is to run Apify actors across 4 pla
 
 ### Phase 1: Run Apify actors
 
-**Use `bash q-system/.q-system/apify-run.sh` for ALL Apify calls.** This script handles REST API auth, response nesting, dataset fetching, and error handling. Never write inline curl + parsing.
+**Use the Apify MCP server tools for all Apify calls** (if configured). If Apify MCP is not available, skip lead sourcing and log the skip.
 
 Read `{{CONFIG_DIR}}/canonical/market-intelligence.md` first to get your target buyer language and pain categories. Use those terms in the search queries below.
 
-Run these 4 in parallel using Bash tool calls. Replace {{SEARCH_TERMS}} with terms from market-intelligence.md:
+Run these 4 in parallel. Replace {{SEARCH_TERMS}} with terms from market-intelligence.md:
 
 1. **LinkedIn**
-   ```bash
-   bash q-system/.q-system/apify-run.sh "supreme_coder~linkedin-post" '{"urls":["https://www.linkedin.com/search/results/content/?keywords={{SEARCH_TERMS}}&sortBy=date_posted"],"deepScrape":false,"maxItems":20}' 120
-   ```
+   - Actor: `supreme_coder~linkedin-post`
+   - Input: `{"urls":["https://www.linkedin.com/search/results/content/?keywords={{SEARCH_TERMS}}&sortBy=date_posted"],"deepScrape":false,"maxItems":20}`
+   - Timeout: 120s
 
 2. **Reddit**
-   ```bash
-   bash q-system/.q-system/apify-run.sh "trudax~reddit-scraper-lite" '{"startUrls":[{"url":"https://www.reddit.com/r/{{TARGET_SUBREDDIT}}/search/?q={{SEARCH_TERMS}}&sort=new&restrict_sr=on&t=week"}],"maxItems":20}' 120
-   ```
+   - Actor: `trudax~reddit-scraper-lite`
+   - Input: `{"startUrls":[{"url":"https://www.reddit.com/r/{{TARGET_SUBREDDIT}}/search/?q={{SEARCH_TERMS}}&sort=new&restrict_sr=on&t=week"}],"maxItems":20}`
+   - Timeout: 120s
 
 3. **Medium**
-   ```bash
-   bash q-system/.q-system/apify-run.sh "apify~google-search-scraper" '{"queries":"site:medium.com ({{SEARCH_TERMS}}) 2026","maxPagesPerQuery":1,"resultsPerPage":10}' 120
-   ```
+   - Actor: `apify~google-search-scraper`
+   - Input: `{"queries":"site:medium.com ({{SEARCH_TERMS}}) 2026","maxPagesPerQuery":1,"resultsPerPage":10}`
+   - Timeout: 120s
 
 4. **X (Twitter)**
-   ```bash
-   bash q-system/.q-system/apify-run.sh "apidojo~tweet-scraper" '{"searchTerms":["{{SEARCH_TERMS}}"],"maxItems":20,"mode":"search"}' 120
-   ```
+   - Actor: `apidojo~tweet-scraper`
+   - Input: `{"searchTerms":["{{SEARCH_TERMS}}"],"maxItems":20,"mode":"search"}`
+   - Timeout: 120s
 
-Each returns a clean JSON array to stdout. Parse directly with python3.
+Each actor returns a JSON array. Parse results directly.
 
 ### Phase 2: Score each result on 6 dimensions (max 30 pts total)
 

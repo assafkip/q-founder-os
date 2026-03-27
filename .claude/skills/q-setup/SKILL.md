@@ -5,9 +5,9 @@ Run this on first use or to reconfigure integrations. Walks through setup one st
 ## Path resolution
 
 Read the `kipi://paths` MCP resource to get resolved directories. Key directories:
-- **Config** (`~/.config/kipi/`): founder-profile, enabled-integrations, canonical/, voice/, marketing/
-- **Data** (`~/.local/share/kipi/`): my-project/, memory/
-- **State** (`~/.local/state/kipi/`): output/, bus/
+- **Config** (`{config_dir}`): founder-profile, enabled-integrations, canonical/, voice/, marketing/
+- **Data** (`{data_dir}`): my-project/, memory/
+- **State** (`{state_dir}`): output/, bus/
 - **Repo**: system code (agents, templates, steps) stays in the git repo
 
 ## Detection
@@ -57,7 +57,7 @@ Ask:
 - What do they use today instead of you? (competitors or manual process)
 - What's your price point or deal size? (if known)
 
-**Save to:** `~/.local/share/kipi/my-project/current-state.md` and `~/.config/kipi/canonical/discovery.md`
+**Save to:** `{data_dir}/my-project/current-state.md` and `{config_dir}/canonical/discovery.md`
 
 ### Step 3: What's your positioning?
 
@@ -67,7 +67,7 @@ Ask:
 - What are you NOT? (common misclassifications)
 - What are the top 3 objections you hear?
 
-**Save to:** `~/.config/kipi/canonical/talk-tracks.md`, `~/.config/kipi/canonical/objections.md`
+**Save to:** `{config_dir}/canonical/talk-tracks.md`, `{config_dir}/canonical/objections.md`
 
 ### Step 4: Your voice
 
@@ -78,12 +78,12 @@ Ask:
 - What language/communication patterns should I know about? (ESL, neurodivergent, etc.)
 - Share 2-3 examples of messages or posts you've written that sound like you (paste or link)
 
-**Save to:** `~/.config/kipi/voice/voice-dna.md` and `~/.config/kipi/voice/writing-samples.md`
+**Save to:** `{config_dir}/voice/voice-dna.md` and `{config_dir}/voice/writing-samples.md`
 
 If they mention ADHD, ASD, or AUDHD:
 - Ask: "Want me to enable AUDHD executive function mode? It structures all output for minimal decision-making — copy-paste ready, friction-ordered, no pressure language."
-- If yes: set `enabled: true` in `~/.config/kipi/enabled-integrations.md` under AUDHD Mode
-- Read `.claude/skills/audhd-executive-function/SKILL.md` and populate the user profile at `~/.config/kipi/audhd/user-profile.md`
+- If yes: set `enabled: true` in `{config_dir}/enabled-integrations.md` under AUDHD Mode
+- Read `.claude/skills/audhd-executive-function/SKILL.md` and populate the user profile at `{config_dir}/audhd/user-profile.md`
 
 ### Step 5: Your tools (SMART DETECTION)
 
@@ -109,17 +109,17 @@ Check `.mcp.json` at the project root for configured MCP servers. For each one f
 - "Want Gamma for deck/one-pager generation?" → If yes, provide config snippet
 - "Want NotebookLM for research content?" → If yes, provide config snippet
 
-After probing, write the final state to `~/.config/kipi/enabled-integrations.md`.
+After probing, write the final state to `{config_dir}/enabled-integrations.md`.
 
 ### Step 6: Your CRM
 
 **If Notion is enabled:**
 - Walk them through creating or connecting databases: Contacts, Interactions, Actions, Pipeline, LinkedIn Tracker, Content Pipeline, Editorial Calendar, Asset Library
 - For each DB, get the database ID and save to `enabled-integrations.md` under Notion Database IDs
-- Also save to `~/.local/share/kipi/my-project/notion-ids.md`
+- Also save to `{data_dir}/my-project/notion-ids.md`
 
 **If Notion is NOT enabled:**
-- Tell them: "No problem — the system works with local files. `~/.local/share/kipi/my-project/relationships.md` is your CRM."
+- Tell them: "No problem — the system works with local files. `{data_dir}/my-project/relationships.md` is your CRM."
 
 ### Step 7: Your network
 
@@ -129,7 +129,7 @@ Ask:
 - Any design partners or early customers?
 - Any advisors or connectors?
 
-**Save to:** `~/.local/share/kipi/my-project/relationships.md`
+**Save to:** `{data_dir}/my-project/relationships.md`
 
 ### Step 8: Confirmation
 

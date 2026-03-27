@@ -39,7 +39,7 @@
 
 | Issue | Severity | Fix |
 |-------|----------|-----|
-| `build_schedule` MCP tool replaces old build-schedule.sh | Minor | Verify MCP tool works |
+| `build_schedule` MCP tool replaces old build-schedule.sh (deleted) | Minor | Verify MCP tool works |
 | `my-project/progress.md` only 7 lines | Minor | Add session log schema |
 | Agent files diverged from KTLYST (different naming, missing newer agents) | Major | Phase 1 reconciliation needed |
 
@@ -126,11 +126,11 @@ The skeleton has been independently developed in some areas:
 | `skills/q-debrief` | Already in kipi-system `.claude/commands/` |
 | `skills/q-wrap` | Already in kipi-system `.claude/commands/` |
 | `scripts/audit-morning.py` | Already in kipi-system `.q-system/` |
-| `build_schedule` MCP tool | Replaces old build-schedule.sh script |
+| `kipi_build_schedule` MCP tool | Replaced old build-schedule.sh (deleted) |
 
 The plugin adds zero unique value. It's a packaging layer with symlinks. Every capability already exists in the instance or skeleton.
 
-**One thing to port:** `build_schedule` functionality is now in the kipi-mcp server as the `build_schedule` MCP tool.
+**One thing to port:** `build_schedule` functionality is now in the kipi-mcp server as the `kipi_build_schedule` MCP tool. The old `build-schedule.sh` has been deleted.
 
 ---
 
@@ -219,39 +219,21 @@ The skeleton `CLAUDE.md` uses `@q-system/CLAUDE.md` to import the behavioral rul
 
 ### 5D. Propagation Workflow
 
-**Decision: Automated script that pulls to all instances at once**
+**Decision: `kipi_update` MCP tool that pulls to all instances at once**
 
-Manual `git subtree pull` per instance is error-prone and will be forgotten. Instead:
+Manual `git subtree pull` per instance is error-prone and will be forgotten. The `kipi_update` MCP tool (in kipi-mcp) handles this. It replaces the old `kipi-update.sh` shell script (now deleted).
 
-```bash
-#!/bin/bash
-# kipi_update MCP tool - replaces kipi-update.sh
-# Pulls latest kipi-system skeleton into all registered instances
-
-SKELETON_REMOTE="https://github.com/assafkip/kipi-system.git"
-SKELETON_BRANCH="main"
-SUBTREE_PREFIX="q-system"  # or whatever prefix we pick
-
-INSTANCES=(
-  "/Users/assafkip/Desktop/KTLYST_strategy"
-  "/Users/assafkip/Desktop/q-founder-os"
-  "/Users/assafkip/Desktop/car-research"
-  "/Users/assafkip/Desktop/q-education"
-)
-
-for instance in "${INSTANCES[@]}"; do
-  echo "=== Updating $instance ==="
-  cd "$instance"
-  git subtree pull --prefix="$SUBTREE_PREFIX" "$SKELETON_REMOTE" "$SKELETON_BRANCH" --squash
-  echo ""
-done
-```
+Configuration reference for the MCP tool:
+- Skeleton remote: `https://github.com/assafkip/kipi-system.git`
+- Skeleton branch: `main`
+- Subtree prefix: `q-system` (or instance-specific)
+- Registered instances are managed via `kipi_new_instance` / `kipi://instances`
 
 **Workflow:**
 1. Make improvement in kipi-system skeleton, commit + push
 2. Use the `kipi_update` MCP tool to pull into all instances
 3. If conflicts arise (instance modified a skeleton file), resolve per-instance
-4. To push a generic improvement FROM an instance back to skeleton: `git subtree push --prefix=q-system https://github.com/assafkip/kipi-system.git main`
+4. To push a generic improvement FROM an instance back to skeleton: `kipi_push_upstream` MCP tool
 
 **Frequency:** Manual trigger. Run after meaningful skeleton improvements, not after every commit.
 

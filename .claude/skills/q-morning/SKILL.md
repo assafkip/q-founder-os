@@ -19,19 +19,19 @@ Do not proceed with any other steps.
 ## Path resolution
 
 Read the `kipi://paths` MCP resource to get resolved directories. Key directories:
-- **Config** (`~/.config/kipi/`): founder-profile, enabled-integrations, canonical/, voice/, marketing/
-- **Data** (`~/.local/share/kipi/`): my-project/, memory/
-- **State** (`~/.local/state/kipi/`): output/, bus/
+- **Config** (`{config_dir}`): founder-profile, enabled-integrations, canonical/, voice/, marketing/
+- **Data** (`{data_dir}`): my-project/, memory/
+- **State** (`{state_dir}`): output/, bus/
 - **Repo**: system code (agents, templates, steps) stays in the git repo
 
 ## Preconditions
 
 Read these files FIRST, in this order:
 1. `q-system/.q-system/preflight.md` — tool manifest, known issues, fallback chains. **MANDATORY before anything else.**
-2. `~/.config/kipi/enabled-integrations.md` — which tools are available
-3. `~/.config/kipi/founder-profile.md` — user context and accommodations
+2. `{config_dir}/enabled-integrations.md` — which tools are available
+3. `{config_dir}/founder-profile.md` — user context and accommodations
 4. `q-system/.q-system/steps/step-orchestrator.md` — full phase execution plan
-5. `~/.local/share/kipi/memory/last-handoff.md` — prior session context (if exists)
+5. `{data_dir}/memory/last-handoff.md` — prior session context (if exists)
 
 ## Integration checks
 
@@ -60,7 +60,7 @@ Report what was skipped in the morning briefing summary.
    - Each agent reads only the bus/ files it needs and writes one JSON result
 6. **Log each step** via `log_step` MCP tool as phases complete
 7. **Build daily schedule** via `kipi_build_schedule` MCP tool
-8. **Run audit harness:** `python3 q-system/.q-system/audit-morning.py ~/.local/state/kipi/output/morning-log-{date}.json`
+8. **Run audit harness:** `python3 q-system/.q-system/audit-morning.py {state_dir}/output/morning-log-{date}.json`
 9. **Show audit results** to the founder. This is NOT optional.
 10. **Auto-backup:** Call `kipi_backup` MCP tool. This runs by default after every morning routine. Mention the archive path to the founder.
 

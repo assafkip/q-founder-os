@@ -4,7 +4,7 @@ Validate content against guardrails. Runs 4 focused review passes in sequence. R
 
 ## Setup guard
 
-**FIRST:** Read `~/.config/kipi/founder-profile.md`. If it contains `{{SETUP_NEEDED}}`, STOP and tell the user:
+**FIRST:** Read `{config_dir}/founder-profile.md`. If it contains `{{SETUP_NEEDED}}`, STOP and tell the user:
 
 > This system hasn't been configured yet. Run `/q-setup` first to set up your profile, integrations, and canonical files.
 
@@ -13,9 +13,9 @@ Do not proceed with any other steps.
 ## Path resolution
 
 Read the `kipi://paths` MCP resource to get resolved directories. Key directories:
-- **Config** (`~/.config/kipi/`): founder-profile, enabled-integrations, canonical/, voice/, marketing/
-- **Data** (`~/.local/share/kipi/`): my-project/, memory/
-- **State** (`~/.local/state/kipi/`): output/, bus/
+- **Config** (`{config_dir}`): founder-profile, enabled-integrations, canonical/, voice/, marketing/
+- **Data** (`{data_dir}`): my-project/, memory/
+- **State** (`{state_dir}`): output/, bus/
 - **Repo**: system code (agents, templates, steps) stays in the git repo
 
 ## Arguments
@@ -25,10 +25,10 @@ Read the `kipi://paths` MCP resource to get resolved directories. Key directorie
 ## Preconditions
 
 Read these files:
-1. `~/.config/kipi/founder-profile.md`
-2. `~/.config/kipi/marketing/content-guardrails.md` — the validation rules
+1. `{config_dir}/founder-profile.md`
+2. `{config_dir}/marketing/content-guardrails.md` — the validation rules
 3. `.claude/skills/founder-voice/SKILL.md` — voice rules
-4. `~/.config/kipi/voice/voice-dna.md` — voice DNA
+4. `{config_dir}/voice/voice-dna.md` — voice DNA
 5. `.claude/skills/audhd-executive-function/SKILL.md` — if AUDHD enabled
 
 ## Integration checks
@@ -46,7 +46,7 @@ Run 4 review passes IN SEQUENCE using Agent tool (Sonnet model for all):
 - PASS/FAIL with specific line-level fixes
 
 ### Pass 2: Guardrails
-- Check content against `~/.config/kipi/marketing/content-guardrails.md`
+- Check content against `{config_dir}/marketing/content-guardrails.md`
 - Verify claims against canonical files
 - Check for overclaiming, misclassification language
 - PASS/FAIL with specific fixes
