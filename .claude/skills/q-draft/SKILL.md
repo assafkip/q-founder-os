@@ -4,6 +4,14 @@ Generate one-off outputs: a specific email, DM, talking points for a meeting, qu
 
 For structured reusable deliverables, use `/q-create` instead.
 
+## Setup guard
+
+**FIRST:** Read `q-system/my-project/founder-profile.md`. If it contains `{{SETUP_NEEDED}}`, STOP and tell the user:
+
+> This system hasn't been configured yet. Run `/q-setup` first to set up your profile, integrations, and canonical files.
+
+Do not proceed with any other steps.
+
 ## Arguments
 
 `/q-draft [type] [audience]`

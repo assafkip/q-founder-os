@@ -2,6 +2,14 @@
 
 Review relationships, objections, proof gaps, and open loops. Propose prioritized next actions based on data, not gut feel.
 
+## Setup guard
+
+**FIRST:** Read `q-system/my-project/founder-profile.md`. If it contains `{{SETUP_NEEDED}}`, STOP and tell the user:
+
+> This system hasn't been configured yet. Run `/q-setup` first to set up your profile, integrations, and canonical files.
+
+Do not proceed with any other steps.
+
 ## Preconditions
 
 Read these files:

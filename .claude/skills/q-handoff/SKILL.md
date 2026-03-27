@@ -2,6 +2,14 @@
 
 Generate a context note for the next session. Run before ending a session, when context is running low, or automatically as part of `/q-wrap`.
 
+## Setup guard
+
+**FIRST:** Read `q-system/my-project/founder-profile.md`. If it contains `{{SETUP_NEEDED}}`, STOP and tell the user:
+
+> This system hasn't been configured yet. Run `/q-setup` first to set up your profile, integrations, and canonical files.
+
+Do not proceed with any other steps.
+
 ## Preconditions
 
 Read these files:
