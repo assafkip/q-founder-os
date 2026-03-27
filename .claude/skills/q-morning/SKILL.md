@@ -2,6 +2,14 @@
 
 The only command you need to start a day. Runs an 8-phase agent pipeline: calendar, email, Notion, social, lead sourcing, engagement hitlist, synthesis, and schedule build. Auto-checkpoints previous session, catches missed debriefs, loads canonical state.
 
+## Setup guard
+
+**FIRST:** Read `q-system/my-project/founder-profile.md`. If it contains `{{SETUP_NEEDED}}`, STOP and tell the user:
+
+> This system hasn't been configured yet. Run `/q-setup` first to set up your profile, integrations, and canonical files.
+
+Do not proceed with any other steps.
+
 ## Preconditions
 
 Read these files FIRST, in this order:

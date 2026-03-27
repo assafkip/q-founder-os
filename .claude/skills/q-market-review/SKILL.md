@@ -2,6 +2,14 @@
 
 Validate content against guardrails. Runs 4 focused review passes in sequence. Returns PASS/FAIL with specific fixes per pass.
 
+## Setup guard
+
+**FIRST:** Read `q-system/my-project/founder-profile.md`. If it contains `{{SETUP_NEEDED}}`, STOP and tell the user:
+
+> This system hasn't been configured yet. Run `/q-setup` first to set up your profile, integrations, and canonical files.
+
+Do not proceed with any other steps.
+
 ## Arguments
 
 `/q-market-review [file]` — path to content file to review. If not provided, ask.
