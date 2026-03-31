@@ -26,7 +26,10 @@ Your context window will compact automatically as it approaches limits. Do not s
    - NEVER paraphrase, summarize, or rewrite agent instructions from memory
    - Read on-demand (when about to spawn), not upfront. File content falls out of context after launch.
    - Why: The Agent tool prompt is the ONLY channel to sub-agents. They inherit nothing from the orchestrator. Whatever you write IS their entire world. Paraphrasing causes silent failures.
-2. Use model=sonnet for all agents EXCEPT 07-synthesize (use opus). Hitlist was downgraded from Opus to Sonnet.
+2. **Model allocation — use the `model` field from each agent's YAML frontmatter.** Summary:
+   - **haiku**: data pulls, simple checks, API calls (00-preflight, 00b-energy-check, 01-calendar/gmail/notion/vc-pipeline-pull, 01b-content-metrics, 02-x-activity, 03-linkedin-dms/posts, 03-prospect-pipeline, 03-publish-reconciliation, 03b-linkedin-notifications, 03c-prospect-activity, 04-marketing-health, 05-loop-review, 05a-site-metrics, 05b-utm-tracking, 06-client-deliverables, 07b-outreach-queue, 08-visual-verify, 09-notion-push, 10-daily-checklists)
+   - **sonnet**: analysis, copy generation, cross-referencing (00-session-bootstrap, 00c-canonical-digest, 00g-monthly-checks, 00h-memory-review, 01c-copy-diff, 01d-graph-kb, 02-meeting-prep, 02-warm-intro-match, 03-content-intel, 03d-outbound-detection, 04-founder-brand-post, 04-post-visuals, 04-signals-content, 04-value-routing, 05-connection-mining, 05-lead-sourcing, 05-lead-sourcing-chrome, 05-pipeline-followup, 05-temperature-scoring, 06-compliance-check, 06-positioning-check)
+   - **opus**: core copy + synthesis only (05-engagement-hitlist, 07-synthesize)
 3. When multiple agents in a phase are independent, launch them ALL in a single message (parallel)
 4. When a phase depends on the previous phase's output, wait for completion first
 5. After each phase, verify the expected bus/ JSON files exist before proceeding
@@ -78,8 +81,8 @@ Before spawning: check if bus/{date}/ already contains calendar.json, gmail.json
 Launch in ONE message with 5 Agent tool calls:
 - 01-data-ingest.md (sonnet) - MERGED agent: pulls Calendar + Gmail + Notion in one agent. Writes calendar.json, gmail.json, notion.json. Has built-in verification gate. Saves ~15-20K tokens vs 3 separate agents.
 - 01-vc-pipeline-pull.md (sonnet) - separate because it's a different API (localhost:5050)
-- 01b-content-metrics.md (sonnet) - Chrome scrapes LinkedIn analytics, writes content-metrics.json + persists to `ktlyst_*` MCP tools
-- 01c-copy-diff.md (sonnet) - compares yesterday's hitlist copy vs actual posts (Chrome), writes copy-diffs.json + persists to `ktlyst_*` MCP tools
+- 01b-content-metrics.md (sonnet) - Chrome scrapes LinkedIn analytics, writes content-metrics.json + persists to `kipi_*` MCP tools
+- 01c-copy-diff.md (sonnet) - compares yesterday's hitlist copy vs actual posts (Chrome), writes copy-diffs.json + persists to `kipi_*` MCP tools
 - 01d-graph-kb.md (sonnet) - queries graph.jsonl for meeting attendees and pipeline contacts, writes graph-digest.json. Depends on calendar.json + notion.json so may need to run AFTER the merged ingest agent if those aren't pre-fetched.
 Verify: Use the `kipi_verify_bus` MCP tool with date={date}, phase=1
 If any fails: log the failure, continue with available data
@@ -93,9 +96,9 @@ Verify: Use the `kipi_verify_bus` MCP tool with date={date}, phase=2
 
 ### Phase 3: LinkedIn (5 agents, SEQUENTIAL - Chrome needs one tab at a time)
 - 03-linkedin-posts.md (sonnet) - writes linkedin-posts.json
-- 03b-linkedin-notifications.md (sonnet) - scrapes linkedin.com/notifications for likes/views/comments/shares, writes behavioral-signals.json + persists to `ktlyst_*` MCP tools
+- 03b-linkedin-notifications.md (sonnet) - scrapes linkedin.com/notifications for likes/views/comments/shares, writes behavioral-signals.json + persists to `kipi_*` MCP tools
 - 03-linkedin-dms.md (sonnet) - writes linkedin-dms.json
-- 03c-prospect-activity.md (sonnet) - visits top 10 Hot+Warm prospect profiles, pulls their last 2 posts, writes prospect-activity.json. **ENERGY GATE: skip if energy < 3.** Takes ~6 min Chrome time. Rotates via `ktlyst_*` MCP tools (skips anyone checked in last 2 days).
+- 03c-prospect-activity.md (sonnet) - visits top 10 Hot+Warm prospect profiles, pulls their last 2 posts, writes prospect-activity.json. **ENERGY GATE: skip if energy < 3.** Takes ~6 min Chrome time. Rotates via `kipi_*` MCP tools (skips anyone checked in last 2 days).
 - 03d-outbound-detection.md (sonnet) - auto-detects founder's posted comments, sent DMs, sent CRs via Chrome + bus data. Writes outbound-actions.json. Also detects loop auto-close candidates and stage advancement signals.
 - 03-dp-pipeline.md (sonnet) - reads notion.json, writes dp-pipeline.json (no Chrome needed, can overlap)
 Verify: Use the `kipi_verify_bus` MCP tool with date={date}, phase=3
@@ -139,7 +142,7 @@ Launch in ONE message:
 3. Run: Use the `kipi_bus_to_log` MCP tool with date={date} — bridges bus/ files to morning-log.json
 4. Run: Use the `kipi_audit_morning` MCP tool with log_file="{state_dir}/output/morning-log-{date}.json"
 5. Show audit output to founder
-Steps 3-4 are NON-OPTIONAL. A hook enforces this - see .claude/settings.json.
+Steps 3-4 are NON-OPTIONAL. A hook enforces this - see hooks/hooks.json.
 
 ### Phase 9: Notion Write-back (2 agents, PARALLEL)
 Launch in ONE message:

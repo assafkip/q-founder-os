@@ -1,8 +1,8 @@
 ---
 name: 02-x-activity
 description: "Pull founder X/Twitter posts, engagement metrics, and scan monitored accounts for reply opportunities"
-model: opus
-maxTurns: 30
+model: haiku
+maxTurns: 15
 ---
 
 # Agent: X/Twitter Activity

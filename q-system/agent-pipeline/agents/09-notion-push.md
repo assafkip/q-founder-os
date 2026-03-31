@@ -1,8 +1,8 @@
 ---
 name: 09-notion-push
 description: "Push today's action items, value-drops, and loop closures to Notion Actions DB"
-model: opus
-maxTurns: 30
+model: haiku
+maxTurns: 15
 ---
 
 # Agent: Notion Push

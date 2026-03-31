@@ -1,8 +1,8 @@
 ---
 name: 03-publish-reconciliation
 description: "Detect content published outside the Q system and reconcile the Content Pipeline DB"
-model: opus
-maxTurns: 30
+model: haiku
+maxTurns: 15
 ---
 
 # Agent: Publish Reconciliation

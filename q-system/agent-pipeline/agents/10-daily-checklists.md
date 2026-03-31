@@ -1,8 +1,8 @@
 ---
 name: 10-daily-checklists
 description: "Refresh Notion Daily Actions and Daily Posts pages with today's items"
-model: opus
-maxTurns: 30
+model: haiku
+maxTurns: 15
 ---
 
 # Agent: Daily Checklists

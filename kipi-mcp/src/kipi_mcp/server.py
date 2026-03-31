@@ -16,7 +16,6 @@ from kipi_mcp.registry import RegistryManager
 from kipi_mcp.step_logger import StepLogger
 from kipi_mcp.loop_tracker import LoopTracker
 from kipi_mcp.template_manager import TemplateManager
-from kipi_mcp.migrator import Migrator
 from kipi_mcp.backup import BackupManager
 from kipi_mcp.schedule_verifier import ScheduleVerifier
 from kipi_mcp.bus_verifier import BusVerifier
@@ -25,7 +24,6 @@ from kipi_mcp.bus_bridge import BusBridge
 from kipi_mcp.draft_scanner import DraftScanner
 from kipi_mcp.morning_auditor import MorningAuditor
 from kipi_mcp.metrics_store import MetricsStore
-from kipi_mcp.guide_loader import GuideLoader
 from kipi_mcp.linter import Linter
 from kipi_mcp.scorer import Scorer
 from kipi_mcp.schema_gen import SchemaGenerator
@@ -33,14 +31,12 @@ from kipi_mcp.schema_gen import SchemaGenerator
 paths = KipiPaths()
 paths.ensure_dirs()
 
-# Legacy layout detection moved to migrator module
-
 mcp = FastMCP(
     "kipi",
     instructions=(
         "Kipi founder OS — instance management, morning routine logging, "
         "follow-up loop tracking, content/schedule tools, and deterministic linters/scorers. "
-        "Tool groups: kipi_* (instances, migration, validation, linting, scoring, schema), "
+        "Tool groups: kipi_* (instances, validation, linting, scoring, schema), "
         "log_* (morning routine step logging), "
         "loop_* (follow-up loop tracking), "
         "kipi_build_schedule / kipi_create_template (content). "
@@ -50,8 +46,7 @@ mcp = FastMCP(
         "kipi_backup / kipi_export / kipi_import (data portability). "
         "Resources: kipi://paths, kipi://status, kipi://instances, kipi://loops/open, "
         "kipi://loops/stats, kipi://backups. "
-        "Read kipi://status first — if legacy_data_detected is true, prompt the user to migrate "
-        "before doing anything else. Read kipi://paths for resolved directory paths."
+        "Read kipi://paths for resolved directory paths."
     ),
 )
 
@@ -84,7 +79,6 @@ morning_auditor = MorningAuditor()
 metrics_store = MetricsStore(db_path=paths.metrics_db)
 metrics_store.init_db()
 
-guide_loader = GuideLoader(guides_dir=paths.repo_dir / "guides")
 linter = Linter()
 scorer = Scorer()
 schema_generator = SchemaGenerator()
@@ -117,16 +111,7 @@ def resource_paths() -> str:
 
 @mcp.resource("kipi://status")
 def resource_status() -> str:
-    """System status: migration state, setup state, data health.
-
-    IMPORTANT: If legacy_data_detected is true, tell the user their data
-    is still in the git repo and offer to migrate. Migration steps:
-    1. Call kipi_suggest_instance_name(company="<their company>") to generate a name.
-    2. Let the user confirm or override the instance name.
-    3. Call kipi_migrate(dry_run=True, instance_name="<name>") to preview.
-    4. Call kipi_migrate(dry_run=False, instance_name="<name>") to execute.
-    The instance_name is REQUIRED for legacy repos (no .kipi-instance file).
-    """
+    """System status: setup state, data health."""
     profile = paths.founder_profile
     setup_needed = True
     if profile.exists():
@@ -177,29 +162,6 @@ def resource_loops_stats() -> str:
 
 
 @mcp.tool()
-def kipi_migrate(dry_run: bool = True, instance_name: str = "") -> str:
-    """Migrate user data from git repo to XDG directories.
-
-    instance_name is required. Use kipi_suggest_instance_name first to generate
-    one, then let the user confirm.
-
-    Args:
-        dry_run: If True, report what would happen without copying. Default True for safety.
-        instance_name: Instance name for this repo. Required.
-    """
-    if not instance_name:
-        raise ToolError("instance_name is required. Use kipi_suggest_instance_name first.")
-    try:
-        m = Migrator(paths, instance_name=instance_name)
-        return json.dumps(m.migrate(dry_run=dry_run))
-    except ValueError as e:
-        raise ToolError(str(e))
-    except Exception as e:
-        logger.error("kipi_migrate failed", exc_info=True)
-        raise ToolError(str(e))
-
-
-@mcp.tool()
 def kipi_suggest_instance_name(company: str) -> str:
     """Generate a Discord-style instance name from a company name.
 
@@ -220,7 +182,7 @@ def kipi_suggest_instance_name(company: str) -> str:
 
 @mcp.tool()
 def kipi_set_instance_name(name: str) -> str:
-    """Set the instance name for the current repo by writing .kipi-instance.
+    """Set the active instance name by writing active-instance file.
 
     Validates the name isn't already taken by another instance.
     After setting, the server must be restarted for the new name to take effect.
@@ -235,7 +197,7 @@ def kipi_set_instance_name(name: str) -> str:
                 f"Instance name '{name}' is already taken. "
                 f"Existing: {sorted(existing)}"
             )
-        marker = paths.repo_dir / ".kipi-instance"
+        marker = paths._base / "active-instance"
         marker.write_text(name + "\n")
         return json.dumps({"set": True, "name": name, "file": str(marker)})
     except ToolError:
@@ -735,18 +697,18 @@ def kipi_audit_morning(log_file: str) -> str:
 
 
 @mcp.tool()
-def ktlyst_init_db() -> str:
+def kipi_init_db() -> str:
     """Initialize the metrics database (idempotent). Returns list of table names."""
     try:
         tables = metrics_store.init_db()
         return json.dumps({"tables": tables})
     except Exception as e:
-        logger.error("ktlyst_init_db failed", exc_info=True)
+        logger.error("kipi_init_db failed", exc_info=True)
         raise ToolError(str(e))
 
 
 @mcp.tool()
-def ktlyst_insert_content_metrics(metrics_json: str) -> str:
+def kipi_insert_content_metrics(metrics_json: str) -> str:
     """Insert content performance metrics from a JSON array of records.
 
     Args:
@@ -758,12 +720,12 @@ def ktlyst_insert_content_metrics(metrics_json: str) -> str:
     except json.JSONDecodeError as e:
         raise ToolError(f"Invalid JSON: {e}")
     except Exception as e:
-        logger.error("ktlyst_insert_content_metrics failed", exc_info=True)
+        logger.error("kipi_insert_content_metrics failed", exc_info=True)
         raise ToolError(str(e))
 
 
 @mcp.tool()
-def ktlyst_insert_behavioral_signals(signals_json: str) -> str:
+def kipi_insert_behavioral_signals(signals_json: str) -> str:
     """Insert behavioral signals from a JSON array.
 
     Args:
@@ -775,12 +737,12 @@ def ktlyst_insert_behavioral_signals(signals_json: str) -> str:
     except json.JSONDecodeError as e:
         raise ToolError(f"Invalid JSON: {e}")
     except Exception as e:
-        logger.error("ktlyst_insert_behavioral_signals failed", exc_info=True)
+        logger.error("kipi_insert_behavioral_signals failed", exc_info=True)
         raise ToolError(str(e))
 
 
 @mcp.tool()
-def ktlyst_insert_outreach(
+def kipi_insert_outreach(
     contact_name: str, channel: str, action_type: str,
     copy_text: str, send_date: str,
 ) -> str:
@@ -798,12 +760,12 @@ def ktlyst_insert_outreach(
             contact_name, channel, action_type, copy_text, send_date,
         ))
     except Exception as e:
-        logger.error("ktlyst_insert_outreach failed", exc_info=True)
+        logger.error("kipi_insert_outreach failed", exc_info=True)
         raise ToolError(str(e))
 
 
 @mcp.tool()
-def ktlyst_insert_copy_edit(
+def kipi_insert_copy_edit(
     original_text: str, edited_text: str,
     diff_summary: str = "", context: str = "",
 ) -> str:
@@ -821,12 +783,12 @@ def ktlyst_insert_copy_edit(
             original_text, edited_text, edit_date, diff_summary, context,
         ))
     except Exception as e:
-        logger.error("ktlyst_insert_copy_edit failed", exc_info=True)
+        logger.error("kipi_insert_copy_edit failed", exc_info=True)
         raise ToolError(str(e))
 
 
 @mcp.tool()
-def ktlyst_query(query_type: str, days: int = 30) -> str:
+def kipi_query(query_type: str, days: int = 30) -> str:
     """Query metrics data. Types: content, outreach, signals, edits, top_posts.
 
     Args:
@@ -849,12 +811,12 @@ def ktlyst_query(query_type: str, days: int = 30) -> str:
     except ToolError:
         raise
     except Exception as e:
-        logger.error("ktlyst_query failed", exc_info=True)
+        logger.error("kipi_query failed", exc_info=True)
         raise ToolError(str(e))
 
 
 @mcp.tool()
-def ktlyst_daily_metrics(
+def kipi_daily_metrics(
     date: str, posts_published: int = 0, outreach_sent: int = 0,
     responses_received: int = 0, meetings_booked: int = 0,
     energy_level: int = 0, routine_completion_pct: float = 0.0,
@@ -881,12 +843,12 @@ def ktlyst_daily_metrics(
             routine_completion_pct=routine_completion_pct,
         ))
     except Exception as e:
-        logger.error("ktlyst_daily_metrics failed", exc_info=True)
+        logger.error("kipi_daily_metrics failed", exc_info=True)
         raise ToolError(str(e))
 
 
 @mcp.tool()
-def ktlyst_monthly_learnings(days: int = 30) -> str:
+def kipi_monthly_learnings(days: int = 30) -> str:
     """Generate a monthly learnings report from copy edit patterns.
 
     Args:
@@ -895,47 +857,9 @@ def ktlyst_monthly_learnings(days: int = 30) -> str:
     try:
         return json.dumps(metrics_store.generate_monthly_learnings(days=days))
     except Exception as e:
-        logger.error("ktlyst_monthly_learnings failed", exc_info=True)
+        logger.error("kipi_monthly_learnings failed", exc_info=True)
         raise ToolError(str(e))
 
-
-# ============================================================
-# Guide System (on-demand methodology loading)
-# ============================================================
-
-
-@mcp.tool()
-def kipi_guide(topic: str, section: str = "full") -> str:
-    """Load a marketing/growth methodology guide on demand.
-
-    Instead of loading all 32 marketing skills into context, call this
-    to fetch only the guide you need. Use section="methodology" for just
-    the core process, or a specific reference name for templates/examples.
-
-    Args:
-        topic: Guide name. Available: copywriting, copy-editing, seo-audit,
-            programmatic-seo, site-architecture, schema-markup, ai-seo,
-            analytics-tracking, page-cro, form-cro, signup-flow-cro,
-            onboarding-cro, popup-cro, paywall-upgrade-cro, pricing-strategy,
-            launch-strategy, content-strategy, marketing-psychology,
-            marketing-ideas, free-tool-strategy, social-content,
-            competitor-alternatives, cold-email, email-sequence, paid-ads,
-            ad-creative, churn-prevention, referral-program, revops,
-            sales-enablement, product-marketing-context, ab-test-setup
-        section: "full" (methodology + all references), "methodology" (core only),
-            or a specific reference file name (e.g. "scoring-models", "platform-specs")
-    """
-    try:
-        return guide_loader.load(topic, section)
-    except FileNotFoundError as e:
-        raise ToolError(str(e))
-
-
-@mcp.resource("kipi://guides")
-def resource_guides() -> str:
-    """List all available marketing/growth methodology guides."""
-    topics = guide_loader.list_topics()
-    return json.dumps({"guides": topics, "count": len(topics)})
 
 
 # ============================================================

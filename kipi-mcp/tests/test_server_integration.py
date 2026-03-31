@@ -9,8 +9,6 @@ from kipi_mcp.loop_tracker import LoopTracker
 
 
 EXPECTED_TOOLS = [
-    "kipi_guide",
-    "kipi_migrate",
     "kipi_suggest_instance_name",
     "kipi_set_instance_name",
     "kipi_validate",
@@ -38,14 +36,14 @@ EXPECTED_TOOLS = [
     "kipi_bus_to_log",
     "kipi_scan_draft",
     "kipi_audit_morning",
-    "ktlyst_init_db",
-    "ktlyst_insert_content_metrics",
-    "ktlyst_insert_behavioral_signals",
-    "ktlyst_insert_outreach",
-    "ktlyst_insert_copy_edit",
-    "ktlyst_query",
-    "ktlyst_daily_metrics",
-    "ktlyst_monthly_learnings",
+    "kipi_init_db",
+    "kipi_insert_content_metrics",
+    "kipi_insert_behavioral_signals",
+    "kipi_insert_outreach",
+    "kipi_insert_copy_edit",
+    "kipi_query",
+    "kipi_daily_metrics",
+    "kipi_monthly_learnings",
     # Linter tools
     "kipi_voice_lint",
     "kipi_validate_schedule",
@@ -70,7 +68,6 @@ EXPECTED_RESOURCES = [
     "kipi://loops/open",
     "kipi://loops/stats",
     "kipi://backups",
-    "kipi://guides",
 ]
 
 KIPI_MCP_DIR = "/Users/ike/code/kipi-system/kipi-mcp"

@@ -41,17 +41,21 @@ def generate_instance_name(company: str, existing: set[str] | None = None) -> st
     return f"{slug}-{random.randint(1000, 9999)}"
 
 
-def _detect_instance(repo_dir: Path) -> str:
-    """Resolve instance name from env var, .kipi-instance file, or repo dirname."""
+def _detect_instance(base_dir: Path) -> str:
+    """Resolve instance name from active-instance file or KIPI_INSTANCE env var.
+
+    Reads {base_dir}/active-instance. Written by /q-setup.
+    Falls back to 'default' if not configured.
+    """
     env = os.environ.get("KIPI_INSTANCE")
     if env:
         return env
-    marker = repo_dir / ".kipi-instance"
+    marker = base_dir / "active-instance"
     if marker.exists():
         name = marker.read_text().strip()
         if name:
             return name
-    return repo_dir.name
+    return "default"
 
 
 class KipiPaths:
@@ -63,8 +67,10 @@ class KipiPaths:
         instances/{name}/    <- per-instance everything (config + data + state)
         instance-registry.json
 
-    The base directory is resolved from KIPI_PLUGIN_DATA env var.
-    Falls back to ~/.kipi-system if unset.
+    The base directory is resolved from (in order):
+    1. base_dir constructor arg (for tests)
+    2. KIPI_PLUGIN_DATA env var (mapped from CLAUDE_PLUGIN_DATA in .mcp.json)
+    3. ~/.kipi-system fallback (standalone / dev use)
     """
 
     def __init__(
@@ -81,10 +87,9 @@ class KipiPaths:
         self.repo_dir = Path(
             repo_dir
             or os.environ.get("KIPI_PLUGIN_ROOT")
-            or os.environ.get("KIPI_HOME")
             or Path(__file__).resolve().parents[3]
         )
-        self.instance = instance or _detect_instance(self.repo_dir)
+        self.instance = instance or _detect_instance(self._base)
 
     # --- Base directories ---
 

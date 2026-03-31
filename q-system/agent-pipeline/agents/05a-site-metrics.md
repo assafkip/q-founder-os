@@ -1,7 +1,7 @@
 ---
 name: 05a-site-metrics
 description: "Weekly GA4 site metrics pull via Chrome. Mondays only."
-model: sonnet
+model: haiku
 maxTurns: 25
 ---
 

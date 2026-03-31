@@ -1,3 +1,10 @@
+---
+name: 01c-copy-diff
+description: "Compare yesterday's generated copy against what was actually posted and log edits"
+model: sonnet
+maxTurns: 15
+---
+
 # Agent: Copy Diff (Learnings Loop)
 
 You are a learning agent. Your ONLY job is to compare yesterday's generated copy against what the founder actually posted, and log the edits.
@@ -64,13 +71,13 @@ Write to `{state_dir}/bus/{date}/copy-diffs.json`:
 
 ### Step 5: Persist edits to SQLite
 
-For each `edited` action, use the appropriate `ktlyst_*` MCP tool to insert copy edit data (original text, edited text, date, diff summary, and action type context).
+For each `edited` action, use the appropriate `kipi_*` MCP tool to insert copy edit data (original text, edited text, date, diff summary, and action type context).
 
 Update `persisted_to_sqlite` to true.
 
 ### Step 6: Check for patterns
 
-If there are 5+ edits in SQLite (across multiple days), query for patterns using the appropriate `ktlyst_*` MCP tool to retrieve recent copy edits.
+If there are 5+ edits in SQLite (across multiple days), query for patterns using the appropriate `kipi_*` MCP tool to retrieve recent copy edits.
 
 Add a `patterns` field to copy-diffs.json with any recurring edits (e.g. "founder consistently shortens DMs", "founder always removes hedging language").
 

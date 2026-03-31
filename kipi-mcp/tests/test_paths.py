@@ -61,14 +61,6 @@ def test_env_var_plugin_data(monkeypatch, tmp_path):
     assert paths.repo_dir == tmp_path / "r"
 
 
-def test_env_var_kipi_home_fallback(monkeypatch, tmp_path):
-    monkeypatch.delenv("KIPI_PLUGIN_ROOT", raising=False)
-    monkeypatch.setenv("KIPI_HOME", str(tmp_path / "h"))
-    monkeypatch.setenv("KIPI_INSTANCE", "inst")
-    paths = KipiPaths(base_dir=tmp_path)
-    assert paths.repo_dir == tmp_path / "h"
-
-
 def test_all_dirs_collapse_to_one(tmp_path):
     """config_dir, data_dir, state_dir all resolve to the same path."""
     paths = KipiPaths(base_dir=tmp_path, instance="proj")
@@ -76,19 +68,25 @@ def test_all_dirs_collapse_to_one(tmp_path):
     assert paths.config_dir == tmp_path / "instances" / "proj"
 
 
-def test_instance_from_file(tmp_path):
-    repo = tmp_path / "my-cool-project"
-    repo.mkdir()
-    (repo / ".kipi-instance").write_text("cool-project\n")
-    paths = KipiPaths(base_dir=tmp_path / "base", repo_dir=repo)
-    assert paths.instance == "cool-project"
+def test_instance_from_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("KIPI_INSTANCE", "my-project")
+    paths = KipiPaths(base_dir=tmp_path / "base")
+    assert paths.instance == "my-project"
 
 
-def test_instance_falls_back_to_dirname(tmp_path):
-    repo = tmp_path / "my-repo-name"
-    repo.mkdir()
-    paths = KipiPaths(base_dir=tmp_path / "base", repo_dir=repo)
-    assert paths.instance == "my-repo-name"
+def test_instance_from_active_file(monkeypatch, tmp_path):
+    monkeypatch.delenv("KIPI_INSTANCE", raising=False)
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "active-instance").write_text("ktlyst\n")
+    paths = KipiPaths(base_dir=base)
+    assert paths.instance == "ktlyst"
+
+
+def test_instance_falls_back_to_default(monkeypatch, tmp_path):
+    monkeypatch.delenv("KIPI_INSTANCE", raising=False)
+    paths = KipiPaths(base_dir=tmp_path / "base")
+    assert paths.instance == "default"
 
 
 def test_global_dir(tmp_path):
