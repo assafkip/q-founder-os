@@ -25,7 +25,10 @@ from types import SimpleNamespace
 _plugin_data = os.environ.get("KIPI_PLUGIN_DATA")
 if _plugin_data:
     _base = Path(_plugin_data)
-    _instance = os.environ.get("KIPI_INSTANCE", "default")
+    _active_file = _base / "active-instance"
+    _instance = os.environ.get("KIPI_INSTANCE") or (
+        _active_file.read_text().strip() if _active_file.exists() else "default"
+    )
     _inst_dir = _base / "instances" / _instance
     _paths = SimpleNamespace(
         memory_dir=_inst_dir / "memory",

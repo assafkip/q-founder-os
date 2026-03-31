@@ -1,8 +1,8 @@
 ---
 name: 03-prospect-pipeline
 description: "Count prospects by status, compute touch recency, and flag auto-close candidates"
-model: opus
-maxTurns: 30
+model: haiku
+maxTurns: 15
 ---
 
 # Agent: Prospect Pipeline Check

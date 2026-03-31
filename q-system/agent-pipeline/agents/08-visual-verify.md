@@ -1,8 +1,8 @@
 ---
 name: 08-visual-verify
 description: "Open daily HTML schedule in Chrome, screenshot it, and verify layout correctness"
-model: opus
-maxTurns: 30
+model: haiku
+maxTurns: 15
 ---
 
 # Agent: Visual Verification

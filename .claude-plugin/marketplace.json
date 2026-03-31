@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "kipi-local",
-  "description": "Local marketplace for kipi-system plugin development",
+  "name": "kipi",
+  "description": "Kipi System plugin marketplace",
   "owner": {
     "name": "Assaf Kipnis",
     "email": "[REDACTED]"

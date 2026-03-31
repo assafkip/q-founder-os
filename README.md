@@ -80,58 +80,93 @@ Your biological brain forgets 90% of every conversation within a week. This one 
 
 ---
 
-## Three commands to start
+## Setup
 
 ```bash
-npm install -g @anthropic-ai/claude-code
-git clone https://github.com/assafkip/kipi-system.git
-cd kipi-system && claude
+/plugin marketplace add assafkip/kipi-system
+/plugin install kipi-system@kipi
 ```
 
-The system walks you through setup. Who you are, what you're building, how you talk, who you know. Takes about 20 minutes. Then run `/q-morning` and see your first daily action plan.
+Then run `/q-setup` to create your instance. The setup wizard walks you through profile, voice, integrations, and network — takes about 20 minutes. Your data lives at `~/.claude/plugins/data/` in an instance directory keyed by the name you choose during setup.
+
+### Required MCP servers
+
+Install these before using the plugin. The system verifies they're functional during `/q-setup` and at the start of each `/q-morning`.
+
+| Server | Package | What it does |
+|--------|---------|-------------|
+| Google Calendar | `@anthropic/google-calendar-mcp` | Meeting detection, auto-prep |
+| Gmail | `@anthropic/gmail-mcp` | Email monitoring, loop auto-close on reply |
+| Apify | `@apify/actors-mcp-server` | LinkedIn/X/Reddit scraping for lead sourcing |
+
+```bash
+claude mcp add google-calendar -- npx -y @anthropic/google-calendar-mcp
+claude mcp add gmail -- npx -y @anthropic/gmail-mcp
+claude mcp add apify -e APIFY_TOKEN=your_token -- npx -y @apify/actors-mcp-server
+```
+
+### Optional MCP servers
+
+| Server | Package | What it does |
+|--------|---------|-------------|
+| Notion | `@notionhq/notion-mcp-server` | CRM, pipeline, relationship tracking (degrades to local files) |
+| Chrome | Configured in Claude.ai settings | LinkedIn DMs, analytics, interactive browsing |
+
+```bash
+claude mcp add notion -e NOTION_TOKEN=your_token -- npx -y @notionhq/notion-mcp-server
+```
+
+### Interactive setup
+
+The system detects `{{SETUP_NEEDED}}` and walks you through 7 categories:
+
+1. **Who are you?** — name, role, company, stage
+2. **Who do you sell to?** — buyer, pain, alternatives
+3. **What's your positioning?** — one-liner, metaphors, misclassifications, objections
+4. **Your voice** — writing style, words you use/avoid, samples
+5. **Your tools** — which MCP servers to configure
+6. **Your CRM** — Notion database setup or local-only mode
+7. **Your network** — top 10 contacts to seed the system
+
+Takes about 20 minutes. Then run `/q-morning` and see your first daily action plan.
+
+## Daily workflow
+
+1. Run `/q-morning` — gets your calendar, email, CRM, generates the HTML schedule
+2. Open the HTML file — it's your entire day, copy-paste ready
+3. After meetings, paste the transcript — the system auto-debriefs
+4. End of day: `/q-wrap` for health check (auto-chains into `/q-handoff`)
 
 ---
 
 ## Architecture
 
+The system is a Claude Code plugin. Install it once, use it across multiple projects.
+
 ```
-kipi-system/
-├── commands.md              # 35+ step morning routine and all workflows
-├── verify-schedule.py       # Blocks HTML build if required sections missing
-├── session-start.py         # Auto-loads context on first use each day
-├── audit-morning.py         # Catches skipped steps and missing content
-├── token-guard.py           # Stops runaway AI token consumption
-├── preflight.md             # Tool manifest, known issues, and verification rules
-│   # MCP tools (via kipi-mcp server):
-│   #   loop_open/close/escalate/list/stats/touch/prune
-│   #   load_step
-│   #   log_init/log_step/log_add_card/log_deliver_cards
-│
-├── canonical/               # Source of truth (updates from every conversation)
-│   ├── talk-tracks.md       # What to say, tested and tagged by audience
-│   ├── objections.md        # Every pushback, with the response that worked
-│   ├── market-intelligence.md  # Buyer language and competitive signals
-│   └── decisions.md         # Every decision with origin and rationale
-│
-├── my-project/              # Your specific context
-│   ├── relationships.md     # Every person and what you owe them
-│   ├── current-state.md     # What's true today (not vision)
-│   └── progress.md          # Decision log and change history
-│
-├── memory/
-│   ├── working/             # 48-hour scratch (auto-cleaned)
-│   ├── weekly/              # 7-day patterns
-│   ├── monthly/             # Persistent insights
-│   └── graph.jsonl          # Who knows whom, who cares about what
-│
-├── marketing/               # Content templates, guardrails, voice matching
-├── methodology/             # Debrief template, operating modes
-│
-└── output/
-    ├── open-loops.json      # Every tracked loop with escalation state
-    ├── daily-schedule-*.html # Your daily action plan
-    └── morning-log-*.json   # Audit trail
+kipi-system/                         # Plugin root
+├── .claude-plugin/plugin.json       # Plugin manifest
+├── .mcp.json                        # MCP server config
+├── hooks/hooks.json                 # Session start + token guard hooks
+├── skills/                          # All slash commands + behavioral rules
+│   ├── q-morning/SKILL.md           # /q-morning — daily briefing
+│   ├── q-debrief/SKILL.md           # /q-debrief — conversation processing
+│   ├── founder-voice/SKILL.md       # Agent skill — voice enforcement
+│   ├── core-behavioral/SKILL.md     # Agent skill — behavioral rules
+│   └── ...                          # 34 skills total (20 commands, 14 rules)
+├── kipi-mcp/                        # MCP server (loops, logging, validation)
+└── q-system/                        # Agent pipeline + templates
+    ├── agent-pipeline/agents/       # 49 agent prompt files
+    ├── hooks/                       # Hook scripts (token-guard, session-start)
+    ├── marketing/templates/         # Schedule template, email templates
+    └── methodology/                 # Debrief template
 ```
+
+Instance data (your positioning, relationships, voice) lives outside the plugin in platform-appropriate directories, resolved via `kipi://paths`.
+
+### Multi-instance deployment
+
+The plugin supports running across multiple projects via git subtree. Each project embeds kipi-system at `q-system/` and adds its own canonical files, relationships, and voice content. Updates propagate from the skeleton to all instances via `git subtree pull`.
 
 ---
 
@@ -141,28 +176,30 @@ kipi-system/
 |---------------------|---------|
 | Generate your entire day | `/q-morning` |
 | Process a conversation | `/q-debrief` (or just paste a transcript) |
+| Generate a structured deliverable | `/q-create` |
 | Draft a quick email or DM | `/q-draft` |
+| Prioritize next actions | `/q-plan` |
 | Get engagement actions for prospects' posts | `/q-engage` |
-| Plan your week's content | `/q-market-plan` |
 | Update your positioning from new info | `/q-calibrate` |
 | Stress-test your positioning | `/q-reality-check` |
+| Generate marketing content | `/q-market-create` |
+| Review content before publishing | `/q-market-review` |
+| Plan your week's content | `/q-market-plan` |
+| Mark content as published | `/q-market-publish` |
+| Refresh marketing assets | `/q-market-assets` |
+| Marketing pipeline snapshot | `/q-market-status` |
+| Scrape and score content across platforms | `/q-content-intel` |
+| Citation-verified research mode | `/q-research` |
+| Draft investor update email | `/q-investor-update` |
 | End-of-day health check | `/q-wrap` |
 | Save context for next session | `/q-handoff` |
+| First-time setup wizard | `/q-setup` |
 
 ---
 
 ## Connects to
 
-Works standalone with local files. Each integration adds capability:
-
-| Tool | What it adds |
-|------|-------------|
-| Notion | CRM, pipeline, relationship tracking |
-| Google Calendar | Meeting detection, auto-prep |
-| Gmail | Email monitoring, loop auto-close on reply |
-| Apify | LinkedIn/X/Reddit scraping for lead sourcing |
-| Chrome | LinkedIn DMs, analytics, interactive browsing |
-| Slack | Notifications, approval workflows |
+All MCP servers are installed by the user (see Setup). If Notion is unavailable, the system degrades to local file-based CRM.
 
 ---
 
@@ -208,10 +245,10 @@ The founder context is where I built it. Fork it and replace the canonical files
 
 ## Security
 
-- `.env`, credentials, and key files blocked from read/write
-- PreToolUse hooks intercept dangerous operations at runtime
-- No secrets in committed files
-- `rm -rf`, `sudo`, `git push --force` denied by default
+- PreToolUse hook (token-guard) detects runaway tool calls, retry loops, and excessive agent spawning
+- Agent skills enforce no hardcoded secrets, parameterized queries, and least privilege
+- No secrets in committed files — tokens configured per MCP server by the user
+- Session start hook auto-pulls latest code on every session
 
 ---
 

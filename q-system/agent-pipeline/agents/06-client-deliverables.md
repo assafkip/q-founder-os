@@ -1,8 +1,8 @@
 ---
 name: 06-client-deliverables
 description: "Check for upcoming and overdue client commitments and surface them for the daily briefing"
-model: opus
-maxTurns: 30
+model: haiku
+maxTurns: 15
 ---
 
 # Agent: Client Deliverable Check

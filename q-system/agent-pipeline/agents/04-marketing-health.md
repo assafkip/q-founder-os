@@ -1,8 +1,8 @@
 ---
 name: 04-marketing-health
 description: "Check asset freshness, content cadence progress, and flag stale drafts"
-model: opus
-maxTurns: 30
+model: haiku
+maxTurns: 15
 ---
 
 # Agent: Marketing Health Check

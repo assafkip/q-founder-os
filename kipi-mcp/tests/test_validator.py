@@ -48,7 +48,8 @@ def _build_skeleton(tmp_path: Path) -> tuple[KipiPaths, Path]:
     (agents_dir / "_auto-fail-checklist.md").write_text("# Checklist\n")
 
     # Scripts (only hook scripts remain in q-system/)
-    (qsys / "token-guard.py").write_text("# script\n")
+    (qsys / "hooks").mkdir(parents=True, exist_ok=True)
+    (qsys / "hooks" / "token-guard.py").write_text("# script\n")
 
     # Canonical files (user data -> config_dir)
     for fname in [
@@ -67,22 +68,39 @@ def _build_skeleton(tmp_path: Path) -> tuple[KipiPaths, Path]:
     # founder-profile.md (user data -> config_dir)
     paths.founder_profile.write_text("{{SETUP_NEEDED}}\n")
 
-    # Voice skill (repo code)
-    voice = repo_dir / ".claude" / "skills" / "founder-voice"
-    voice.mkdir(parents=True)
-    (voice / "SKILL.md").write_text("# Voice Skill\n")
-    refs = voice / "references"
-    refs.mkdir()
-    (refs / "voice-dna.md").write_text("# Voice DNA\n")
-    (refs / "writing-samples.md").write_text("# Samples\n")
-
-    # CLAUDE.md files (repo code)
-    (repo_dir / "CLAUDE.md").write_text("# Root\n@q-system\n")
-    (q / "CLAUDE.md").write_text("# Q System\n")
+    # skills/ (behavioral rules delivered as agent skills + user-invokable skills)
+    skills_dir = repo_dir / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    # Agent skills (converted from rules, user-invocable: false)
+    for sname in [
+        "core-identity", "core-behavioral", "operating-modes",
+        "file-authority", "language-rules", "marketing-system",
+        "auto-detection", "decision-tagging", "memory-architecture",
+        "preflight-audit", "operator-context",
+        "founder-voice", "audhd-executive-function",
+        "token-discipline",
+    ]:
+        sd = skills_dir / sname
+        sd.mkdir(exist_ok=True)
+        (sd / "SKILL.md").write_text(
+            f"---\ndescription: \"{sname} rule\"\nuser-invocable: false\n"
+            f"paths:\n  - \"**/*\"\n---\n\n# {sname}\n"
+        )
+    # User-invokable skills (q-* commands)
+    for qname in [
+        "q-morning", "q-debrief", "q-draft", "q-engage", "q-wrap",
+        "q-create", "q-plan", "q-setup", "q-calibrate", "q-handoff",
+        "q-market-create", "q-market-review", "q-market-plan",
+        "q-market-publish", "q-market-assets", "q-market-status",
+        "q-content-intel", "q-investor-update", "q-research",
+        "q-reality-check",
+    ]:
+        sd = skills_dir / qname
+        sd.mkdir(exist_ok=True)
+        (sd / "SKILL.md").write_text(f"# /{qname}\n")
 
     # Documentation files (repo code, phase 5)
-    for fname in ["SETUP.md", "UPDATE.md", "CONTRIBUTE.md", "ARCHITECTURE.md"]:
-        (repo_dir / fname).write_text(f"# {fname}\n")
+    (repo_dir / "README.md").write_text("# README\n")
 
     return paths, repo_dir
 
@@ -126,8 +144,6 @@ def _make_instance(
 
     for i in range(1, agent_count + 1):
         _make_agent_file(agents_dir, f"{i:02d}-agent.md")
-
-    (inst_path / "CLAUDE.md").write_text("# Instance\n@q-system import\n")
 
     return {
         "name": name,
@@ -253,12 +269,11 @@ class TestPhase5:
             c for c in result["checks"] if "Documentation" in c["description"]
         ]
         assert all(c["result"] == "pass" for c in doc_checks)
-        assert len(doc_checks) == 4
+        assert len(doc_checks) == 1
 
     def test_phase_5_missing_docs_fail(self, tmp_path):
         paths, repo_dir = _build_skeleton(tmp_path)
-        (repo_dir / "SETUP.md").unlink()
-        (repo_dir / "UPDATE.md").unlink()
+        (repo_dir / "README.md").unlink()
         registry = _make_registry(tmp_path, repo_dir)
         v = Validator(paths, registry)
         result = v.run(phase=5)
@@ -267,7 +282,7 @@ class TestPhase5:
             for c in result["checks"]
             if "Documentation" in c["description"] and c["result"] == "fail"
         ]
-        assert len(doc_fails) == 2
+        assert len(doc_fails) == 1
 
 
 class TestRun:

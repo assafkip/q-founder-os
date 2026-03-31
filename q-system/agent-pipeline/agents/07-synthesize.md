@@ -12,8 +12,8 @@ You are the synthesis agent. You read ALL bus/ outputs from prior agents and pro
 ## Reads
 - `{{BUS_DIR}}/*.json` -- all bus output files from prior agents
 - `{{QROOT}}/marketing/templates/schedule-data-schema.md` -- schedule JSON schema
-- `{{QROOT}}/.claude/skills/audhd-executive-function/SKILL.md` -- actionability rules (if present)
-- `{{QROOT}}/.claude/skills/founder-voice/SKILL.md` -- voice rules for written text (if present)
+- `{{QROOT}}/skills/audhd-executive-function/SKILL.md` -- actionability rules (if enabled)
+- `{{QROOT}}/skills/founder-voice/SKILL.md` -- voice rules for written text
 - `{{BUS_DIR}}/post-visuals.json` -- visual assets for drafted posts
 - `{{DATA_DIR}}/memory/morning-state.md` -- investor update tracker (if present)
 
@@ -21,9 +21,8 @@ You are the synthesis agent. You read ALL bus/ outputs from prior agents and pro
 
 1. Read all JSON files in {{BUS_DIR}}/
 2. Read the schedule schema: {{QROOT}}/marketing/templates/schedule-data-schema.md
-3. Read the AUDHD executive function skill if present: {{QROOT}}/.claude/skills/audhd-executive-function/SKILL.md
-4. Read the voice skill for any written text if present: {{QROOT}}/.claude/skills/founder-voice/SKILL.md
-   - If these skill files don't exist, apply the core principles: every item must be copy-paste ready, have a next physical action, and an energy tag.
+3. Read the AUDHD executive function rule if enabled: {{QROOT}}/skills/audhd-executive-function/SKILL.md
+4. Read the voice rule for any written text: {{QROOT}}/skills/founder-voice/SKILL.md
 
 5. Synthesize everything into a single schedule-data JSON file following the schema exactly.
 

@@ -1,7 +1,7 @@
 ---
 name: 05b-utm-tracking
 description: "Weekly UTM prospect engagement tracking via GA4. Cross-refs clicks with Notion contacts. Mondays only."
-model: sonnet
+model: haiku
 maxTurns: 25
 ---
 

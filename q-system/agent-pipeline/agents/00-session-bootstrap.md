@@ -1,7 +1,7 @@
 ---
 name: 00-session-bootstrap
 description: "Recover state from previous session including action cards, missed debriefs, and loop escalation"
-model: opus
+model: sonnet
 maxTurns: 30
 ---
 
@@ -43,9 +43,24 @@ You are a session bootstrap agent. Your ONLY job is to recover state from the pr
   - warming-tracker.md active prospect count
   - lead-signals.md total lead count
   - pipeline.md prospect counts by stage
-  - state-model.md health indicators
   - morning-state.md last sync date
   - marketing-state.md cadence counts
+
+### 4b. System Health Check
+Evaluate these indicators against actual file state:
+
+**Stall detection** (flag any that match):
+- No debrief logged in >1 week despite meetings on the calendar
+- Multiple `{{NEEDS_UPDATE}}` placeholders in `{{DATA_DIR}}/my-project/relationships.md`
+- Objections in `{{CONFIG_DIR}}/canonical/objections.md` without crisp answers for >2 weeks
+- `{{DATA_DIR}}/my-project/current-state.md` hasn't been modified in >2 weeks
+- Same gap questions in `{{CONFIG_DIR}}/canonical/discovery.md` open for >3 weeks
+
+**Regression detection** (flag any that match):
+- Relationships that were warm have gone cold (last contact >14 days for active contacts)
+- `{{UNVALIDATED}}` marker count increasing across canonical files vs last checksum
+
+If stalls or regressions are detected, include them in the output with specific evidence and a recommended action (usually `/q-calibrate`).
 
 ### 5. Monthly Checks (1st of month ONLY)
 If today is the 1st of the month:
@@ -62,7 +77,11 @@ If today is the 1st of the month:
   "missed_debriefs": [{"name": "...", "meeting_date": "..."}],
   "loop_stats": {"open": 0, "L0": 0, "L1": 0, "L2": 0, "L3": 0},
   "level2_loops": [{"id": "...", "target": "...", "age_days": 0, "recommendation": "..."}],
-  "checksums": {"warming_active": 0, "leads_total": 0, "pipeline_by_stage": {}, "health": {}, "last_sync": "", "cadence": {}},
+  "checksums": {"warming_active": 0, "leads_total": 0, "pipeline_by_stage": {}, "last_sync": "", "cadence": {}},
+  "health": {
+    "stalls": [{"indicator": "...", "evidence": "...", "recommendation": "..."}],
+    "regressions": [{"indicator": "...", "evidence": "...", "recommendation": "..."}]
+  },
   "monthly_audit": null,
   "stale_pending_items": []
 }

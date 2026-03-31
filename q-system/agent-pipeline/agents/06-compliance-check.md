@@ -1,7 +1,7 @@
 ---
 name: 06-compliance-check
 description: "Check all generated content against canonical positioning rules and flag violations"
-model: opus
+model: sonnet
 maxTurns: 30
 ---
 

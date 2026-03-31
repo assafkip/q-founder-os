@@ -30,7 +30,7 @@ CANONICAL_FILES = [
     "verticals.md",
 ]
 
-DOC_FILES = ["SETUP.md", "UPDATE.md", "CONTRIBUTE.md", "ARCHITECTURE.md"]
+DOC_FILES = ["README.md"]
 
 
 class Validator:
@@ -184,7 +184,7 @@ class Validator:
         self._check(
             checks,
             "token-guard.py exists",
-            (qsys / "token-guard.py").exists(),
+            (qsys / "hooks" / "token-guard.py").exists(),
         )
 
         # Migrated modules live in kipi_mcp package
@@ -217,46 +217,38 @@ class Validator:
                 "SETUP_NEEDED" in content,
             )
 
-        # Gate 1.4 - Voice skill
-        voice_dir = self.repo_dir / ".claude" / "skills" / "founder-voice"
+        # Gate 1.4 - Voice & AUDHD agent skills (delivered via skills/)
+        skills_dir = self.repo_dir / "skills"
         self._check(
             checks,
-            "founder-voice/SKILL.md exists",
-            (voice_dir / "SKILL.md").exists(),
+            "founder-voice skill exists",
+            (skills_dir / "founder-voice" / "SKILL.md").exists(),
         )
-        refs_dir = voice_dir / "references"
-        for fname in ["voice-dna.md", "writing-samples.md"]:
-            self._check(
-                checks,
-                f"voice {fname} exists",
-                (refs_dir / fname).exists(),
-            )
-        if voice_dir.is_dir():
-            instance_hits = self._grep_dir(
-                voice_dir, [r"Assaf", r"KTLYST", r"ktlyst"]
-            )
-            self._check(
-                checks,
-                "No instance-specific content in voice skill",
-                len(instance_hits) == 0,
-                detail=", ".join(instance_hits) if instance_hits else None,
-            )
+        self._check(
+            checks,
+            "audhd-executive-function skill exists",
+            (skills_dir / "audhd-executive-function" / "SKILL.md").exists(),
+        )
 
-        # Gate 1.5 - CLAUDE.md
-        root_claude = self.repo_dir / "CLAUDE.md"
-        q_claude = self.repo_dir / "q-system" / "CLAUDE.md"
-        self._check(checks, "Root CLAUDE.md exists", root_claude.exists())
-        self._check(checks, "q-system/CLAUDE.md exists", q_claude.exists())
-        if q_claude.exists():
-            hits = self._grep_dir(
-                q_claude.parent, KTLYST_PATTERNS, exclude_files=None
-            )
-            q_claude_hits = [h for h in hits if Path(h).name == "CLAUDE.md"]
+        # Gate 1.5 - Behavioral rules as agent skills (delivered via skills/, not CLAUDE.md)
+        self._check(checks, "skills/ directory exists", skills_dir.is_dir())
+        if skills_dir.is_dir():
+            skill_dirs = [
+                d for d in skills_dir.iterdir()
+                if d.is_dir() and (d / "SKILL.md").exists()
+            ]
             self._check(
                 checks,
-                "No KTLYST refs in q-system/CLAUDE.md",
-                len(q_claude_hits) == 0,
-                detail=", ".join(q_claude_hits) if q_claude_hits else None,
+                "At least 28 skill directories in skills/",
+                len(skill_dirs) >= 28,
+                detail=f"found {len(skill_dirs)}",
+            )
+            skill_hits = self._grep_dir(skills_dir, KTLYST_PATTERNS)
+            self._check(
+                checks,
+                "No KTLYST refs in skills/",
+                len(skill_hits) == 0,
+                detail=", ".join(skill_hits) if skill_hits else None,
             )
 
         # Full skeleton sweep
@@ -324,19 +316,8 @@ class Validator:
                     detail=f"found {len(md_files)}",
                 )
 
-            claude_md = inst_path / "CLAUDE.md"
-            self._check(
-                checks,
-                f"[{name}] CLAUDE.md exists",
-                claude_md.exists(),
-            )
-            if claude_md.exists():
-                content = claude_md.read_text(errors="replace")
-                self._check(
-                    checks,
-                    f"[{name}] CLAUDE.md imports skeleton (@q-system)",
-                    "@q-system" in content,
-                )
+            # Instance data validation (CLAUDE.md no longer required —
+            # behavioral rules are delivered via plugin skills/)
 
     def _phase_3(self, checks: list) -> None:
         for entry in self.registry.list_eliminated():
@@ -367,19 +348,8 @@ class Validator:
                 agents_dir.is_dir(),
             )
 
-            claude_md = inst_path / "CLAUDE.md"
-            self._check(
-                checks,
-                f"[{name}] Phase 4: CLAUDE.md exists",
-                claude_md.exists(),
-            )
-            if claude_md.exists():
-                content = claude_md.read_text(errors="replace")
-                self._check(
-                    checks,
-                    f"[{name}] Phase 4: skeleton import present",
-                    "@q-system" in content,
-                )
+            # Instance CLAUDE.md no longer required — behavioral rules
+            # are delivered via plugin skills/
 
     def _phase_5(self, checks: list) -> None:
         for fname in DOC_FILES:

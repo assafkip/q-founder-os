@@ -1,8 +1,8 @@
 ---
 name: 00-preflight
 description: "Verify all MCP tools and required files are available before morning routine"
-model: opus
-maxTurns: 30
+model: haiku
+maxTurns: 15
 ---
 
 # Agent: Preflight Check

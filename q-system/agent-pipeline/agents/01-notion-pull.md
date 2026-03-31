@@ -1,8 +1,8 @@
 ---
 name: 01-notion-pull
 description: "Fetch contacts, actions, pipeline, and LinkedIn tracker data from Notion CRM"
-model: opus
-maxTurns: 30
+model: haiku
+maxTurns: 15
 ---
 
 # Agent: Notion Pull

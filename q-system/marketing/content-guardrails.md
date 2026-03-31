@@ -6,7 +6,7 @@
 
 ### 1. Voice Check
 - [ ] Sounds like the founder (not generic marketing copy)
-- [ ] Zero banned AI words (see founder-voice skill)
+- [ ] Zero banned AI words (see founder-voice rule)
 - [ ] No hedging language
 - [ ] Sentence length varies
 

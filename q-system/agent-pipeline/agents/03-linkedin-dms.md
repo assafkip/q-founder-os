@@ -1,8 +1,8 @@
 ---
 name: 03-linkedin-dms
 description: "Read LinkedIn DMs and connection accepts via Chrome and write structured data to disk"
-model: opus
-maxTurns: 30
+model: haiku
+maxTurns: 15
 ---
 
 # Agent: LinkedIn DMs

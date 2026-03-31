@@ -1,8 +1,8 @@
 ---
 name: 01-calendar-pull
 description: "Fetch calendar events for the next 7 days via Google Calendar MCP"
-model: opus
-maxTurns: 30
+model: haiku
+maxTurns: 15
 ---
 
 # Agent: Calendar Pull
