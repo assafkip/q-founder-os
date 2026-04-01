@@ -12,11 +12,11 @@ You are a marketing health agent. Your ONLY job is to check asset freshness, con
 ## Reads
 - `{{DATA_DIR}}/memory/marketing-state.md` -- cadence tracking, asset freshness dates, publish log
 - Harvest data: `kipi_get_harvest("notion-pipeline", days=1)` -- Content Pipeline DB (drafts and scheduled items)
-- Bus file: `{{BUS_DIR}}/publish-reconciliation.json` -- today's reconciliation data (if available)
+- `kipi_get_harvest("agent:publish-recon", days=1)` -- today's reconciliation data (if available)
 - `{{CONFIG_DIR}}/marketing/content-themes.md` -- current theme rotation
 
 ## Writes
-- `{{BUS_DIR}}/marketing-health.json`
+- `kipi_store_harvest("agent:marketing-health", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 

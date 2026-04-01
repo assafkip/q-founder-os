@@ -16,7 +16,7 @@ You are an X/Twitter activity agent. Your ONLY job is to pull the founder's rece
 - `{{AGENTS_DIR}}/_auto-fail-checklist.md` -- copy rules
 
 ## Writes
-- `{{BUS_DIR}}/x-activity.json`
+- `kipi_store_harvest("agent:x-activity", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 

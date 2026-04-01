@@ -10,13 +10,13 @@ maxTurns: 15
 You are a Notion update agent. Your ONLY job is to refresh the Daily Actions and Daily Posts pages in Notion with today's items.
 
 ## Reads
-- `{{BUS_DIR}}/hitlist.json` - engagement actions
-- `{{BUS_DIR}}/signals.json` - post drafts
-- `{{BUS_DIR}}/founder-brand-post.json` - founder brand post (if exists, Wednesdays)
+- `kipi_get_harvest("agent:engagement-hitlist")` - engagement actions
+- `kipi_get_harvest("agent:signals-content")` - post drafts
+- `kipi_get_harvest("agent:founder-brand")` - founder brand post (if exists, Wednesdays)
 - `{{DATA_DIR}}/my-project/notion-ids.md` - page IDs for Daily Actions and Daily Posts pages
 
 ## Writes
-- `{{BUS_DIR}}/daily-checklists.json` (log of what was updated)
+- `kipi_store_harvest("agent:daily-checklists", results_json, "{{RUN_ID}}")` (log of what was updated)
 
 ## Instructions
 
@@ -36,7 +36,7 @@ Use `mcp__notion_api__*` tools.
 1. Append today's post drafts as to_do blocks with the actual draft text
 2. Include platform label: "[LinkedIn]", "[X]", "[Reddit]"
 
-### Write log to `{{BUS_DIR}}/daily-checklists.json`:
+### Write log to `kipi_store_harvest("agent:daily-checklists", results_json, "{{RUN_ID}}")`:
 
 ```json
 {

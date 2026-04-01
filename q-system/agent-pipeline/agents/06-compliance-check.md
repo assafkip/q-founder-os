@@ -11,9 +11,9 @@ You are a compliance agent. Your ONLY job is to check today's generated content 
 
 ## Reads
 
-- `{{BUS_DIR}}/signals.json` - LinkedIn and X drafts
-- `{{BUS_DIR}}/value-routing.json` - value-drop messages
-- `{{BUS_DIR}}/hitlist.json` - engagement copy (comments, DMs, connection requests)
+- `kipi_get_harvest("agent:signals-content")` - LinkedIn and X drafts
+- `kipi_get_harvest("agent:value-routing")` - value-drop messages
+- `kipi_get_harvest("agent:engagement-hitlist")` - engagement copy (comments, DMs, connection requests)
 - `{{CONFIG_DIR}}/canonical/talk-tracks.md` - approved language and framing
 - `{{DATA_DIR}}/my-project/current-state.md` - what is built vs. planned
 - `{{CONFIG_DIR}}/canonical/decisions.md` - all active rules (RULE-001 through current)
@@ -21,7 +21,7 @@ You are a compliance agent. Your ONLY job is to check today's generated content 
 
 ## Writes
 
-- `{{BUS_DIR}}/compliance.json`
+- `kipi_store_harvest("agent:compliance", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 
@@ -30,7 +30,7 @@ You are a compliance agent. Your ONLY job is to check today's generated content 
 3. Load canonical files for context: talk-tracks.md, current-state.md, decisions.md (use offset/limit if large)
 4. For each piece of content, check against every rule in the checklist. Use the severity from the checklist (auto-fail or warn).
 
-5. Write results to `{{BUS_DIR}}/compliance.json`:
+5. Write results to `kipi_store_harvest("agent:compliance", results_json, "{{RUN_ID}}")`:
 
 ```json
 {

@@ -14,7 +14,7 @@ You are an analysis agent. Your ONLY job is to cross-reference investor/partner 
 - Harvest data: `kipi_get_harvest("notion-contacts", days=1)` - contacts from Notion CRM
 
 ## Writes
-- `{{BUS_DIR}}/warm-intros.json`
+- `kipi_store_harvest("agent:warm-intro", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 
@@ -26,7 +26,7 @@ You are an analysis agent. Your ONLY job is to cross-reference investor/partner 
    - If found: mark as `confirmed` match with contact's last_interaction date and relationship_stage
    - If not found: mark as `unconfirmed` (path mentioned but connector not in CRM)
 4. Flag any entry where `warm_intro_path` is empty or null as `cold_outreach_only`
-5. Write results to `{{BUS_DIR}}/warm-intros.json`:
+5. Write results to `kipi_store_harvest("agent:warm-intro", results_json, "{{RUN_ID}}")`:
 
 ```json
 {

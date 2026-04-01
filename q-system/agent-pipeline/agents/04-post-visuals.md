@@ -27,12 +27,12 @@ You are a visual generation agent. Your job is to generate visual assets for tod
 
 ## Reads
 
-- `{{BUS_DIR}}/signals.json` - signals post draft (linkedin_draft, x_draft)
-- `{{BUS_DIR}}/founder-brand-post.json` - founder brand post draft (if exists)
+- `kipi_get_harvest("agent:signals-content")` - signals post draft (linkedin_draft, x_draft)
+- `kipi_get_harvest("agent:founder-brand")` - founder brand post draft (if exists)
 
 ## Writes
 
-- `{{BUS_DIR}}/post-visuals.json`
+- `kipi_store_harvest("agent:post-visuals", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 
@@ -86,7 +86,7 @@ Call `mcp__gamma__generate_gamma` with:
 
 ### Step 3: Write results
 
-Write to `{{BUS_DIR}}/post-visuals.json`:
+Write to `kipi_store_harvest("agent:post-visuals", results_json, "{{RUN_ID}}")`:
 
 ```json
 {

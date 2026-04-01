@@ -16,7 +16,7 @@ You are a content intelligence agent. Your ONLY job is to scrape the founder's o
 - `{{DATA_DIR}}/memory/marketing-state.md` -- last content intel date
 
 ## Writes
-- `{{BUS_DIR}}/content-intel.json`
+- `kipi_store_harvest("agent:content-intel", results_json, "{{RUN_ID}}")`
 - Updates `{{CONFIG_DIR}}/canonical/content-intelligence.md` (append new analysis)
 
 ## Instructions

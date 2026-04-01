@@ -16,7 +16,7 @@ You are a client deliverable agent. Your ONLY job is to check for upcoming and o
 - Bootstrap data is available from `kipi_morning_init` result (passed by orchestrator via template variable or context)
 
 ## Writes
-- `{{BUS_DIR}}/client-deliverables.json`
+- `kipi_store_harvest("agent:client-deliverables", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 

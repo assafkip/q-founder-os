@@ -38,7 +38,7 @@ Read the `kipi://paths` MCP resource to get resolved directories.
 
 9. **Build HTML** via `kipi_build_schedule` MCP tool.
 
-10. **Audit** via `kipi_bus_to_log` then `kipi_audit_morning`. Show results. NON-OPTIONAL.
+10. **Audit** via `kipi_audit_morning`. Show results. NON-OPTIONAL.
 
 11. **Backup** via `kipi_backup`. Report archive path.
 
@@ -62,4 +62,4 @@ Read the `kipi://paths` MCP resource to get resolved directories.
 `kipi_gate_check`, `kipi_deliverables_check`,
 `log_init`, `log_step`, `log_add_card`, `log_deliver_cards`, `log_checksum`, `log_verify`,
 `loop_escalate`, `kipi://loops/open`, `kipi://loops/stats`,
-`kipi_build_schedule`, `kipi_bus_to_log`, `kipi_audit_morning`, `kipi_backup`
+`kipi_build_schedule`, `kipi_audit_morning`, `kipi_backup`

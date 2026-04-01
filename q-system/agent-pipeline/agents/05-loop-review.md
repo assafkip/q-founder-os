@@ -11,11 +11,11 @@ You are a loop escalation agent. Your ONLY job is to check for stale open loops 
 
 ## Reads
 - Harvest data: `kipi_get_harvest("notion-actions", days=1)` - actions with Due dates and Status
-- Bus file: `{{BUS_DIR}}/prospect-pipeline.json` - prospect pipeline with touch counts
+- `kipi_get_harvest("agent:prospect-pipeline", days=1)` - prospect pipeline with touch counts
 - `{{AGENTS_DIR}}/_cadence-config.md` - auto-close timing (breakup/park threshold)
 
 ## Writes
-- `{{BUS_DIR}}/loop-review.json`
+- `kipi_store_harvest("agent:loop-review", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 
@@ -27,7 +27,7 @@ You are a loop escalation agent. Your ONLY job is to check for stale open loops 
 3. For each stale loop:
    - Classify: Level 2 (7-13 days) or Level 3 (14+ days)
    - Recommend: "close" (mark Done, won't happen), "park" (move to Someday), "escalate" (needs founder decision), or "force-close" (auto-Passed per cadence rule)
-4. Write results to `{{BUS_DIR}}/loop-review.json`:
+4. Write results to `kipi_store_harvest("agent:loop-review", results_json, "{{RUN_ID}}")`:
 
 ```json
 {

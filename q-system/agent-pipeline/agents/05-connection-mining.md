@@ -18,7 +18,7 @@ You are a connection mining agent. Your ONLY job is to scan the founder's Linked
 - `{{AGENTS_DIR}}/_auto-fail-checklist.md` -- copy rules
 
 ## Writes
-- `{{BUS_DIR}}/connection-mining.json`
+- `kipi_store_harvest("agent:connection-mining", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 
