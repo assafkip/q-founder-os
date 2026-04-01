@@ -20,6 +20,8 @@ Paths, bus directory creation, and cleanup are handled by `kipi_morning_init`.
    - **opus**: synthesis only (05-engagement-hitlist, 07-synthesize)
 3. Launch independent agents in ONE message (parallel). Wait when phase depends on previous output.
 4. Log each phase completion via `log_step` MCP tool with step_id format: `phase_N_description`.
+5b. **Agent timing:** Before spawning each agent, note the current time. After it completes, call `kipi_log_agent_metric` with agent_name, phase, model, started_at, completed_at, and status. This builds performance data for optimization.
+5c. **Agent counting:** Track how many agents you have spawned. Keep a running count.
 5. **Tool permissions per agent** (principle of least privilege):
    - **Read-only agents** (analysis, scoring, compliance): Read, Glob, Grep, MCP reads only. No Edit, Write, Bash.
      - Applies to: 02-meeting-prep, 02-warm-intro-match, 05-temperature-scoring, 05-loop-review, 06-compliance-check, 06-positioning-check, 00g-monthly-checks, 00h-memory-review, 01d-graph-kb, 03-prospect-pipeline, 04-marketing-health
@@ -29,6 +31,13 @@ Paths, bus directory creation, and cleanup are handled by `kipi_morning_init`.
      - Applies to: 07-synthesize, 07b-outreach-queue, 08-visual-verify, 09-notion-push, 10-daily-checklists
 
 ## Phase Sequence
+
+### Session Resume Detection
+
+After calling `kipi_morning_init`, check `result.resume_from`. If it contains a handoff:
+- Show the founder: "Resuming from previous session. Phases {phases_completed} already done. Continuing from Phase {next_phase}."
+- Skip all completed phases. Jump directly to the next incomplete phase.
+- The harvest data and agent outputs from the previous session are still in SQLite — no need to re-run.
 
 ### Phase 0: Init (deterministic Python -- zero tokens)
 
@@ -124,6 +133,11 @@ THEN sequential:
 - 05-engagement-hitlist.md (opus) -- reads all Phase 4 outputs + harvest data, writes hitlist.json
 
 Log: `log_step(date, "phase_4_pipeline", "done")`
+
+**CONTEXT CHECK:** If you have spawned 15+ agents so far, consider splitting:
+- Tell the founder: "Phase 4 complete. I've spawned {N} agents. Context may be getting full. Want to continue or save progress and resume in a new session?"
+- If splitting: call `kipi_session_handoff` with run_id and phases_completed="0,0.6,1,2,3,4". Tell the founder to start a new session and run `/q-morning` — it will auto-detect the handoff and resume from Phase 5.
+- If continuing: proceed normally.
 
 ### Phase 5: Compliance (3 agents, PARALLEL)
 - 06-compliance-check.md (sonnet) -- reads bus/ content + canonical digest
