@@ -59,6 +59,14 @@ EXPECTED_TOOLS = [
     "kipi_crack_detect",
     # Schema generator
     "kipi_generate_schema",
+    # Harvest tools
+    "kipi_harvest",
+    "kipi_store_harvest",
+    "kipi_get_harvest",
+    "kipi_harvest_status",
+    "kipi_harvest_summary",
+    "kipi_harvest_cleanup",
+    "kipi_approve_apify_budget",
 ]
 
 EXPECTED_RESOURCES = [

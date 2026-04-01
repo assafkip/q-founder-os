@@ -1,0 +1,18 @@
+name: linkedin-analytics
+method: chrome
+chrome:
+  actions_file: linkedin-analytics.md
+  throttle_ms: 3000
+schedule:
+  frequency: daily
+output:
+  full_text: false
+  schema:
+    post_url: string
+    impressions: int
+    likes: int
+    comments: int
+    reposts: int
+persist:
+  method: kipi_insert_content_metrics
+on_error: skip

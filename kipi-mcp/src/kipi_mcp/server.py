@@ -27,6 +27,8 @@ from kipi_mcp.metrics_store import MetricsStore
 from kipi_mcp.linter import Linter
 from kipi_mcp.scorer import Scorer
 from kipi_mcp.schema_gen import SchemaGenerator
+from kipi_mcp.harvest_store import HarvestStore
+from kipi_mcp.source_registry import SourceRegistry
 
 paths = KipiPaths()
 paths.ensure_dirs()
@@ -82,6 +84,14 @@ metrics_store.init_db()
 linter = Linter()
 scorer = Scorer()
 schema_generator = SchemaGenerator()
+
+harvest_store = HarvestStore(db_path=paths.harvest_db)
+harvest_store.init_db()
+
+source_registry = SourceRegistry(
+    plugin_sources_dir=paths.sources_dir,
+    instance_sources_dir=paths.instance_sources_dir,
+)
 
 try:
     from kipi_mcp.validator import Validator
@@ -1118,6 +1128,199 @@ def kipi_generate_schema(page_type: str, data_json: str) -> str:
         raise ToolError(str(e))
     except Exception as e:
         logger.error("kipi_generate_schema failed", exc_info=True)
+        raise ToolError(str(e))
+
+
+# ============================================================
+# Harvest Tools (7 tools)
+# ============================================================
+
+
+@mcp.tool()
+async def kipi_harvest(
+    sources: str = "all",
+    mode: str = "incremental",
+    methods: str = "all",
+) -> str:
+    """Run data harvest from configured sources.
+
+    For http/apify/local sources: executes in Python (zero tokens).
+    For chrome/mcp sources: returns generated agent prompts to spawn.
+
+    Args:
+        sources: "all" or comma-separated source names.
+        mode: "incremental" (use cursors), "full" (ignore cursors), or "resume" (continue last run).
+        methods: "all" or filter to "http", "apify", "chrome", "mcp", "local".
+    """
+    try:
+        from kipi_mcp.harvest_orchestrator import HarvestOrchestrator
+        orchestrator = HarvestOrchestrator(
+            store=harvest_store,
+            registry=source_registry,
+            apify_token=os.environ.get("APIFY_TOKEN"),
+        )
+        result = await orchestrator.harvest(
+            sources=sources, mode=mode, methods=methods,
+            env=dict(os.environ),
+        )
+        return json.dumps({
+            "run_id": result.run_id,
+            "python_results": result.python_results,
+            "chrome_agent_prompt": result.chrome_agent_prompt,
+            "mcp_agent_prompt": result.mcp_agent_prompt,
+            "skipped": result.skipped,
+            "errors": result.errors,
+        })
+    except Exception as e:
+        logger.error("kipi_harvest failed", exc_info=True)
+        raise ToolError(str(e))
+
+
+@mcp.tool()
+def kipi_store_harvest(source_name: str, records_json: str, run_id: str = "") -> str:
+    """Store harvested records from an agent.
+
+    Called by Chrome/MCP harvest agents after extracting data.
+    Each record should have a unique key field (url, id, etc).
+
+    Args:
+        source_name: Source identifier (e.g. "linkedin-feed").
+        records_json: JSON array of record objects.
+        run_id: The harvest run ID this data belongs to.
+    """
+    try:
+        records = json.loads(records_json)
+        stored = 0
+        deduped = 0
+        for record in records:
+            key = record.get("url") or record.get("id") or record.get("record_key", "")
+            summary = json.dumps({k: v for k, v in record.items() if k != "body_text" and k != "full_text"})
+            body = record.get("body_text") or record.get("full_text") or record.get("text")
+            result = harvest_store.store_record(
+                run_id=run_id,
+                source_name=source_name,
+                record_key=str(key),
+                summary_json=summary,
+                body_text=body,
+            )
+            if result is None:
+                break
+            if result.get("deduped"):
+                deduped += 1
+            else:
+                stored += 1
+        return json.dumps({"stored": stored, "deduped": deduped, "source": source_name})
+    except json.JSONDecodeError as e:
+        raise ToolError(f"Invalid JSON: {e}")
+    except Exception as e:
+        logger.error("kipi_store_harvest failed", exc_info=True)
+        raise ToolError(str(e))
+
+
+@mcp.tool()
+def kipi_get_harvest(
+    source_name: str,
+    days: int = 1,
+    include_body: bool = False,
+    limit: int = 50,
+    after_id: int = 0,
+) -> str:
+    """Get harvested records for a source.
+
+    Returns summary data by default. Set include_body=True for full text
+    (decompresses from storage -- slower, more tokens).
+
+    Args:
+        source_name: Source to query (e.g. "linkedin-feed").
+        days: Look back N days (default 1).
+        include_body: Include full text body (default False).
+        limit: Max records to return (default 50).
+        after_id: Return records with id > this value (for pagination).
+    """
+    try:
+        records = harvest_store.get_records(
+            source_name=source_name,
+            days=days,
+            include_body=include_body,
+            limit=limit,
+            after_id=after_id,
+        )
+        return json.dumps({"records": records, "count": len(records), "source": source_name})
+    except Exception as e:
+        logger.error("kipi_get_harvest failed", exc_info=True)
+        raise ToolError(str(e))
+
+
+@mcp.tool()
+def kipi_harvest_status(run_id: str = "") -> str:
+    """Check harvest run status.
+
+    Args:
+        run_id: Specific run ID. If empty, returns latest run.
+    """
+    try:
+        if run_id:
+            run = harvest_store.get_run(run_id)
+        else:
+            run = harvest_store.get_latest_run()
+        if not run:
+            return json.dumps({"error": "no_runs_found"})
+        return json.dumps(run)
+    except Exception as e:
+        logger.error("kipi_harvest_status failed", exc_info=True)
+        raise ToolError(str(e))
+
+
+@mcp.tool()
+def kipi_harvest_summary(run_id: str = "") -> str:
+    """Get record counts per source for a harvest run.
+
+    Args:
+        run_id: Specific run ID. If empty, uses latest run.
+    """
+    try:
+        if not run_id:
+            latest = harvest_store.get_latest_run()
+            if not latest:
+                return json.dumps({"error": "no_runs_found"})
+            run_id = latest["run_id"]
+        summary = harvest_store.harvest_summary(run_id)
+        return json.dumps(summary)
+    except Exception as e:
+        logger.error("kipi_harvest_summary failed", exc_info=True)
+        raise ToolError(str(e))
+
+
+@mcp.tool()
+def kipi_harvest_cleanup(days: int = 7) -> str:
+    """Delete harvest data older than N days.
+
+    Bodies are cascade-deleted with their parent records.
+
+    Args:
+        days: Age threshold in days (default 7).
+    """
+    try:
+        return json.dumps(harvest_store.cleanup(days))
+    except Exception as e:
+        logger.error("kipi_harvest_cleanup failed", exc_info=True)
+        raise ToolError(str(e))
+
+
+@mcp.tool()
+def kipi_approve_apify_budget(month: str, extra: float) -> str:
+    """Approve additional Apify spend for a month.
+
+    Call this when a harvest is blocked by budget limits.
+
+    Args:
+        month: Month in YYYY-MM format (e.g. "2026-04").
+        extra: Additional dollars to approve.
+    """
+    try:
+        return json.dumps(harvest_store.approve_extra(month, extra))
+    except Exception as e:
+        logger.error("kipi_approve_apify_budget failed", exc_info=True)
         raise ToolError(str(e))
 
 

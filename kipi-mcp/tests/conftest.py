@@ -89,3 +89,22 @@ def tmp_q_system(tmp_path):
     (q / "agent-pipeline" / "agents").mkdir(parents=True)
     (q / "agent-pipeline" / "templates").mkdir(parents=True)
     return q
+
+
+@pytest.fixture
+def tmp_harvest_store(tmp_path):
+    """Create a HarvestStore backed by a temp DB."""
+    from kipi_mcp.harvest_store import HarvestStore
+    db = tmp_path / "metrics.db"
+    store = HarvestStore(db_path=db)
+    store.init_db()
+    return store
+
+
+@pytest.fixture
+def tmp_sources_dir(tmp_path):
+    """Create a temporary sources directory with sample YAML configs."""
+    sources = tmp_path / "sources"
+    sources.mkdir()
+    (sources / "chrome").mkdir()
+    return sources
