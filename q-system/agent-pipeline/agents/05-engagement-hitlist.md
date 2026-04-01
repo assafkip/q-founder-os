@@ -11,8 +11,8 @@ You are a copy generation agent. Your job is to produce a copy-paste-ready engag
 
 ## Reads
 
-- `{{QROOT}}/skills/founder-voice/SKILL.md` -- voice rules for all drafted copy (READ FIRST)
-- `{{QROOT}}/skills/audhd-executive-function/SKILL.md` -- friction-ordering, copy-paste-only, energy tags (READ FIRST)
+- IF {{VOICE_ENABLED}} is true: Read `{{QROOT}}/skills/founder-voice/SKILL.md` -- voice rules for all drafted copy (READ FIRST)
+- IF {{AUDHD_ENABLED}} is true: Read `{{QROOT}}/skills/audhd-executive-function/SKILL.md` -- friction-ordering, copy-paste-only, energy tags (READ FIRST)
 - `kipi_get_harvest("agent:temperature-scoring", days=1)` - prospect temperature scores
 - `kipi_get_harvest("agent:lead-scoring", days=1)` - qualified leads from today's sourcing
 - Harvest data: `kipi_get_harvest("linkedin-feed", days=2, include_body=true)` - recent posts from tracked prospects

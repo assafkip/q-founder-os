@@ -32,14 +32,14 @@ Context data (read only if needed):
 
 Reference files:
 - `{{QROOT}}/marketing/templates/schedule-data-schema.md` -- schedule JSON schema (READ FIRST)
-- `{{QROOT}}/skills/audhd-executive-function/SKILL.md` -- actionability rules
-- `{{QROOT}}/skills/founder-voice/SKILL.md` -- voice rules for written text
+- IF {{AUDHD_ENABLED}} is true: Read `{{QROOT}}/skills/audhd-executive-function/SKILL.md` -- actionability rules
+- IF {{VOICE_ENABLED}} is true: Read `{{QROOT}}/skills/founder-voice/SKILL.md` -- voice rules for written text
 - `{{DATA_DIR}}/memory/morning-state.md` -- investor update tracker (if present)
 
 ## Instructions
 
 1. **Read the schema first**: `{{QROOT}}/marketing/templates/schedule-data-schema.md`. This defines the exact JSON structure, field names, and section IDs. Follow it exactly.
-2. Read AUDHD and voice rules.
+2. If {{AUDHD_ENABLED}} is true, read AUDHD rules. If {{VOICE_ENABLED}} is true, read voice rules.
 3. Call `kipi_get_harvest` for each source above. If a source returns 0 records, skip it.
 
 ## Section ID Mapping (REQUIRED for verification)
