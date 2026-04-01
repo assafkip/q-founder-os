@@ -20,7 +20,7 @@ Read `{{AGENTS_DIR}}/_cadence-config.md` for posting frequency. Only draft conte
 
 ## Writes
 
-- `{{BUS_DIR}}/signals.json`
+- `kipi_store_harvest("agent:signals-content", results_json, "{{RUN_ID}}")`
 
 ## What to search for
 
@@ -61,7 +61,7 @@ Pick the single most actionable signal for today's posts.
    - If the signal has enough depth for a longer piece, draft a 2-sentence article pitch (title + angle).
    - If not, set to null.
 
-4. Write results to `{{BUS_DIR}}/signals.json`:
+4. Write results to `kipi_store_harvest("agent:signals-content", results_json, "{{RUN_ID}}")`:
 
 ```json
 {

@@ -10,16 +10,16 @@ maxTurns: 10
 You are a merge agent. Your ONLY job is to combine all pending outreach actions into a single prioritized queue.
 
 ## Reads
-- `{state_dir}/bus/{date}/hitlist.json` - engagement actions (comments, DMs, connection requests)
-- `{state_dir}/bus/{date}/value-routing.json` - value-drop messages
-- `{state_dir}/bus/{date}/pipeline-followup.json` - overdue follow-ups
+- `kipi_get_harvest("agent:engagement-hitlist", days=1)` - engagement actions (comments, DMs, connection requests)
+- `kipi_get_harvest("agent:value-routing", days=1)` - value-drop messages
+- `kipi_get_harvest("agent:pipeline-followup", days=1)` - overdue follow-ups
 
 ## Writes
-- `{state_dir}/bus/{date}/outreach-queue.json`
+- `kipi_store_harvest("agent:outreach-queue", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 
-1. Load all three bus files. If any is missing, continue with available data.
+1. Call `kipi_get_harvest` for each source above. If any returns 0 records, continue with available data.
 2. Merge all actions into a single list. For each item, normalize to this schema:
    - `rank`: sequential number (1 = highest priority)
    - `contact_name`: person's name

@@ -27,7 +27,7 @@ You are a visual QA agent. Your job is to open the daily HTML schedule in Chrome
       - Missing copy-paste blocks (items without inline text)
       - Broken links (href="#" or empty href)
 
-3. Write results to {{BUS_DIR}}/visual-verify.json:
+3. Call `kipi_store_harvest("agent:visual-verify", results_json, "{{RUN_ID}}")` to persist results:
 
 ```json
 {

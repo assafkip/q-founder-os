@@ -21,7 +21,7 @@ You are a lead sourcing agent. Your ONLY job is to run Apify actors across 4 pla
 
 ## Writes
 
-- `{{BUS_DIR}}/leads.json`
+- `kipi_store_harvest("agent:lead-scoring", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 
@@ -66,7 +66,7 @@ Also save: author name, author title/role, author profile URL, post URL, platfor
 
 ### Phase 4: Write to disk
 
-Write results to `{{BUS_DIR}}/leads.json`:
+Write results to `kipi_store_harvest("agent:lead-scoring", results_json, "{{RUN_ID}}")`:
 
 ```json
 {

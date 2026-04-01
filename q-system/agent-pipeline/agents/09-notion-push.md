@@ -10,16 +10,16 @@ maxTurns: 15
 You are a write-back agent. Your ONLY job is to push today's action items to the Notion Actions DB.
 
 ## Reads
-- Bus file: `{{BUS_DIR}}/hitlist.json` - engagement actions with copy
-- Bus file: `{{BUS_DIR}}/value-routing.json` - value-drop actions
-- Bus file: `{{BUS_DIR}}/pipeline-followup.json` - follow-up actions (if exists)
-- Bus file: `{{BUS_DIR}}/loop-review.json` - loop closures to apply (if exists)
-- Bus file: `{{BUS_DIR}}/outbound-actions.json` - auto-detected outbound actions to log to LinkedIn Tracker + loops to close (if exists)
+- `kipi_get_harvest("agent:engagement-hitlist", days=1)` - engagement actions with copy
+- `kipi_get_harvest("agent:value-routing", days=1)` - value-drop actions
+- `kipi_get_harvest("agent:pipeline-followup", days=1)` - follow-up actions (if exists)
+- `kipi_get_harvest("agent:loop-review", days=1)` - loop closures to apply (if exists)
+- `kipi_get_harvest("agent:outbound-detection", days=1)` - auto-detected outbound actions to log to LinkedIn Tracker + loops to close (if exists)
 - Harvest data: `kipi_get_harvest("ga4-utm", days=7)` - prospect engagement data to update Contact records (Mondays, if exists)
 - `{{DATA_DIR}}/my-project/notion-ids.md` - database IDs and data_source_ids
 
 ## Writes
-- `{{BUS_DIR}}/notion-push.json` (log of what was pushed)
+- `kipi_store_harvest("agent:notion-push", results_json, "{{RUN_ID}}")` (log of what was pushed)
 
 ## Instructions
 
@@ -47,7 +47,7 @@ For each action from bus files:
 For loop-review force-close items:
 - Use `mcp__notion_api__API-patch-page` to update the Status to "Passed" with reason in Notes
 
-3. Write a log to `{{BUS_DIR}}/notion-push.json`:
+3. Write a log to `kipi_store_harvest("agent:notion-push", results_json, "{{RUN_ID}}")`:
 
 ```json
 {

@@ -14,10 +14,10 @@ This agent runs on Wednesdays only. Read `{{AGENTS_DIR}}/_cadence-config.md` to 
 
 ## Reads
 - `{{QROOT}}/skills/founder-voice/SKILL.md` -- voice rules for all drafted copy (READ FIRST)
-- `{{BUS_DIR}}/signals.json` - check if a signals post is already drafted (avoid double-posting)
+- `kipi_get_harvest("agent:signals-content")` - check if a signals post is already drafted (avoid double-posting)
 
 ## Writes
-- `{{BUS_DIR}}/founder-brand-post.json`
+- `kipi_store_harvest("agent:founder-brand", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 
@@ -31,7 +31,7 @@ This agent runs on Wednesdays only. Read `{{AGENTS_DIR}}/_cadence-config.md` to 
    - No pitch for {{YOUR_PRODUCT}}. This is founder brand, not product marketing.
    - The observation should be specific enough that another founder reading it thinks "I've experienced exactly this"
 3. Before writing, read `{{AGENTS_DIR}}/_auto-fail-checklist.md`. Verify zero violations.
-4. Write results to `{{BUS_DIR}}/founder-brand-post.json`:
+4. Write results to `kipi_store_harvest("agent:founder-brand", results_json, "{{RUN_ID}}")`:
 
 ```json
 {

@@ -12,17 +12,17 @@ You are a matching agent. Your ONLY job is to match today's signals to active pr
 ## Reads
 
 - `{{QROOT}}/skills/founder-voice/SKILL.md` -- voice rules for all drafted copy (READ FIRST)
-- Bus file: `{{BUS_DIR}}/signals.json` - today's signals (written by 04-signals-content)
+- `kipi_get_harvest("agent:signals-content", days=1)` - today's signals (written by 04-signals-content)
 - Harvest data: `kipi_get_harvest("notion-contacts", days=1)` - active prospects
 - Harvest data: `kipi_get_harvest("gmail", days=2)` - recent email activity
 
 ## Writes
 
-- `{{BUS_DIR}}/value-routing.json`
+- `kipi_store_harvest("agent:value-routing", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 
-1. Read `{{BUS_DIR}}/signals.json` for the `signals_found` array
+1. Read `kipi_get_harvest("agent:signals-content")` for the `signals_found` array
 2. Call `kipi_get_harvest` MCP tool with source_name="notion-contacts", days=1 for active prospects
 3. For each signal, identify which prospects it is relevant to based on:
    - Industry match (e.g. fintech prospect + fintech regulatory news)
@@ -40,7 +40,7 @@ You are a matching agent. Your ONLY job is to match today's signals to active pr
    - No "leverage," "innovative," "cutting-edge," "following up," "circling back"
    - No mention of {{YOUR_PRODUCT}} unless they have already asked about it
 6. Before writing, re-check every message against `{{AGENTS_DIR}}/_auto-fail-checklist.md`. Read that file. Verify zero auto-fail and zero warn violations in your output.
-7. Write results to `{{BUS_DIR}}/value-routing.json`:
+7. Write results to `kipi_store_harvest("agent:value-routing", results_json, "{{RUN_ID}}")`:
 
 ```json
 {

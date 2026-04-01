@@ -15,7 +15,7 @@ You are a graph query agent. Your job is to read the entity-relationship graph a
 - Harvest data: `kipi_get_harvest("notion-contacts", days=1)` (active pipeline contacts)
 
 ## Writes
-- `{{BUS_DIR}}/graph-digest.json`
+- `kipi_store_harvest("agent:graph-kb", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 

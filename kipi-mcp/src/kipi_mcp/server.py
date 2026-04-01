@@ -1427,7 +1427,7 @@ def kipi_deliverables_check(date: str = "") -> str:
     """
     try:
         from kipi_mcp.morning_init import deliverables_check
-        return json.dumps(deliverables_check(paths, date))
+        return json.dumps(deliverables_check(paths, date, harvest_store=harvest_store))
     except Exception as e:
         logger.error("kipi_deliverables_check failed", exc_info=True)
         raise ToolError(str(e))

@@ -17,7 +17,7 @@ You are a positioning audit agent. Your ONLY job is to check whether talk tracks
 
 ## Writes
 
-- `{{BUS_DIR}}/positioning.json`
+- `kipi_store_harvest("agent:positioning", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 
@@ -49,7 +49,7 @@ For each objection in objections.md:
 
 ### Write results
 
-Write to `{{BUS_DIR}}/positioning.json`:
+Write to `kipi_store_harvest("agent:positioning", results_json, "{{RUN_ID}}")`:
 
 ```json
 {

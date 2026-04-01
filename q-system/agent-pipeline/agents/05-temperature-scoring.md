@@ -18,7 +18,7 @@ You are a scoring agent. Your ONLY job is to consolidate engagement signals per 
 
 ## Writes
 
-- `{{BUS_DIR}}/temperature.json`
+- `kipi_store_harvest("agent:temperature-scoring", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 
@@ -45,7 +45,7 @@ Signal weights (additive):
 
 4. Read `{{AGENTS_DIR}}/_cadence-config.md` for auto-close and timeout thresholds. Apply auto-close rule using the cadence config timing (not hardcoded).
 
-5. Write results to `{{BUS_DIR}}/temperature.json`:
+5. Write results to `kipi_store_harvest("agent:temperature-scoring", results_json, "{{RUN_ID}}")`:
 
 ```json
 {

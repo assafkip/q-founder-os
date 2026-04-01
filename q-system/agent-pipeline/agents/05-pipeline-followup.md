@@ -14,11 +14,11 @@ You are a follow-up agent. Your ONLY job is to identify warm/active contacts who
 - Harvest data: `kipi_get_harvest("notion-contacts", days=1)` - contacts with Last Contact dates
 - Harvest data: `kipi_get_harvest("linkedin-dms", days=2, include_body=true)` - recent DM activity (avoid double-touching)
 - Harvest data: `kipi_get_harvest("gmail", days=2)` - recent email activity (avoid double-touching)
-- Bus file: `{{BUS_DIR}}/signals.json` - today's signals for value-drop hooks
+- `kipi_get_harvest("agent:signals-content", days=1)` - today's signals for value-drop hooks
 - `{{AGENTS_DIR}}/_cadence-config.md` - outreach timing rules
 
 ## Writes
-- `{{BUS_DIR}}/pipeline-followup.json`
+- `kipi_store_harvest("agent:pipeline-followup", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 
@@ -42,7 +42,7 @@ You are a follow-up agent. Your ONLY job is to identify warm/active contacts who
    Include `stage_advancement` field in output for any contact that should move.
 5. Sort by days overdue (most overdue first). Cap at 5 follow-ups.
 6. Before writing, read `{{AGENTS_DIR}}/_auto-fail-checklist.md`. Verify zero violations.
-7. Write results to `{{BUS_DIR}}/pipeline-followup.json`:
+7. Write results to `kipi_store_harvest("agent:pipeline-followup", results_json, "{{RUN_ID}}")`:
 
 ```json
 {

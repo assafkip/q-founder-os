@@ -15,7 +15,7 @@ You are an action detection agent. Your job is to detect what the founder DID on
 - Harvest data: `kipi_get_harvest("notion-contacts", days=1)` (existing LinkedIn Tracker entries to avoid duplicate logging)
 
 ## Writes
-- `{{BUS_DIR}}/outbound-actions.json`
+- `kipi_store_harvest("agent:outbound-detection", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 

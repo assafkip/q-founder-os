@@ -13,21 +13,21 @@ You are a copy generation agent. Your job is to produce a copy-paste-ready engag
 
 - `{{QROOT}}/skills/founder-voice/SKILL.md` -- voice rules for all drafted copy (READ FIRST)
 - `{{QROOT}}/skills/audhd-executive-function/SKILL.md` -- friction-ordering, copy-paste-only, energy tags (READ FIRST)
-- Bus file: `{{BUS_DIR}}/temperature.json` - prospect temperature scores
-- Bus file: `{{BUS_DIR}}/leads.json` - qualified leads from today's sourcing
+- `kipi_get_harvest("agent:temperature-scoring", days=1)` - prospect temperature scores
+- `kipi_get_harvest("agent:lead-scoring", days=1)` - qualified leads from today's sourcing
 - Harvest data: `kipi_get_harvest("linkedin-feed", days=2, include_body=true)` - recent posts from tracked prospects
 - Harvest data: `kipi_get_harvest("linkedin-dms", days=2, include_body=true)` - DM activity (replies needed, active conversations)
-- Bus file: `{{BUS_DIR}}/pipeline-followup.json` - overdue follow-ups with drafted messages
-- Bus file: `{{BUS_DIR}}/loop-review.json` - stale loops needing escalation
+- `kipi_get_harvest("agent:pipeline-followup", days=1)` - overdue follow-ups with drafted messages
+- `kipi_get_harvest("agent:loop-review", days=1)` - stale loops needing escalation
 - Harvest data: `kipi_get_harvest("notion-contacts", days=1)` - relationship stages for all contacts
-- Bus file: `{{BUS_DIR}}/outbound-actions.json` - auto-detected founder actions. Use to avoid suggesting actions the founder already took.
-- Bus file: `{{BUS_DIR}}/graph-digest.json` - entity-relationship context (if exists)
+- `kipi_get_harvest("agent:outbound-detection", days=1)` - auto-detected founder actions. Use to avoid suggesting actions the founder already took.
+- `kipi_get_harvest("agent:graph-kb", days=1)` - entity-relationship context (if exists)
 - Harvest data: `kipi_get_harvest("ga4-metrics", days=7)` - weekly GA4 metrics, Mondays only (if exists)
 - Harvest data: `kipi_get_harvest("ga4-utm", days=7)` - prospect click tracking, Mondays only. Hot UTM leads should be prioritized.
 
 ## Writes
 
-- `{{BUS_DIR}}/hitlist.json`
+- `kipi_store_harvest("agent:engagement-hitlist", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 
@@ -82,7 +82,7 @@ Tag each action with the service line from the lead's `service_line` field. If n
 
 ### Step 4: Write results
 
-Write to `{{BUS_DIR}}/hitlist.json`:
+Write to `kipi_store_harvest("agent:engagement-hitlist", results_json, "{{RUN_ID}}")`:
 
 ```json
 {

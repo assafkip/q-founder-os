@@ -173,9 +173,6 @@ def morning_init(paths, energy_level: int) -> dict:
     THE one call that replaces phases 0-0.7 of the old orchestrator.
     """
     date = datetime.now().strftime("%Y-%m-%d")
-    bus_today = paths.bus_dir / date
-    bus_today.mkdir(parents=True, exist_ok=True)
-    _clean_old_bus(paths.bus_dir, days=3)
 
     return {
         "date": date,
@@ -232,16 +229,15 @@ def gate_check(paths, phase: int, date: str = "") -> dict:
     }
 
 
-def deliverables_check(paths, date: str = "") -> dict:
-    """Check that required deliverables exist for the day.
+def deliverables_check(paths, date: str = "", harvest_store=None) -> dict:
+    """Check that required deliverables exist in the harvest ledger.
 
-    Inspects bus files for expected outputs based on day of week.
+    Queries harvest_records for expected agent outputs based on day of week.
     Returns pass/fail with details on what's missing.
     """
     if not date:
         date = datetime.now().strftime("%Y-%m-%d")
 
-    bus_dir = paths.bus_dir / date
     day_of_week = datetime.strptime(date, "%Y-%m-%d").strftime("%A").lower()
 
     result = {
@@ -252,42 +248,35 @@ def deliverables_check(paths, date: str = "") -> dict:
         "checked": [],
     }
 
-    def _check_bus_file(name: str, required_field: str | None = None, label: str = ""):
-        fpath = bus_dir / name
-        desc = label or name
-        if not fpath.exists():
-            result["missing"].append(desc)
+    def _check_agent(source_name: str, label: str = ""):
+        desc = label or source_name
+        if harvest_store is None:
+            result["missing"].append(f"{desc} (no harvest store)")
             result["passed"] = False
             return
-        if required_field:
-            try:
-                data = json.loads(fpath.read_text())
-                if not data.get(required_field):
-                    result["missing"].append(f"{desc} (empty {required_field})")
-                    result["passed"] = False
-                    return
-            except (json.JSONDecodeError, KeyError):
-                result["missing"].append(f"{desc} (invalid JSON)")
-                result["passed"] = False
-                return
-        result["checked"].append(desc)
+        records = harvest_store.get_records(source_name=source_name, days=1, limit=1)
+        if not records:
+            result["missing"].append(desc)
+            result["passed"] = False
+        else:
+            result["checked"].append(desc)
 
     # Day-invariant deliverables
-    _check_bus_file("pipeline-followup.json", label="pipeline follow-ups")
-    _check_bus_file("hitlist.json", "actions", label="engagement hitlist")
-    _check_bus_file("outbound-actions.json", label="outbound detection")
-    _check_bus_file("loop-review.json", label="loop review")
+    _check_agent("agent:pipeline-followup", "pipeline follow-ups")
+    _check_agent("agent:engagement-hitlist", "engagement hitlist")
+    _check_agent("agent:outbound-detection", "outbound detection")
+    _check_agent("agent:loop-review", "loop review")
 
     # Content deliverables by day
     if day_of_week in ("monday", "wednesday", "friday"):
-        _check_bus_file("signals.json", label="signals content (Mon/Wed/Fri)")
+        _check_agent("agent:signals-content", "signals content (Mon/Wed/Fri)")
     if day_of_week in ("tuesday", "thursday"):
-        _check_bus_file("signals.json", label="TL content (Tue/Thu)")
+        _check_agent("agent:signals-content", "TL content (Tue/Thu)")
     if day_of_week == "monday":
-        _check_bus_file("content-intel.json", label="content intelligence (Monday)")
+        _check_agent("agent:content-intel", "content intelligence (Monday)")
 
     # Value routing
-    _check_bus_file("value-routing.json", label="value routing")
+    _check_agent("agent:value-routing", "value routing")
 
     return result
 

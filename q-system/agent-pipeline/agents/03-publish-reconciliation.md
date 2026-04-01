@@ -11,12 +11,12 @@ You are a publish reconciliation agent. Your ONLY job is to detect content publi
 
 ## Reads
 - Harvest data: `kipi_get_harvest("linkedin-publish-recon", days=2, include_body=true)` (founder's recent LinkedIn posts)
-- Bus file: `{{BUS_DIR}}/x-activity.json` (X posts from 02-x-activity agent, if available)
+- `kipi_get_harvest("agent:x-activity", days=1)` (X posts from 02-x-activity agent, if available)
 - Harvest data: `kipi_get_harvest("notion-pipeline", days=1)` (Content Pipeline DB entries)
 - `{{DATA_DIR}}/memory/marketing-state.md` -- cadence tracking and publish log
 
 ## Writes
-- `{{BUS_DIR}}/publish-reconciliation.json`
+- `kipi_store_harvest("agent:publish-recon", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 

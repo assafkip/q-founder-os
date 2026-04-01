@@ -186,25 +186,6 @@ class TestCanonicalDigest:
 
 
 class TestMorningInit:
-    def test_creates_bus_dir(self, paths):
-        _create_file(paths.canonical_dir / "talk-tracks.md")
-        _create_file(paths.canonical_dir / "objections.md")
-        _create_file(paths.my_project_dir / "relationships.md")
-        result = morning_init(paths, energy_level=3)
-        bus_today = paths.bus_dir / result["date"]
-        assert bus_today.exists()
-
-    def test_cleans_old_bus(self, paths):
-        _create_file(paths.canonical_dir / "talk-tracks.md")
-        _create_file(paths.canonical_dir / "objections.md")
-        _create_file(paths.my_project_dir / "relationships.md")
-        old_date = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
-        old_dir = paths.bus_dir / old_date
-        old_dir.mkdir(parents=True, exist_ok=True)
-        (old_dir / "test.json").write_text("{}")
-        morning_init(paths, energy_level=3)
-        assert not old_dir.exists()
-
     def test_returns_complete_bundle(self, paths):
         _create_file(paths.canonical_dir / "talk-tracks.md", "# Metaphor\nTest.")
         _create_file(paths.canonical_dir / "objections.md", "# Obj\nResp.")
@@ -302,44 +283,46 @@ class TestGateCheck:
 
 
 class TestDeliverablesCheck:
-    def test_all_present(self, paths):
-        date = datetime.now().strftime("%Y-%m-%d")
-        bus = paths.bus_dir / date
-        bus.mkdir(parents=True, exist_ok=True)
-        (bus / "pipeline-followup.json").write_text("{}")
-        (bus / "hitlist.json").write_text('{"actions": [1]}')
-        (bus / "outbound-actions.json").write_text("{}")
-        (bus / "loop-review.json").write_text("{}")
-        (bus / "signals.json").write_text("{}")
-        (bus / "value-routing.json").write_text("{}")
-        result = deliverables_check(paths, date=date)
+    @pytest.fixture
+    def store(self, tmp_path):
+        from kipi_mcp.harvest_store import HarvestStore
+        s = HarvestStore(db_path=tmp_path / "test.db")
+        s.init_db()
+        return s
+
+    def _store_agent_record(self, store, source_name):
+        run = store.create_run("incremental")
+        store.store_record(
+            run_id=run["run_id"],
+            source_name=source_name,
+            record_key=f"test-{source_name}",
+            summary_json='{"test": true}',
+        )
+
+    def test_all_present(self, paths, store):
+        for agent in [
+            "agent:pipeline-followup", "agent:engagement-hitlist",
+            "agent:outbound-detection", "agent:loop-review",
+            "agent:signals-content", "agent:value-routing",
+        ]:
+            self._store_agent_record(store, agent)
+        result = deliverables_check(paths, harvest_store=store)
         assert result["passed"] is True
         assert len(result["missing"]) == 0
 
-    def test_missing_hitlist(self, paths):
-        date = datetime.now().strftime("%Y-%m-%d")
-        bus = paths.bus_dir / date
-        bus.mkdir(parents=True, exist_ok=True)
-        (bus / "pipeline-followup.json").write_text("{}")
+    def test_missing_hitlist(self, paths, store):
+        for agent in [
+            "agent:pipeline-followup",
+            "agent:outbound-detection", "agent:loop-review",
+            "agent:signals-content", "agent:value-routing",
+        ]:
+            self._store_agent_record(store, agent)
         # hitlist missing
-        (bus / "outbound-actions.json").write_text("{}")
-        (bus / "loop-review.json").write_text("{}")
-        (bus / "signals.json").write_text("{}")
-        (bus / "value-routing.json").write_text("{}")
-        result = deliverables_check(paths, date=date)
+        result = deliverables_check(paths, harvest_store=store)
         assert result["passed"] is False
         assert any("hitlist" in m for m in result["missing"])
 
-    def test_empty_hitlist_actions(self, paths):
-        date = datetime.now().strftime("%Y-%m-%d")
-        bus = paths.bus_dir / date
-        bus.mkdir(parents=True, exist_ok=True)
-        (bus / "pipeline-followup.json").write_text("{}")
-        (bus / "hitlist.json").write_text('{"actions": []}')  # empty
-        (bus / "outbound-actions.json").write_text("{}")
-        (bus / "loop-review.json").write_text("{}")
-        (bus / "signals.json").write_text("{}")
-        (bus / "value-routing.json").write_text("{}")
-        result = deliverables_check(paths, date=date)
+    def test_no_store(self, paths):
+        result = deliverables_check(paths, harvest_store=None)
         assert result["passed"] is False
-        assert any("empty" in m for m in result["missing"])
+        assert len(result["missing"]) > 0

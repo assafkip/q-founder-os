@@ -14,7 +14,7 @@ You are an analysis agent. Your ONLY job is to prepare context for today's meeti
 - Harvest data: `kipi_get_harvest("notion-contacts", days=1)` - contact context, last interactions, open actions
 
 ## Writes
-- `{{BUS_DIR}}/meeting-prep.json`
+- `kipi_store_harvest("agent:meeting-prep", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 
@@ -27,7 +27,7 @@ You are an analysis agent. Your ONLY job is to prepare context for today's meeti
    - `open_items`: any open Actions in Notion linked to this contact (status not Done)
    - `talk_points`: 2-3 suggested topics based on their role and open items. Keep these factual - no positioning language.
 5. Do NOT generate full talk tracks or outreach copy. That is not your job.
-6. Write results to `{{BUS_DIR}}/meeting-prep.json`:
+6. Write results to `kipi_store_harvest("agent:meeting-prep", results_json, "{{RUN_ID}}")`:
 
 ```json
 {
