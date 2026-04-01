@@ -45,7 +45,7 @@ You are a merge agent. Your ONLY job is to combine all pending outreach actions 
    - Tier B leads fifth
    - Pipeline follow-ups last
 
-5. Write to `{state_dir}/bus/{date}/outreach-queue.json`:
+5. Call `kipi_store_harvest("agent:outreach-queue", results_json, "{{RUN_ID}}")` with this structure:
 
 ```json
 {

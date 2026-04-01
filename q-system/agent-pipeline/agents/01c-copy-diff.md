@@ -10,17 +10,17 @@ maxTurns: 15
 You are a learning agent. Your ONLY job is to compare yesterday's generated copy against what the founder actually posted, and log the edits.
 
 ## Reads
-- Previous day's hitlist: `{state_dir}/output/` or `{state_dir}/bus/{yesterday}/hitlist.json` (generated copy)
+- Previous day's hitlist: `kipi_get_harvest("agent:engagement-hitlist", days=2)` (yesterday's generated copy)
 - Harvest data: `kipi_get_harvest("linkedin-publish-recon", days=2, include_body=true)` (what was actually posted)
 
 ## Writes
-- `{state_dir}/bus/{date}/copy-diffs.json`
+- `kipi_store_harvest("agent:copy-diff", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 
 ### Step 1: Find yesterday's hitlist
 
-Calculate yesterday's date. Read `{state_dir}/bus/{yesterday}/hitlist.json`. If it doesn't exist, write `{"date": "{{DATE}}", "diffs": [], "note": "no previous hitlist found"}` and exit.
+Calculate yesterday's date. Call `kipi_get_harvest("agent:engagement-hitlist", days=2)` to get yesterday's hitlist. If 0 records returned, call `kipi_store_harvest("agent:copy-diff", '[{"date": "{{DATE}}", "diffs": [], "note": "no previous hitlist found"}]', "{{RUN_ID}}")` and exit.
 
 ### Step 2: Check what was actually posted
 
@@ -41,7 +41,7 @@ For each hitlist action from yesterday:
 
 ### Step 4: Write results
 
-Write to `{state_dir}/bus/{date}/copy-diffs.json`:
+Call `kipi_store_harvest("agent:copy-diff", results_json, "{{RUN_ID}}")` with this structure:
 
 ```json
 {
