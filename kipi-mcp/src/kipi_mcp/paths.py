@@ -180,6 +180,20 @@ class KipiPaths:
     def registry_path(self) -> Path:
         return self._base / "instance-registry.json"
 
+    @property
+    def sources_dir(self) -> Path:
+        """Plugin-level source YAML configs (ships with repo)."""
+        return self.repo_dir / "kipi-mcp" / "sources"
+
+    @property
+    def instance_sources_dir(self) -> Path:
+        """User-level source YAML overrides (per instance)."""
+        return self._instance_dir / "sources"
+
+    @property
+    def harvest_db(self) -> Path:
+        return self._instance_dir / "metrics.db"
+
     # --- Config files ---
 
     @property
