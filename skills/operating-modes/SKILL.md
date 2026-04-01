@@ -2,8 +2,7 @@
 description: "Operating modes — CALIBRATE, CREATE, DEBRIEF, PLAN mode definitions and triggers"
 user-invocable: false
 paths:
-  - "**/q-system/**"
-  - "**/canonical/**"
+  - "**/*"
 ---
 
 # Operating Modes

@@ -2,9 +2,7 @@
 description: "Core rules — actionable outputs, positioning guardrails, anti-misclassification"
 user-invocable: false
 paths:
-  - "**/q-system/**"
-  - "**/canonical/**"
-  - "**/my-project/**"
+  - "**/*"
 ---
 
 # Core Rules
