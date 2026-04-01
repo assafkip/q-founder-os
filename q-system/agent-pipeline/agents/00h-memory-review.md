@@ -14,7 +14,7 @@ You are a memory lifecycle agent. You run ONLY on Mondays. If today is not Monda
 - `{{DATA_DIR}}/memory/monthly/` (to check for duplicates before promoting)
 
 ## Writes
-- `{{BUS_DIR}}/memory-review.json`
+- `kipi_store_harvest("agent:memory-review", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 

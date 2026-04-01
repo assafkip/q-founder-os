@@ -16,11 +16,11 @@ You are a monthly audit agent. You run ONLY on the 1st of the month. If today is
 - `{{DATA_DIR}}/memory/weekly/`
 
 ## Writes
-- `{{BUS_DIR}}/monthly-checks.json`
+- `kipi_store_harvest("agent:monthly-checks", results_json, "{{RUN_ID}}")`
 
 ## Instructions
 
-Check today's date. If it is NOT the 1st of the month, write `{"skipped": true, "reason": "not_1st"}` to the output file and stop.
+Check today's date. If it is NOT the 1st of the month, call `kipi_store_harvest("agent:monthly-checks", '[{"skipped": true, "reason": "not_1st"}]', "{{RUN_ID}}")` and stop.
 
 If it IS the 1st:
 

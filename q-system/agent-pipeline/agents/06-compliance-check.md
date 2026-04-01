@@ -17,7 +17,7 @@ You are a compliance agent. Your ONLY job is to check today's generated content 
 - `{{CONFIG_DIR}}/canonical/talk-tracks.md` - approved language and framing
 - `{{DATA_DIR}}/my-project/current-state.md` - what is built vs. planned
 - `{{CONFIG_DIR}}/canonical/decisions.md` - all active rules (RULE-001 through current)
-- Prior days' compliance: `q-system/agent-pipeline/bus/*/compliance.json` (last 5 days if they exist)
+- Prior days' compliance: `kipi_get_harvest("agent:compliance", days=5)` (last 5 days if they exist)
 
 ## Writes
 
@@ -59,7 +59,7 @@ You are a compliance agent. Your ONLY job is to check today's generated content 
 
 6. Set `overall_pass: false` if ANY auto-fail violation exists.
 
-7. **Recurring violation check:** Read compliance.json from the last 5 days in bus/. Count how many days each warn-level rule appeared. If a warn appeared 3+ of the last 5 days, add it to `promotion_candidates`:
+7. **Recurring violation check:** Call `kipi_get_harvest("agent:compliance", days=5)` to read compliance records from the last 5 days. Count how many days each warn-level rule appeared. If a warn appeared 3+ of the last 5 days, add it to `promotion_candidates`:
 
 ```json
 "promotion_candidates": [
