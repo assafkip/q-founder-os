@@ -3,35 +3,40 @@
 Single source of truth for lead scoring, temperature signals, and strategic targeting.
 Read by agents that score prospects or generate outreach.
 
-## Regulatory/Compliance Bonus Sectors
-Read `{{CONFIG_DIR}}/canonical/engagement-playbook.md` for domain-specific targeting rules and sector bonuses.
-Bonus: +3 to lead score, +1 to temperature. Angle: "regulators now agree with the problem you're describing."
+## Regulatory/Compliance Bonus
+Regulated sectors: energy, transport, banking, health, digital infra, cloud, ICT.
+Lead scoring bonus: +3. Temperature bonus: +1.
+Angle: "regulators now agree with the problem you're describing."
 
-## Lead Scoring (5 dimensions, 0-5 each, max 25 + bonus)
-- **Pain Signal**: real operational problem described? (5 = "we have no way to track...", 0 = generic opinion). Read `{{CONFIG_DIR}}/canonical/talk-tracks.md` for validated buyer pain language that scores 5 automatically from buyer roles.
-- **First-Person Proof**: their own experience? (5 = "I spent 3 days...", 0 = retweeted article)
-- **Role Fit**: buyer? (5 = {{TARGET_PERSONA}} or equivalent decision-maker, 0 = student/vendor)
-- **Engagement Opportunity**: can you add value? (5 = specific pain, 0 = 50 generic replies already)
-- **Multi-Team Pain**: touches multiple teams? (5 = cross-functional, 0 = single tool complaint)
+## Lead Scoring (6 dimensions, 0-5 each, max 30 + bonus)
+
+- **Pain Signal** (0-5): Real operational problem? (5 = "we have no way to track X", 0 = generic opinion)
+- **First-Person Proof** (0-5): Their own experience? (5 = "I spent 3 days manually...", 0 = retweeted article)
+- **Role Fit** (0-5): Buyer persona? (5 = matches ICP exactly, 0 = student/vendor/irrelevant)
+- **Budget Signal** (0-5): Can they pay? Read budget-qualifiers.md for keep/skip signals. (5 = quantified pain + senior title + team, 0 = student/side hustle/no revenue signal). **Score 0 = auto-discard regardless of other scores.**
+- **Engagement Opportunity** (0-5): Can you add real value? (5 = specific pain you can address, 0 = 50 generic replies)
+- **Multi-Team Pain** (0-5): Touches multiple teams? (5 = 3+ teams/departments, 0 = single person complaint)
 
 ## Lead Tiers
-- Tier A (20-25): Send outreach today
-- Tier B (15-19): Engage today (comment, then DM)
-- Tier C (10-14): Add to warm list
+- Tier A (22-30): Send outreach today
+- Tier B (16-21): Engage today (comment, then DM)
+- Tier C (10-15): Add to warm list
 - Below 10: Discard
 
 ## Temperature Signal Weights
+
 | Signal | Weight |
 |--------|--------|
 | DM reply received | +3 |
 | Email reply received | +3 |
-| Demo request / scheduling link | +4 |
-| Connection accepted (7 days) | +2 |
+| Demo request / scheduling link clicked | +4 |
+| Connection accepted (within 7 days) | +2 |
 | Comment on your post | +2 |
 | Like on your post | +1 |
-| Link click (UTM) | +2 |
+| Link click (tracked UTM) | +2 |
 | Profile view (notification) | +2 |
 | Post share/repost (notification) | +3 |
+| Regulated sector prospect | +1 |
 | No contact 14+ days | -1 |
 | No contact 30+ days | -2 |
 

@@ -11,6 +11,7 @@ You are a lead sourcing agent. Your ONLY job is to run Apify actors across 4 pla
 
 ## Reads
 
+- `{{AGENTS_DIR}}/_scoring-config.md` -- lead scoring dimensions, tiers, regulatory bonus
 - Harvest data: `kipi_get_harvest("x-lead-search", days=1, include_body=true)` (X/Twitter lead search results)
 - Harvest data: `kipi_get_harvest("reddit-leads", days=1, include_body=true)` (Reddit lead search results)
 - `{{DATA_DIR}}/my-project/current-state.md` - your target buyer personas and pain categories
@@ -35,27 +36,15 @@ Pull pre-harvested lead search results:
 
 If a source returns 0 records, note it in the output summary and continue scoring with available data. The harvest layer handles all API calls, retries, and fallbacks — this agent only scores and qualifies.
 
-### Phase 2: Score each result on 6 dimensions (max 30 pts total)
+### Phase 2: Score each result
 
-For each post/result, score 0-5 on each dimension:
+Read `{{AGENTS_DIR}}/_scoring-config.md` for the scoring dimensions, tier thresholds, and regulatory bonus rules. Also read `{{DATA_DIR}}/my-project/budget-qualifiers.md` for budget keep/skip signals.
 
-- **Pain Signal** (0-5): Does the person describe a real operational problem? (5 = "we have no way to track X", 0 = generic opinion)
-- **First-Person Proof** (0-5): Is this their own experience? (5 = "I spent 3 days manually...", 0 = retweeted article)
-- **Role Fit** (0-5): Are they a buyer persona? (5 = matches your ICP exactly, 0 = student/vendor/irrelevant)
-- **Budget Signal** (0-5): Can they pay? Read `{{DATA_DIR}}/my-project/budget-qualifiers.md` for keep/skip signals. (5 = quantified pain + senior title + team, 0 = student/side hustle/no revenue signal). **Score 0 = auto-discard regardless of other scores.**
-- **Engagement Opportunity** (0-5): Can you add real value in a comment? (5 = specific pain you can address, 0 = already has 50 generic replies)
-- **Multi-Team Pain** (0-5): Does the pain touch multiple teams or stakeholders? (5 = mentions 3+ teams or departments, 0 = single person complaint)
-- **Regulatory Relevance** (bonus +3): Is the person/company in a regulated sector or discussing regulatory governance mandates? +3 bonus to total score. Regulated prospects need governance infrastructure and have budget urgency.
+Score each result on the 6 dimensions defined in _scoring-config.md (max 30 + regulatory bonus). Apply tier thresholds from the config.
 
 ### Service Line Tagging
 
-Tag each lead with which service line it maps to (read from `{{CONFIG_DIR}}/founder-profile.md` service_lines section). This enables per-service-line pipeline tracking.
-
-Tiers:
-- Tier A (22-30): Send outreach today
-- Tier B (16-21): Engage today (comment, then DM)
-- Tier C (10-15): Add to warm list
-- Below 10: Discard
+Tag each lead with which service line it maps to (read from `{{CONFIG_DIR}}/founder-profile.md` service_lines section).
 
 ### Phase 3: For every Tier A and B result
 
