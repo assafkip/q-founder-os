@@ -1,0 +1,30 @@
+{
+  "date": "2026-04-02",
+  "confirmation_bias": {
+    "contradicting_signals_found": 1,
+    "contradicting_signals_surfaced": 1,
+    "examples": [],
+    "verdict": "clean"
+  },
+  "decision_sycophancy": {
+    "approved": 2,
+    "modified": 2,
+    "rejected": 1,
+    "user_directed": 3,
+    "pi": 0.4,
+    "verdict": "healthy"
+  },
+  "positioning_variance": {
+    "ran": false
+  },
+  "co_rumination": {
+    "amplified_signals": [],
+    "softened_negatives": [],
+    "over_indexed_positives": [],
+    "verdict": "clean"
+  },
+  "monthly_contradictions": null,
+  "residual_risk_acknowledged": false,
+  "overall": "pass",
+  "founder_note": "Clean day."
+}

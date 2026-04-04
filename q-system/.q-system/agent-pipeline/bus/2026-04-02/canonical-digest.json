@@ -1,0 +1,43 @@
+{
+  "date": "2026-04-02",
+  "digest_version": 1,
+  "talk_tracks": {
+    "primary_metaphor": "(if you have one)",
+    "product_definition": "(filled during setup)",
+    "wedge_formula": "(how you describe what you are)",
+    "banned_phrases": [
+      "AI-powered",
+      "leverage",
+      "innovative",
+      "cutting-edge",
+      "single pane of glass",
+      "next-gen",
+      "game-changing"
+    ],
+    "detection_rule": ""
+  },
+  "objections": [
+    {
+      "name": "[Objection as they say it]",
+      "response_summary": "(what to say)\n- **Proof needed:** (what evidence would close this)\n- **What NOT to say:** (common mistakes)\n- **Source:** [Person] - [Date]\n```\n\n## Active Objections\n\n(populated through debriefs)",
+      "signal_count": 0,
+      "near_threshold": false
+    }
+  ],
+  "current_state": {
+    "works_today": [],
+    "validated": [],
+    "unvalidated": [],
+    "is_not": []
+  },
+  "discovery": {
+    "top_questions": [
+      {
+        "q": "[Question as asked]",
+        "a": "(current best response)\n- **Gaps:** (what we still can't answer well)\n- **Source:** [Person] - [Date]\n```\n\n## Questions & Answers\n\n(populated through debriefs and calibration)"
+      }
+    ],
+    "gaps": []
+  },
+  "decisions": []
+}
