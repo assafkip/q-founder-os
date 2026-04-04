@@ -139,6 +139,7 @@ THEN (can run after posts + x-activity are done):
   - IF weekly brand day: 04-founder-brand-post.md (sonnet) - writes founder-brand-post.json. NOTE: If brand day, run founder-brand-post BEFORE post-visuals so visuals agent can read both drafts. Sequence: signals -> founder-brand-post -> [value-routing + post-visuals] in parallel.
 
 ### Phase 5: Pipeline (1 script + 4 agents parallel, then conditional, then 1 sequential)
+**GATE: Phase 4 must complete before Phase 5 launches.** 05-pipeline-followup reads signals.json (Phase 4 output).
 Run SCRIPT first: `python3 {{QROOT}}/.q-system/scripts/temperature-scoring.py {date}` - writes temperature.json
 THEN launch in ONE message:
 - 05-lead-sourcing.md (sonnet) - runs Chrome (LinkedIn) + Reddit MCP + RSS (Medium) + Apify (X only), writes leads.json
