@@ -196,6 +196,32 @@ Then (one at a time):
 
 Save to `my-project/current-state.md` and `canonical/discovery.md`.
 
+### Step 3b: ICP Deep Dive
+
+Skip for `minimal` and `content-creator` archetypes.
+
+Explain why this matters:
+> "I use this to find content your buyers actually care about and score leads. The more specific, the better I can filter signal from noise."
+
+**For GTM founders, product founders, and operators:**
+
+Ask one at a time:
+1. What's their exact job title? (Can be multiple: "CISO, VP Security, Head of SecOps")
+2. Who do they report to? (e.g. CTO, CIO, CEO)
+3. How big are the companies you sell to? (employees or revenue range)
+4. What industry or vertical? (can be multiple)
+5. What words do THEY use to describe their problem? Not your marketing language - their words.
+6. What makes them start looking for a solution right now? (the trigger event)
+7. What's the typical deal size or price point?
+8. How long does a sale usually take? (weeks, months)
+9. Who else is involved in the buying decision besides your champion?
+
+Save to `my-project/icp.md`:
+- Q1-Q4 -> Primary Buyer section
+- Q5-Q7 -> Pain Profile section
+- Q8-Q9 -> Buying Process section
+- Q5 also -> Language Fingerprint "Words they use"
+
 ### Step 4: Your Positioning
 
 Skip for `minimal` archetype.
@@ -286,6 +312,41 @@ Also populate `my-project/lead-sources.md`:
 - X handles go into "X Accounts to Monitor" if they want to track competitors
 - Reddit subreddits: ask "What subreddits do your target customers hang out in?" and populate the table
 - Medium tags: ask "What topics should I search for on Medium?" and convert to kebab-case tags
+
+### Step 5c: Content Discovery Sources
+
+Skip for `minimal` archetype.
+
+> "Last thing about platforms - I can find content your audience cares about on Instagram and TikTok, so you can engage with it. Want to set that up?"
+
+**If they want Instagram:**
+Ask one at a time:
+- Name 3-5 Instagram accounts your audience follows (creators, thought leaders, industry voices)
+- What hashtags does your audience use? (niche ones like #threatintelligence, not broad ones like #tech)
+- What words appear in your target buyer's Instagram bio? (e.g. "CISO", "founder", "security engineer")
+
+**If they want TikTok:**
+Ask one at a time:
+- Name 2-3 TikTok creators who make content for your audience
+- What would your audience search for on TikTok? (search queries, not hashtags)
+- Any TikTok hashtags specific to your space?
+
+**For all archetypes (if they use Medium/Substack):**
+- Any specific authors on Medium or Substack your audience reads?
+
+Save to `my-project/icp-signals.md`:
+- Instagram hashtags, creators, bio keywords -> Instagram section
+- TikTok keywords, creators, hashtags -> TikTok section
+- Medium/Substack authors -> Medium section
+
+Also populate `my-project/lead-sources.md`:
+- Instagram hashtags -> "Instagram Hashtags" table with day rotation
+- Instagram creators -> "Instagram Creators" table
+- TikTok keywords -> "TikTok Keywords" table with day rotation
+- TikTok hashtags -> "TikTok Hashtags" table with day rotation
+- TikTok creators -> "TikTok Creators" table
+
+Add `instagram:` and `tiktok:` to `my-project/founder-profile.md` Platform Handles (blank if they don't have accounts, @handle if they do).
 
 ### Step 6: Your Network
 
