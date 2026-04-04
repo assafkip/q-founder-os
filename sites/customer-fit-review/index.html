@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Customer Fit Review - Claude Code Skill</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            surface: {
+              0: '#09090b',
+              1: '#111114',
+              2: '#18181b',
+              3: '#1f1f23',
+              4: '#27272a',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; }
+    code, .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+    .gradient-text {
+      background: linear-gradient(135deg, #f4f4f5 0%, #a1a1aa 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .gradient-text-red {
+      background: linear-gradient(135deg, #fca5a5 0%, #f87171 50%, #ef4444 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .card-glow {
+      position: relative;
+    }
+    .card-glow::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      padding: 1px;
+      background: linear-gradient(135deg, rgba(244,244,245,0.1), rgba(63,63,70,0.05));
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      pointer-events: none;
+    }
+
+    .wave-connector {
+      position: relative;
+    }
+    .wave-connector::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      right: -2rem;
+      width: 2rem;
+      height: 2px;
+      background: linear-gradient(90deg, #3f3f46, transparent);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 8px;
+    }
+    .status-pass { background-color: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.4); }
+    .status-fail { background-color: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.4); }
+    .status-warn { background-color: #f59e0b; box-shadow: 0 0 6px rgba(245,158,11,0.4); }
+
+    .yaml-key { color: #7dd3fc; }
+    .yaml-value { color: #d4d4d8; }
+    .yaml-comment { color: #52525b; }
+
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-in {
+      animation: fadeInUp 0.6s ease-out forwards;
+    }
+
+    .section-divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, #27272a 20%, #3f3f46 50%, #27272a 80%, transparent);
+    }
+  </style>
+</head>
+<body class="bg-surface-0 text-zinc-300 antialiased">
+
+  <!-- Navigation -->
+  <nav class="fixed top-0 w-full z-50 bg-surface-0/80 backdrop-blur-xl border-b border-zinc-800/50">
+    <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-lg bg-surface-3 flex items-center justify-center border border-zinc-700/50">
+          <svg class="w-4 h-4 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+          </svg>
+        </div>
+        <span class="text-sm font-semibold text-zinc-200">Customer Fit Review</span>
+        <span class="text-xs font-mono text-zinc-600 ml-1">Claude Code Skill</span>
+      </div>
+      <a href="#install" class="text-sm text-zinc-400 hover:text-zinc-200 transition-colors">Install</a>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="relative pt-32 pb-24 overflow-hidden">
+    <div class="absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(120,119,198,0.08),transparent)]"></div>
+    <div class="max-w-4xl mx-auto px-6 text-center relative">
+      <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-2 border border-zinc-800 mb-8">
+        <span class="status-dot status-fail"></span>
+        <span class="text-xs font-medium text-zinc-400">Born from a real incident</span>
+      </div>
+      <h1 class="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.1] mb-6">
+        <span class="gradient-text">Technically correct.</span><br>
+        <span class="gradient-text">Operationally wrong.</span><br>
+        <span class="gradient-text-red">Catch the difference.</span>
+      </h1>
+      <p class="text-lg sm:text-xl text-zinc-400 max-w-2xl mx-auto mb-10 leading-relaxed">
+        Expert persona reviews anchored to your customer's actual deployment reality. Not what the docs say they have. What they <em class="text-zinc-300 not-italic font-medium">actually</em> have.
+      </p>
+      <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+        <a href="#install" class="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-zinc-100 text-zinc-900 font-semibold text-sm hover:bg-white transition-colors">
+          Install Skill
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+        </a>
+        <a href="#how-it-works" class="inline-flex items-center gap-2 px-6 py-3 rounded-lg border border-zinc-700 text-zinc-300 font-medium text-sm hover:border-zinc-500 hover:text-zinc-100 transition-colors">
+          How it works
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <div class="section-divider max-w-5xl mx-auto"></div>
+
+  <!-- Origin Story -->
+  <section class="py-24">
+    <div class="max-w-4xl mx-auto px-6">
+      <div class="max-w-3xl">
+        <p class="text-sm font-semibold text-red-400/80 uppercase tracking-wider mb-4">The Origin Story</p>
+        <h2 class="text-3xl sm:text-4xl font-bold text-zinc-100 mb-6">A review approved output that would have locked out firefighters.</h2>
+        <div class="space-y-4 text-zinc-400 leading-relaxed">
+          <p>
+            The generated policy was technically perfect. Every expert reviewer signed off. The syntax was valid, the logic was sound, the coverage looked comprehensive.
+          </p>
+          <p>
+            One problem: it assumed infrastructure the customer didn't have. It referenced an identity provider they never deployed. It would have locked frontline responders out of their own systems during an emergency.
+          </p>
+          <p class="text-zinc-300 font-medium">
+            Every reviewer evaluated the output in a vacuum. Nobody checked whether it fit the customer who was going to use it.
+          </p>
+          <p>
+            This skill exists so that never happens again. No review runs without a customer profile. No output ships without the customer persona signing off.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="section-divider max-w-5xl mx-auto"></div>
+
+  <!-- The 3 Waves -->
+  <section id="how-it-works" class="py-24">
+    <div class="max-w-5xl mx-auto px-6">
+      <div class="text-center mb-16">
+        <p class="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-4">Execution Flow</p>
+        <h2 class="text-3xl sm:text-4xl font-bold text-zinc-100">The 3 Waves</h2>
+      </div>
+
+      <div class="grid md:grid-cols-3 gap-6">
+        <!-- Wave 1 -->
+        <div class="relative card-glow rounded-xl bg-surface-1 p-8">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center">
+              <span class="text-amber-400 font-bold font-mono text-sm">01</span>
+            </div>
+            <div class="h-px flex-1 bg-gradient-to-r from-amber-500/20 to-transparent"></div>
+          </div>
+          <h3 class="text-lg font-bold text-zinc-100 mb-3">Profile Validation</h3>
+          <p class="text-sm text-zinc-400 leading-relaxed mb-4">
+            Before any review begins, validate the customer profile is complete. If any deployment reality field is empty -- stop and ask. Do not review with assumptions.
+          </p>
+          <div class="flex items-center gap-2 text-xs font-mono text-amber-400/70">
+            <span class="status-dot status-warn"></span>
+            Gate: All fields populated
+          </div>
+        </div>
+
+        <!-- Wave 2 -->
+        <div class="relative card-glow rounded-xl bg-surface-1 p-8">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="w-10 h-10 rounded-lg bg-sky-500/10 flex items-center justify-center">
+              <span class="text-sky-400 font-bold font-mono text-sm">02</span>
+            </div>
+            <div class="h-px flex-1 bg-gradient-to-r from-sky-500/20 to-transparent"></div>
+          </div>
+          <h3 class="text-lg font-bold text-zinc-100 mb-3">Parallel Persona Reviews</h3>
+          <p class="text-sm text-zinc-400 leading-relaxed mb-4">
+            One agent per persona, running in parallel. Each receives the output files and the full customer profile. Domain experts + the customer persona review simultaneously.
+          </p>
+          <div class="flex items-center gap-2 text-xs font-mono text-sky-400/70">
+            <span class="status-dot" style="background-color:#38bdf8;box-shadow:0 0 6px rgba(56,189,248,0.4)"></span>
+            Parallel execution
+          </div>
+        </div>
+
+        <!-- Wave 3 -->
+        <div class="relative card-glow rounded-xl bg-surface-1 p-8">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+              <span class="text-emerald-400 font-bold font-mono text-sm">03</span>
+            </div>
+            <div class="h-px flex-1 bg-gradient-to-r from-emerald-500/20 to-transparent"></div>
+          </div>
+          <h3 class="text-lg font-bold text-zinc-100 mb-3">Sequential Fix Pass</h3>
+          <p class="text-sm text-zinc-400 leading-relaxed mb-4">
+            Collect all findings. Apply fixes in sequence. Re-validate every affected file. Nothing ships until every deviation is resolved or documented.
+          </p>
+          <div class="flex items-center gap-2 text-xs font-mono text-emerald-400/70">
+            <span class="status-dot status-pass"></span>
+            Gate: All personas pass
+          </div>
+        </div>
+      </div>
+
+      <!-- Flow arrows (desktop) -->
+      <div class="hidden md:flex items-center justify-center gap-2 mt-8">
+        <div class="flex items-center gap-2 text-xs text-zinc-600">
+          <span class="font-mono text-amber-400/50">validate</span>
+          <svg class="w-4 h-4 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+          <span class="font-mono text-sky-400/50">review</span>
+          <svg class="w-4 h-4 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+          <span class="font-mono text-emerald-400/50">fix</span>
+          <svg class="w-4 h-4 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+          <span class="font-mono text-emerald-400/50">ship</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="section-divider max-w-5xl mx-auto"></div>
+
+  <!-- Deviation Rules -->
+  <section class="py-24">
+    <div class="max-w-5xl mx-auto px-6">
+      <div class="text-center mb-16">
+        <p class="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-4">Automatic Deviation Rules</p>
+        <h2 class="text-3xl sm:text-4xl font-bold text-zinc-100">Four ways output goes wrong</h2>
+        <p class="mt-4 text-zinc-400 max-w-2xl mx-auto">These fire automatically during every review. When triggered, the persona stops and flags the issue before continuing.</p>
+      </div>
+
+      <div class="grid sm:grid-cols-2 gap-6">
+        <!-- Rule 1 -->
+        <div class="card-glow rounded-xl bg-surface-1 p-8 hover:bg-surface-2 transition-colors">
+          <div class="flex items-start gap-4 mb-4">
+            <div class="w-10 h-10 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center justify-center flex-shrink-0">
+              <svg class="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5.636 5.636a9 9 0 1012.728 0M12 3v9" />
+              </svg>
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-zinc-100 mb-1">Infrastructure Assumption</h3>
+              <p class="text-xs font-mono text-red-400/60">DEVIATION_01</p>
+            </div>
+          </div>
+          <p class="text-sm text-zinc-400 leading-relaxed">
+            Output assumes a service, license, or integration the customer doesn't have. The review adds a triage gate or skips the output entirely.
+          </p>
+          <div class="mt-4 px-3 py-2 rounded-md bg-surface-0 border border-zinc-800/50">
+            <p class="text-xs font-mono text-zinc-500"><span class="text-red-400">FLAG</span> References Azure AD conditional access -- customer uses local Active Directory only</p>
+          </div>
+        </div>
+
+        <!-- Rule 2 -->
+        <div class="card-glow rounded-xl bg-surface-1 p-8 hover:bg-surface-2 transition-colors">
+          <div class="flex items-start gap-4 mb-4">
+            <div class="w-10 h-10 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center justify-center flex-shrink-0">
+              <svg class="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-zinc-100 mb-1">Dangerous Default</h3>
+              <p class="text-xs font-mono text-red-400/60">DEVIATION_02</p>
+            </div>
+          </div>
+          <p class="text-sm text-zinc-400 leading-relaxed">
+            Output would break the customer's environment. Lock out users, delete data, block legitimate access. The review adjusts to safe defaults.
+          </p>
+          <div class="mt-4 px-3 py-2 rounded-md bg-surface-0 border border-zinc-800/50">
+            <p class="text-xs font-mono text-zinc-500"><span class="text-red-400">FLAG</span> MFA enforcement would lock out field crews without smartphone access</p>
+          </div>
+        </div>
+
+        <!-- Rule 3 -->
+        <div class="card-glow rounded-xl bg-surface-1 p-8 hover:bg-surface-2 transition-colors">
+          <div class="flex items-start gap-4 mb-4">
+            <div class="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center flex-shrink-0">
+              <svg class="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-zinc-100 mb-1">Coverage Lie</h3>
+              <p class="text-xs font-mono text-amber-400/60">DEVIATION_03</p>
+            </div>
+          </div>
+          <p class="text-sm text-zinc-400 leading-relaxed">
+            Output claims "all devices" or "fully covered" when coverage is partial. Unmanaged devices exist. Integrations aren't configured. The review qualifies the claim.
+          </p>
+          <div class="mt-4 px-3 py-2 rounded-md bg-surface-0 border border-zinc-800/50">
+            <p class="text-xs font-mono text-zinc-500"><span class="text-amber-400">FLAG</span> "Full endpoint coverage" -- 340 of 812 devices are unmanaged</p>
+          </div>
+        </div>
+
+        <!-- Rule 4 -->
+        <div class="card-glow rounded-xl bg-surface-1 p-8 hover:bg-surface-2 transition-colors">
+          <div class="flex items-start gap-4 mb-4">
+            <div class="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center flex-shrink-0">
+              <svg class="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-zinc-100 mb-1">Expertise Assumption</h3>
+              <p class="text-xs font-mono text-amber-400/60">DEVIATION_04</p>
+            </div>
+          </div>
+          <p class="text-sm text-zinc-400 leading-relaxed">
+            Output requires knowledge the customer's contact doesn't have, with no explanation or guidance path. The review adds plain-language instructions.
+          </p>
+          <div class="mt-4 px-3 py-2 rounded-md bg-surface-0 border border-zinc-800/50">
+            <p class="text-xs font-mono text-zinc-500"><span class="text-amber-400">FLAG</span> Requires KQL proficiency -- customer contact is a network admin, not a SOC analyst</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="section-divider max-w-5xl mx-auto"></div>
+
+  <!-- Customer Profile -->
+  <section class="py-24">
+    <div class="max-w-5xl mx-auto px-6">
+      <div class="grid lg:grid-cols-2 gap-12 items-start">
+        <div>
+          <p class="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-4">Deployment Reality</p>
+          <h2 class="text-3xl sm:text-4xl font-bold text-zinc-100 mb-6">The customer profile is mandatory</h2>
+          <p class="text-zinc-400 leading-relaxed mb-6">
+            No review runs without it. The profile captures what the customer actually has deployed, not what the documentation assumes. Managed vs. unmanaged devices. Infrastructure present vs. absent. Integrations configured vs. not configured.
+          </p>
+          <div class="space-y-4">
+            <div class="flex items-start gap-3">
+              <div class="mt-1 w-5 h-5 rounded-full bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+                <div class="w-1.5 h-1.5 rounded-full bg-emerald-400"></div>
+              </div>
+              <div>
+                <p class="text-sm font-medium text-zinc-200">Infrastructure present/absent</p>
+                <p class="text-xs text-zinc-500">What they have running vs. what you assume they have</p>
+              </div>
+            </div>
+            <div class="flex items-start gap-3">
+              <div class="mt-1 w-5 h-5 rounded-full bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+                <div class="w-1.5 h-1.5 rounded-full bg-emerald-400"></div>
+              </div>
+              <div>
+                <p class="text-sm font-medium text-zinc-200">Managed vs. unmanaged device counts</p>
+                <p class="text-xs text-zinc-500">The gap between "covered" and reality</p>
+              </div>
+            </div>
+            <div class="flex items-start gap-3">
+              <div class="mt-1 w-5 h-5 rounded-full bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+                <div class="w-1.5 h-1.5 rounded-full bg-emerald-400"></div>
+              </div>
+              <div>
+                <p class="text-sm font-medium text-zinc-200">Contact background and constraints</p>
+                <p class="text-xs text-zinc-500">Their expertise level, time, budget, team size</p>
+              </div>
+            </div>
+            <div class="flex items-start gap-3">
+              <div class="mt-1 w-5 h-5 rounded-full bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+                <div class="w-1.5 h-1.5 rounded-full bg-emerald-400"></div>
+              </div>
+              <div>
+                <p class="text-sm font-medium text-zinc-200">Integrations configured vs. not</p>
+                <p class="text-xs text-zinc-500">What is actually connected and sending data</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- YAML block -->
+        <div class="rounded-xl bg-surface-1 border border-zinc-800/50 overflow-hidden">
+          <div class="flex items-center gap-2 px-5 py-3 bg-surface-2 border-b border-zinc-800/50">
+            <div class="w-3 h-3 rounded-full bg-zinc-700"></div>
+            <div class="w-3 h-3 rounded-full bg-zinc-700"></div>
+            <div class="w-3 h-3 rounded-full bg-zinc-700"></div>
+            <span class="ml-3 text-xs font-mono text-zinc-500">customer_profile.yaml</span>
+          </div>
+          <pre class="p-5 text-xs leading-relaxed overflow-x-auto"><code><span class="yaml-key">customer_profile:</span>
+  <span class="yaml-key">name:</span> <span class="yaml-value">"San Jose Fire Department"</span>
+  <span class="yaml-key">sector:</span> <span class="yaml-value">fire_department</span>
+  <span class="yaml-key">employee_count:</span> <span class="yaml-value">485</span>
+  <span class="yaml-key">security_team_size:</span> <span class="yaml-value">0</span>  <span class="yaml-comment"># solo IT admin</span>
+
+  <span class="yaml-comment"># Deployment Reality</span>
+  <span class="yaml-key">managed_device_count:</span> <span class="yaml-value">472</span>
+  <span class="yaml-key">unmanaged_device_count:</span> <span class="yaml-value">340</span>
+  <span class="yaml-key">byod_policy:</span> <span class="yaml-value">allowed</span>
+
+  <span class="yaml-key">infrastructure_present:</span>
+    <span class="yaml-value">- on_prem_active_directory</span>
+    <span class="yaml-value">- local_file_server</span>
+    <span class="yaml-value">- basic_firewall</span>
+
+  <span class="yaml-key">infrastructure_absent:</span>
+    <span class="yaml-value">- cloud_identity_provider</span>  <span class="yaml-comment"># no Azure AD</span>
+    <span class="yaml-value">- siem</span>
+    <span class="yaml-value">- mdm</span>
+
+  <span class="yaml-key">contact_background:</span> <span class="yaml-value">"IT generalist, not security"</span>
+  <span class="yaml-key">contact_constraints:</span> <span class="yaml-value">"Solo operator, no budget"</span></code></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="section-divider max-w-5xl mx-auto"></div>
+
+  <!-- 10 Shared Review Criteria -->
+  <section class="py-24">
+    <div class="max-w-5xl mx-auto px-6">
+      <div class="text-center mb-16">
+        <p class="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-4">Shared Review Criteria</p>
+        <h2 class="text-3xl sm:text-4xl font-bold text-zinc-100">10 checks every persona runs</h2>
+        <p class="mt-4 text-zinc-400 max-w-2xl mx-auto">Before any domain-specific review, every persona evaluates these universal quality gates.</p>
+      </div>
+
+      <div class="grid sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div class="rounded-lg bg-surface-1 border border-zinc-800/30 p-4">
+          <p class="text-xs font-mono text-zinc-500 mb-2">01</p>
+          <p class="text-sm font-medium text-zinc-200">Format correctness</p>
+        </div>
+        <div class="rounded-lg bg-surface-1 border border-zinc-800/30 p-4">
+          <p class="text-xs font-mono text-zinc-500 mb-2">02</p>
+          <p class="text-sm font-medium text-zinc-200">Syntactic validity</p>
+        </div>
+        <div class="rounded-lg bg-surface-1 border border-zinc-800/30 p-4">
+          <p class="text-xs font-mono text-zinc-500 mb-2">03</p>
+          <p class="text-sm font-medium text-zinc-200">Customer actionability</p>
+        </div>
+        <div class="rounded-lg bg-surface-1 border border-zinc-800/30 p-4">
+          <p class="text-xs font-mono text-zinc-500 mb-2">04</p>
+          <p class="text-sm font-medium text-zinc-200">False positive risk</p>
+        </div>
+        <div class="rounded-lg bg-surface-1 border border-zinc-800/30 p-4">
+          <p class="text-xs font-mono text-zinc-500 mb-2">05</p>
+          <p class="text-sm font-medium text-zinc-200">Infrastructure fit</p>
+        </div>
+        <div class="rounded-lg bg-surface-1 border border-zinc-800/30 p-4">
+          <p class="text-xs font-mono text-zinc-500 mb-2">06</p>
+          <p class="text-sm font-medium text-zinc-200">Coverage honesty</p>
+        </div>
+        <div class="rounded-lg bg-surface-1 border border-zinc-800/30 p-4">
+          <p class="text-xs font-mono text-zinc-500 mb-2">07</p>
+          <p class="text-sm font-medium text-zinc-200">Response guidance</p>
+        </div>
+        <div class="rounded-lg bg-surface-1 border border-zinc-800/30 p-4">
+          <p class="text-xs font-mono text-zinc-500 mb-2">08</p>
+          <p class="text-sm font-medium text-zinc-200">Triage gates</p>
+        </div>
+        <div class="rounded-lg bg-surface-1 border border-zinc-800/30 p-4">
+          <p class="text-xs font-mono text-zinc-500 mb-2">09</p>
+          <p class="text-sm font-medium text-zinc-200">Provenance</p>
+        </div>
+        <div class="rounded-lg bg-surface-1 border border-zinc-800/30 p-4">
+          <p class="text-xs font-mono text-zinc-500 mb-2">10</p>
+          <p class="text-sm font-medium text-zinc-200">Plain language</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="section-divider max-w-5xl mx-auto"></div>
+
+  <!-- Sample Output -->
+  <section class="py-24">
+    <div class="max-w-5xl mx-auto px-6">
+      <div class="text-center mb-16">
+        <p class="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-4">Sample Output</p>
+        <h2 class="text-3xl sm:text-4xl font-bold text-zinc-100">What a persona review looks like</h2>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-6">
+        <!-- Domain expert review -->
+        <div class="rounded-xl bg-surface-1 border border-zinc-800/50 overflow-hidden">
+          <div class="flex items-center justify-between px-5 py-3 bg-surface-2 border-b border-zinc-800/50">
+            <span class="text-xs font-mono text-zinc-400">Identity Policy Expert</span>
+            <span class="inline-flex items-center gap-1.5 text-xs font-mono">
+              <span class="status-dot status-warn"></span>
+              <span class="text-amber-400">PASS WITH NOTES</span>
+            </span>
+          </div>
+          <div class="p-5 text-xs font-mono leading-relaxed space-y-3">
+            <div>
+              <span class="text-zinc-500">Pass/Fail:</span> <span class="text-amber-400">PASS WITH NOTES</span>
+            </div>
+            <div>
+              <span class="text-zinc-500">Customer-fit:</span> <span class="text-zinc-300">Partially fits. 2 policies assume cloud IdP.</span>
+            </div>
+            <div class="space-y-1">
+              <span class="text-zinc-500">Issues:</span>
+              <p class="text-red-400 pl-3">1. [HIGH] Policy 3 requires Azure AD conditional access</p>
+              <p class="text-red-400 pl-3">&nbsp;&nbsp;&nbsp;Customer has on-prem AD only</p>
+              <p class="text-amber-400 pl-3">2. [MED] MFA rule has no bypass for field devices</p>
+              <p class="text-zinc-400 pl-3">3. [LOW] Password policy exceeds NIST for this sector</p>
+            </div>
+            <div class="space-y-1">
+              <span class="text-zinc-500">Fixes:</span>
+              <p class="text-zinc-400 pl-3">1. Replace Policy 3 with on-prem GPO equivalent</p>
+              <p class="text-zinc-400 pl-3">2. Add field crew exception group to MFA rule</p>
+            </div>
+            <div>
+              <span class="text-zinc-500">Confidence:</span> <span class="text-amber-400">Needs minor edits</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Customer persona review -->
+        <div class="rounded-xl bg-surface-1 border border-red-500/20 overflow-hidden">
+          <div class="flex items-center justify-between px-5 py-3 bg-surface-2 border-b border-red-500/20">
+            <span class="text-xs font-mono text-zinc-400">Customer Persona (SJI Fire Dept)</span>
+            <span class="inline-flex items-center gap-1.5 text-xs font-mono">
+              <span class="status-dot status-fail"></span>
+              <span class="text-red-400">FAIL</span>
+            </span>
+          </div>
+          <div class="p-5 text-xs font-mono leading-relaxed space-y-3">
+            <div>
+              <span class="text-zinc-500">Pass/Fail:</span> <span class="text-red-400">FAIL</span>
+            </div>
+            <div>
+              <span class="text-zinc-500">Would use:</span> <span class="text-red-400">No. I don't have half the things this requires.</span>
+            </div>
+            <div class="space-y-1">
+              <span class="text-zinc-500">Issues:</span>
+              <p class="text-red-400 pl-3">1. [CRITICAL] I'd lock out my firefighters during a call</p>
+              <p class="text-red-400 pl-3">2. [HIGH] References 3 systems I've never heard of</p>
+              <p class="text-amber-400 pl-3">3. [MED] Instructions assume I have a security team.</p>
+              <p class="text-amber-400 pl-3">&nbsp;&nbsp;&nbsp;It's just me.</p>
+            </div>
+            <div class="space-y-1">
+              <span class="text-zinc-500">Fixes:</span>
+              <p class="text-zinc-400 pl-3">1. Remove cloud IdP dependency entirely</p>
+              <p class="text-zinc-400 pl-3">2. Add emergency bypass for all field personnel</p>
+              <p class="text-zinc-400 pl-3">3. Rewrite instructions for solo IT admin</p>
+            </div>
+            <div>
+              <span class="text-zinc-500">Confidence:</span> <span class="text-red-400">Needs rework</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="section-divider max-w-5xl mx-auto"></div>
+
+  <!-- The Customer Persona -->
+  <section class="py-24">
+    <div class="max-w-4xl mx-auto px-6">
+      <div class="rounded-xl bg-surface-1 border border-zinc-800/50 overflow-hidden">
+        <div class="p-10 sm:p-12">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="w-12 h-12 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+              <svg class="w-6 h-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+              </svg>
+            </div>
+            <div>
+              <p class="text-sm font-semibold text-red-400/80 uppercase tracking-wider">Non-Negotiable</p>
+              <h2 class="text-2xl sm:text-3xl font-bold text-zinc-100">The Customer Persona</h2>
+            </div>
+          </div>
+
+          <div class="space-y-4 text-zinc-400 leading-relaxed mb-8">
+            <p>
+              Domain experts review FOR the customer. The customer persona reviews AS the customer. It is constructed from the profile's <span class="font-mono text-xs text-zinc-300">contact_background</span> and <span class="font-mono text-xs text-zinc-300">contact_constraints</span> fields and asks four questions:
+            </p>
+          </div>
+
+          <div class="grid sm:grid-cols-2 gap-4 mb-8">
+            <div class="rounded-lg bg-surface-0 border border-zinc-800/50 p-4">
+              <p class="text-sm text-zinc-200 font-medium">"Can I do this with my resources?"</p>
+            </div>
+            <div class="rounded-lg bg-surface-0 border border-zinc-800/50 p-4">
+              <p class="text-sm text-zinc-200 font-medium">"Do I know what to do if something goes wrong?"</p>
+            </div>
+            <div class="rounded-lg bg-surface-0 border border-zinc-800/50 p-4">
+              <p class="text-sm text-zinc-200 font-medium">"Does this make me feel stupid?"</p>
+            </div>
+            <div class="rounded-lg bg-surface-0 border border-zinc-800/50 p-4">
+              <p class="text-sm text-zinc-200 font-medium">"Would I pay for this?"</p>
+            </div>
+          </div>
+
+          <div class="rounded-lg bg-red-500/5 border border-red-500/20 p-5">
+            <p class="text-sm text-zinc-300 leading-relaxed">
+              <span class="font-semibold text-red-400">Veto power.</span> The customer persona's "would use" verdict is the ultimate gate. If domain experts all pass but the customer persona says no, the output does not ship. Technically correct is not enough.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="section-divider max-w-5xl mx-auto"></div>
+
+  <!-- Install -->
+  <section id="install" class="py-24">
+    <div class="max-w-3xl mx-auto px-6">
+      <div class="text-center mb-12">
+        <p class="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-4">Get Started</p>
+        <h2 class="text-3xl sm:text-4xl font-bold text-zinc-100 mb-4">Install the skill</h2>
+        <p class="text-zinc-400">Drop it into your Claude Code project and start reviewing output against customer reality.</p>
+      </div>
+
+      <div class="space-y-6">
+        <!-- Step 1 -->
+        <div class="rounded-xl bg-surface-1 border border-zinc-800/50 p-6">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-7 h-7 rounded-md bg-surface-3 flex items-center justify-center">
+              <span class="text-xs font-bold font-mono text-zinc-400">1</span>
+            </div>
+            <h3 class="text-sm font-semibold text-zinc-200">Add the skill to your project</h3>
+          </div>
+          <div class="rounded-lg bg-surface-0 border border-zinc-800/50 p-4">
+            <code class="text-xs text-zinc-300">cp -r customer-fit-review/ .claude/skills/customer-fit-review/</code>
+          </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="rounded-xl bg-surface-1 border border-zinc-800/50 p-6">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-7 h-7 rounded-md bg-surface-3 flex items-center justify-center">
+              <span class="text-xs font-bold font-mono text-zinc-400">2</span>
+            </div>
+            <h3 class="text-sm font-semibold text-zinc-200">Create a customer profile</h3>
+          </div>
+          <div class="rounded-lg bg-surface-0 border border-zinc-800/50 p-4">
+            <code class="text-xs text-zinc-300">Fill in customer_profile.yaml with your customer's deployment reality</code>
+          </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="rounded-xl bg-surface-1 border border-zinc-800/50 p-6">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-7 h-7 rounded-md bg-surface-3 flex items-center justify-center">
+              <span class="text-xs font-bold font-mono text-zinc-400">3</span>
+            </div>
+            <h3 class="text-sm font-semibold text-zinc-200">Run a review</h3>
+          </div>
+          <div class="rounded-lg bg-surface-0 border border-zinc-800/50 p-4">
+            <code class="text-xs text-zinc-300">"Review this output for [customer name]"</code>
+          </div>
+          <p class="mt-3 text-xs text-zinc-500">Claude Code will invoke the skill, validate the profile, spawn persona agents, and return the full review with fixes.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="border-t border-zinc-800/50 py-12">
+    <div class="max-w-5xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-6 h-6 rounded-md bg-surface-3 flex items-center justify-center border border-zinc-700/50">
+          <svg class="w-3 h-3 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+          </svg>
+        </div>
+        <span class="text-xs text-zinc-500">Customer Fit Review</span>
+        <span class="text-xs text-zinc-700">|</span>
+        <span class="text-xs text-zinc-600">A Claude Code Skill</span>
+      </div>
+      <p class="text-xs text-zinc-600">
+        Built because technically correct is not enough.
+      </p>
+    </div>
+  </footer>
+
+</body>
+</html>

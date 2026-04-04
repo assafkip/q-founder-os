@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AUDHD Executive Function | Claude Code Skill</title>
+  <meta name="description" content="An external executive function system for founders with AUDHD. Every output is copy-paste ready. Zero decisions. No shame. Just action.">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwindcss.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+          },
+          colors: {
+            surface: {
+              900: '#0c0d10',
+              800: '#12141a',
+              700: '#1a1d26',
+              600: '#242832',
+            },
+            accent: {
+              green: '#34d399',
+              greenDim: '#065f46',
+              amber: '#fbbf24',
+              amberDim: '#78350f',
+              blue: '#60a5fa',
+              blueDim: '#1e3a5f',
+              purple: '#a78bfa',
+              purpleDim: '#3b1f7a',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    body { background-color: #0c0d10; }
+    .gradient-text {
+      background: linear-gradient(135deg, #34d399 0%, #60a5fa 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .card-glow {
+      background: linear-gradient(135deg, rgba(52,211,153,0.05) 0%, rgba(96,165,250,0.05) 100%);
+      border: 1px solid rgba(52,211,153,0.1);
+    }
+    .card-glow:hover {
+      border-color: rgba(52,211,153,0.25);
+    }
+    .copy-box {
+      background: rgba(52,211,153,0.06);
+      border: 1px solid rgba(52,211,153,0.2);
+    }
+    .anti-card {
+      background: rgba(239,68,68,0.04);
+      border: 1px solid rgba(239,68,68,0.15);
+    }
+    .mock-item {
+      background: linear-gradient(135deg, #1a1d26 0%, #12141a 100%);
+      border: 1px solid rgba(52,211,153,0.15);
+    }
+    .section-divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(52,211,153,0.2), transparent);
+    }
+    .badge {
+      font-size: 0.65rem;
+      letter-spacing: 0.05em;
+      padding: 0.15rem 0.5rem;
+      border-radius: 9999px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body class="font-sans text-zinc-300 antialiased">
+
+  <!-- Nav -->
+  <nav class="fixed top-0 w-full z-50 bg-surface-900/80 backdrop-blur-xl border-b border-zinc-800/50">
+    <div class="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent-green/20 to-accent-blue/20 border border-accent-green/30 flex items-center justify-center">
+          <svg class="w-4 h-4 text-accent-green" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+        <span class="font-semibold text-zinc-100 text-sm tracking-tight">AUDHD Executive Function</span>
+      </div>
+      <a href="#install" class="text-sm text-accent-green hover:text-accent-green/80 transition-colors font-medium">
+        Install Skill &rarr;
+      </a>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="pt-32 pb-20 px-6">
+    <div class="max-w-3xl mx-auto text-center">
+      <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-700 border border-zinc-700 text-xs text-zinc-400 mb-8">
+        <svg class="w-3.5 h-3.5 text-accent-green" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        </svg>
+        Claude Code Skill
+      </div>
+      <h1 class="text-4xl sm:text-5xl md:text-6xl font-extrabold text-zinc-50 leading-[1.1] tracking-tight mb-8">
+        Your external<br>
+        <span class="gradient-text">executive function</span>
+      </h1>
+      <p class="text-lg sm:text-xl text-zinc-400 max-w-2xl mx-auto leading-relaxed mb-10">
+        A Claude Code skill that serves as an external executive function system for founders with AUDHD. It governs how every daily output is structured. Zero decisions. No shame. Just action.
+      </p>
+      <div class="inline-block px-6 py-4 rounded-xl bg-surface-700 border border-accent-green/20 mb-12">
+        <p class="text-zinc-100 font-medium text-base sm:text-lg tracking-tight">
+          "If you cannot copy-paste it, click it, or check it off, it does not belong."
+        </p>
+      </div>
+      <div class="flex flex-col sm:flex-row gap-4 justify-center">
+        <a href="#install" class="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-accent-green/10 border border-accent-green/30 text-accent-green font-semibold text-sm hover:bg-accent-green/20 transition-all">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+          </svg>
+          Install Skill
+        </a>
+        <a href="#how-it-works" class="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-surface-700 border border-zinc-700 text-zinc-300 font-medium text-sm hover:border-zinc-600 transition-all">
+          How It Works
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <div class="section-divider max-w-4xl mx-auto"></div>
+
+  <!-- The Problem -->
+  <section class="py-20 px-6">
+    <div class="max-w-3xl mx-auto">
+      <h2 class="text-2xl sm:text-3xl font-bold text-zinc-100 mb-4 text-center">The problem</h2>
+      <p class="text-zinc-400 text-center mb-12 max-w-xl mx-auto">
+        AUDHD founders face compounding executive function challenges that generic productivity tools ignore entirely.
+      </p>
+      <div class="grid sm:grid-cols-2 gap-4">
+        <div class="p-5 rounded-xl bg-surface-800 border border-zinc-800">
+          <div class="text-zinc-500 text-sm font-mono mb-2">Working memory</div>
+          <p class="text-zinc-300 text-sm leading-relaxed">
+            If a task, person, or commitment is not visible on screen right now, it does not exist. Both ADHD and ASD compromise working memory independently. Combined, the deficit compounds.
+          </p>
+        </div>
+        <div class="p-5 rounded-xl bg-surface-800 border border-zinc-800">
+          <div class="text-zinc-500 text-sm font-mono mb-2">Wall of Awful</div>
+          <p class="text-zinc-300 text-sm leading-relaxed">
+            Emotional barriers built from accumulated failure. Blank-page paralysis on every outreach email, every follow-up, every ask. Not laziness. Self-protection.
+          </p>
+        </div>
+        <div class="p-5 rounded-xl bg-surface-800 border border-zinc-800">
+          <div class="text-zinc-500 text-sm font-mono mb-2">Decision fatigue</div>
+          <p class="text-zinc-300 text-sm leading-relaxed">
+            ADHD brains deplete dopamine faster during decision-making. Too many choices triggers freeze. "Who do I contact first? What do I say?" becomes paralysis.
+          </p>
+        </div>
+        <div class="p-5 rounded-xl bg-surface-800 border border-zinc-800">
+          <div class="text-zinc-500 text-sm font-mono mb-2">RSD + outreach</div>
+          <p class="text-zinc-300 text-sm leading-relaxed">
+            Rejection Sensitive Dysphoria makes every cold message feel like a personal risk. The most common coping mechanism: refusing to try at all.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="section-divider max-w-4xl mx-auto"></div>
+
+  <!-- Features -->
+  <section class="py-20 px-6">
+    <div class="max-w-4xl mx-auto">
+      <h2 class="text-2xl sm:text-3xl font-bold text-zinc-100 mb-4 text-center">What the skill does</h2>
+      <p class="text-zinc-400 text-center mb-12 max-w-xl mx-auto">
+        Every feature exists to eliminate a specific executive function gap. Nothing decorative.
+      </p>
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+
+        <!-- Feature 1 -->
+        <div class="card-glow rounded-xl p-6 transition-all duration-200">
+          <div class="w-10 h-10 rounded-lg bg-accent-green/10 flex items-center justify-center mb-4">
+            <svg class="w-5 h-5 text-accent-green" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"/>
+            </svg>
+          </div>
+          <h3 class="text-zinc-100 font-semibold mb-2 text-sm">Friction-sorted ordering</h3>
+          <p class="text-zinc-400 text-sm leading-relaxed">
+            Tasks ordered by friction, lowest first. 2-minute replies before 5-minute DMs before 10-minute emails. Momentum builds before harder tasks surface.
+          </p>
+        </div>
+
+        <!-- Feature 2 -->
+        <div class="card-glow rounded-xl p-6 transition-all duration-200">
+          <div class="w-10 h-10 rounded-lg bg-accent-green/10 flex items-center justify-center mb-4">
+            <svg class="w-5 h-5 text-accent-green" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+            </svg>
+          </div>
+          <h3 class="text-zinc-100 font-semibold mb-2 text-sm">Copy-paste everything</h3>
+          <p class="text-zinc-400 text-sm leading-relaxed">
+            Every item has the actual message text with a Copy button. Emails include subject lines. DMs are ready to paste. The compose step is eliminated entirely.
+          </p>
+        </div>
+
+        <!-- Feature 3 -->
+        <div class="card-glow rounded-xl p-6 transition-all duration-200">
+          <div class="w-10 h-10 rounded-lg bg-accent-green/10 flex items-center justify-center mb-4">
+            <svg class="w-5 h-5 text-accent-green" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/>
+            </svg>
+          </div>
+          <h3 class="text-zinc-100 font-semibold mb-2 text-sm">No shame language ever</h3>
+          <p class="text-zinc-400 text-sm leading-relaxed">
+            No "overdue." No "missed." No "failed." Carried forward. Ready when you are. Awaiting reply. Effort tracked, never outcomes. RSD-safe by default.
+          </p>
+        </div>
+
+        <!-- Feature 4 -->
+        <div class="card-glow rounded-xl p-6 transition-all duration-200">
+          <div class="w-10 h-10 rounded-lg bg-accent-green/10 flex items-center justify-center mb-4">
+            <svg class="w-5 h-5 text-accent-green" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+            </svg>
+          </div>
+          <h3 class="text-zinc-100 font-semibold mb-2 text-sm">Zero-decision execution</h3>
+          <p class="text-zinc-400 text-sm leading-relaxed">
+            The system picks who to contact, what to say, in what order, through which channel. You copy, paste, and check off. Override if you want, but you never have to decide.
+          </p>
+        </div>
+
+        <!-- Feature 5 -->
+        <div class="card-glow rounded-xl p-6 transition-all duration-200">
+          <div class="w-10 h-10 rounded-lg bg-accent-green/10 flex items-center justify-center mb-4">
+            <svg class="w-5 h-5 text-accent-green" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+          </div>
+          <h3 class="text-zinc-100 font-semibold mb-2 text-sm">Energy-tagged tasks</h3>
+          <p class="text-zinc-400 text-sm leading-relaxed">
+            Every item tagged: Quick Win, Deep Focus, People, or Admin. Similar-energy tasks batched together. Context-switching minimized. Transition buffers included.
+          </p>
+        </div>
+
+        <!-- Feature 6 -->
+        <div class="card-glow rounded-xl p-6 transition-all duration-200">
+          <div class="w-10 h-10 rounded-lg bg-accent-green/10 flex items-center justify-center mb-4">
+            <svg class="w-5 h-5 text-accent-green" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+          </div>
+          <h3 class="text-zinc-100 font-semibold mb-2 text-sm">Automatic crack detection</h3>
+          <p class="text-zinc-400 text-sm leading-relaxed">
+            Surfaces what fell through without you remembering to check. Awaiting reply over 7 days. Meeting follow-ups not sent. Cooling contacts. All with recovery drafts attached.
+          </p>
+        </div>
+
+        <!-- Feature 7 -->
+        <div class="card-glow rounded-xl p-6 transition-all duration-200">
+          <div class="w-10 h-10 rounded-lg bg-accent-green/10 flex items-center justify-center mb-4">
+            <svg class="w-5 h-5 text-accent-green" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+            </svg>
+          </div>
+          <h3 class="text-zinc-100 font-semibold mb-2 text-sm">Inline relationship context</h3>
+          <p class="text-zinc-400 text-sm leading-relaxed">
+            Every person-related task shows last interaction, what was discussed, and what you owe them. Context and action in one place. Never search your memory.
+          </p>
+        </div>
+
+        <!-- Feature 8 -->
+        <div class="card-glow rounded-xl p-6 transition-all duration-200">
+          <div class="w-10 h-10 rounded-lg bg-accent-green/10 flex items-center justify-center mb-4">
+            <svg class="w-5 h-5 text-accent-green" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+            </svg>
+          </div>
+          <h3 class="text-zinc-100 font-semibold mb-2 text-sm">Skip without shame</h3>
+          <p class="text-zinc-400 text-sm leading-relaxed">
+            Missed items move to "carried forward" without commentary. Every section is independently completable. Missing one module does not invalidate others.
+          </p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <div class="section-divider max-w-4xl mx-auto"></div>
+
+  <!-- How It Works -->
+  <section id="how-it-works" class="py-20 px-6">
+    <div class="max-w-3xl mx-auto">
+      <h2 class="text-2xl sm:text-3xl font-bold text-zinc-100 mb-4 text-center">How it works</h2>
+      <p class="text-zinc-400 text-center mb-12 max-w-xl mx-auto">
+        Installed as a Claude Code skill. It becomes a behavioral layer that governs every output your system generates.
+      </p>
+      <div class="space-y-6">
+        <div class="flex gap-5">
+          <div class="flex-shrink-0 w-10 h-10 rounded-full bg-surface-700 border border-zinc-700 flex items-center justify-center text-zinc-400 font-mono text-sm font-semibold">1</div>
+          <div>
+            <h3 class="text-zinc-100 font-semibold mb-1">Install the skill into your Claude Code project</h3>
+            <p class="text-zinc-400 text-sm leading-relaxed">
+              Drop the skill folder into <code class="text-zinc-300 bg-surface-700 px-1.5 py-0.5 rounded text-xs font-mono">.claude/skills/audhd-executive-function/</code> in your project. Claude Code reads it automatically on every session.
+            </p>
+          </div>
+        </div>
+        <div class="flex gap-5">
+          <div class="flex-shrink-0 w-10 h-10 rounded-full bg-surface-700 border border-zinc-700 flex items-center justify-center text-zinc-400 font-mono text-sm font-semibold">2</div>
+          <div>
+            <h3 class="text-zinc-100 font-semibold mb-1">Reference it in your CLAUDE.md</h3>
+            <p class="text-zinc-400 text-sm leading-relaxed">
+              Add a rule to your project's <code class="text-zinc-300 bg-surface-700 px-1.5 py-0.5 rounded text-xs font-mono">CLAUDE.md</code> telling Claude to read the skill before generating any output the user will act on. This makes it non-optional.
+            </p>
+          </div>
+        </div>
+        <div class="flex gap-5">
+          <div class="flex-shrink-0 w-10 h-10 rounded-full bg-surface-700 border border-zinc-700 flex items-center justify-center text-zinc-400 font-mono text-sm font-semibold">3</div>
+          <div>
+            <h3 class="text-zinc-100 font-semibold mb-1">Every output follows the rules automatically</h3>
+            <p class="text-zinc-400 text-sm leading-relaxed">
+              Morning routines, daily schedules, task lists, engagement hitlists, follow-up emails. Everything Claude generates is friction-sorted, copy-paste ready, and shame-free. The skill enforces this across all commands.
+            </p>
+          </div>
+        </div>
+        <div class="flex gap-5">
+          <div class="flex-shrink-0 w-10 h-10 rounded-full bg-surface-700 border border-zinc-700 flex items-center justify-center text-zinc-400 font-mono text-sm font-semibold">4</div>
+          <div>
+            <h3 class="text-zinc-100 font-semibold mb-1">A 10-point quality gate validates every output</h3>
+            <p class="text-zinc-400 text-sm leading-relaxed">
+              Copy-paste test. Link test. Time test. Context test. Zero-decision test. No-shame test. Crack test. Inline test. Order test. Independence test. All must pass before any output reaches you.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="section-divider max-w-4xl mx-auto"></div>
+
+  <!-- Sample Output -->
+  <section class="py-20 px-6">
+    <div class="max-w-3xl mx-auto">
+      <h2 class="text-2xl sm:text-3xl font-bold text-zinc-100 mb-4 text-center">Sample output</h2>
+      <p class="text-zinc-400 text-center mb-12 max-w-xl mx-auto">
+        This is what a single task item looks like in your daily schedule. Every item follows this structure.
+      </p>
+
+      <!-- Mock Task Item -->
+      <div class="mock-item rounded-2xl p-6 max-w-2xl mx-auto">
+        <!-- Header row -->
+        <div class="flex items-start justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <div class="w-5 h-5 rounded border-2 border-zinc-600 flex-shrink-0"></div>
+            <div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="badge bg-accent-blueDim text-accent-blue">LinkedIn</span>
+                <span class="badge bg-accent-greenDim text-accent-green">Quick Win</span>
+                <span class="text-zinc-500 text-xs font-mono">~3 min</span>
+              </div>
+            </div>
+          </div>
+          <a href="#" class="text-accent-green text-xs hover:underline flex items-center gap-1 flex-shrink-0">
+            Open DM
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+            </svg>
+          </a>
+        </div>
+
+        <!-- Person context -->
+        <div class="mb-4 pl-8">
+          <div class="text-zinc-100 font-semibold text-sm">Sarah Chen / Meridian Security</div>
+          <div class="text-zinc-500 text-xs mt-1 leading-relaxed">
+            Last: Call on Tuesday. Liked the demo. Asked about API integrations.<br>
+            Owed: Send pricing doc + case study. She presents to her VP on Friday.
+          </div>
+        </div>
+
+        <!-- Action -->
+        <div class="pl-8 mb-3">
+          <div class="text-zinc-300 text-sm mb-3">
+            Send follow-up DM with pricing doc and the Acme case study.
+          </div>
+        </div>
+
+        <!-- Copy box -->
+        <div class="pl-8">
+          <div class="copy-box rounded-lg p-4 relative">
+            <div class="text-zinc-300 text-sm leading-relaxed font-mono">
+              Hey Sarah - great talking Tuesday. Attaching the pricing breakdown and the Acme case study you asked about. The API integration section starts on page 3 which should cover what your team needed. Happy to walk through anything before your VP presentation Friday. No rush either way.
+            </div>
+            <button onclick="navigator.clipboard.writeText(this.parentElement.querySelector('.text-zinc-300').textContent.trim()).then(() => { this.textContent = 'Copied'; setTimeout(() => this.textContent = 'Copy', 1500) })"
+              class="absolute top-3 right-3 px-2.5 py-1 rounded-md bg-accent-green/10 border border-accent-green/30 text-accent-green text-xs font-medium hover:bg-accent-green/20 transition-all cursor-pointer">
+              Copy
+            </button>
+          </div>
+        </div>
+
+        <!-- Carried forward note -->
+        <div class="pl-8 mt-3">
+          <span class="text-zinc-600 text-xs italic">Carried forward from yesterday</span>
+        </div>
+      </div>
+
+      <!-- Summary bar -->
+      <div class="mt-6 max-w-2xl mx-auto">
+        <div class="flex items-center justify-between text-xs text-zinc-500 px-2 mb-2">
+          <span>3 of 11 actions done</span>
+          <span>Today: ~42 min, 11 actions</span>
+        </div>
+        <div class="h-1.5 rounded-full bg-surface-700 overflow-hidden">
+          <div class="h-full w-[27%] rounded-full bg-accent-green/60"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="section-divider max-w-4xl mx-auto"></div>
+
+  <!-- Anti-patterns -->
+  <section class="py-20 px-6">
+    <div class="max-w-3xl mx-auto">
+      <h2 class="text-2xl sm:text-3xl font-bold text-zinc-100 mb-4 text-center">What this skill never does</h2>
+      <p class="text-zinc-400 text-center mb-12 max-w-xl mx-auto">
+        These are hard rules. The skill actively blocks these patterns from appearing in any output.
+      </p>
+      <div class="grid sm:grid-cols-2 gap-4">
+        <div class="anti-card rounded-xl p-5">
+          <div class="flex items-start gap-3">
+            <svg class="w-4 h-4 text-red-400/70 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            <div>
+              <div class="text-zinc-200 text-sm font-medium mb-1">Dashboards without actions</div>
+              <p class="text-zinc-500 text-xs leading-relaxed">A score means nothing unless the recovery draft is right there. Pipeline counts without per-person actions are analytics, not executive function.</p>
+            </div>
+          </div>
+        </div>
+        <div class="anti-card rounded-xl p-5">
+          <div class="flex items-start gap-3">
+            <svg class="w-4 h-4 text-red-400/70 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            <div>
+              <div class="text-zinc-200 text-sm font-medium mb-1">Options to evaluate</div>
+              <p class="text-zinc-500 text-xs leading-relaxed">"Here are 3 comment styles, which do you prefer?" is a decision. The system picks. One comment, ready to copy. Override if you want.</p>
+            </div>
+          </div>
+        </div>
+        <div class="anti-card rounded-xl p-5">
+          <div class="flex items-start gap-3">
+            <svg class="w-4 h-4 text-red-400/70 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            <div>
+              <div class="text-zinc-200 text-sm font-medium mb-1">Abstract task names</div>
+              <p class="text-zinc-500 text-xs leading-relaxed">"Follow up with Jay" is not a task. The actual email text is the task. Every item contains the literal next physical action.</p>
+            </div>
+          </div>
+        </div>
+        <div class="anti-card rounded-xl p-5">
+          <div class="flex items-start gap-3">
+            <svg class="w-4 h-4 text-red-400/70 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            <div>
+              <div class="text-zinc-200 text-sm font-medium mb-1">Shame language</div>
+              <p class="text-zinc-500 text-xs leading-relaxed">No "overdue," "missed," "failed," "forgot," "dropped the ball," "behind." Effort tracked, never outcomes. RSD protection is structural.</p>
+            </div>
+          </div>
+        </div>
+        <div class="anti-card rounded-xl p-5">
+          <div class="flex items-start gap-3">
+            <svg class="w-4 h-4 text-red-400/70 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            <div>
+              <div class="text-zinc-200 text-sm font-medium mb-1">Cross-references</div>
+              <p class="text-zinc-500 text-xs leading-relaxed">"See section above" or "copy from file X" is a working memory tax. Everything is inline. The user never scrolls or searches.</p>
+            </div>
+          </div>
+        </div>
+        <div class="anti-card rounded-xl p-5">
+          <div class="flex items-start gap-3">
+            <svg class="w-4 h-4 text-red-400/70 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            <div>
+              <div class="text-zinc-200 text-sm font-medium mb-1">Outcome metrics</div>
+              <p class="text-zinc-500 text-xs leading-relaxed">"0 replies received" triggers RSD. Track effort only. "You sent 4 messages yesterday" is the metric. What came back is not your score.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="section-divider max-w-4xl mx-auto"></div>
+
+  <!-- Research-backed -->
+  <section class="py-20 px-6">
+    <div class="max-w-3xl mx-auto">
+      <h2 class="text-2xl sm:text-3xl font-bold text-zinc-100 mb-4 text-center">Built for AUDHD brains</h2>
+      <p class="text-zinc-400 text-center mb-12 max-w-xl mx-auto">
+        Design decisions grounded in AUDHD research. Barkley's scaffolding framework, Mahan's Wall of Awful, Dodson's interest-based nervous system model.
+      </p>
+      <div class="space-y-4">
+        <div class="p-5 rounded-xl bg-surface-800 border border-zinc-800 flex gap-4">
+          <div class="text-accent-green font-mono text-sm font-bold flex-shrink-0 mt-0.5 w-6 text-right">01</div>
+          <div>
+            <div class="text-zinc-100 font-semibold text-sm mb-1">The system IS the executive function</div>
+            <p class="text-zinc-400 text-sm leading-relaxed">Based on Barkley's scaffolding: externalize working memory, planning, and initiation into the environment. The daily HTML is not a briefing. It is the user's entire workday, pre-loaded.</p>
+          </div>
+        </div>
+        <div class="p-5 rounded-xl bg-surface-800 border border-zinc-800 flex gap-4">
+          <div class="text-accent-green font-mono text-sm font-bold flex-shrink-0 mt-0.5 w-6 text-right">02</div>
+          <div>
+            <div class="text-zinc-100 font-semibold text-sm mb-1">Momentum-first, not eat-the-frog</div>
+            <p class="text-zinc-400 text-sm leading-relaxed">The interest-based nervous system needs activation energy. Start with quick wins to build completion dopamine. Then surface harder tasks while momentum is flowing. Never start with the hardest item.</p>
+          </div>
+        </div>
+        <div class="p-5 rounded-xl bg-surface-800 border border-zinc-800 flex gap-4">
+          <div class="text-accent-green font-mono text-sm font-bold flex-shrink-0 mt-0.5 w-6 text-right">03</div>
+          <div>
+            <div class="text-zinc-100 font-semibold text-sm mb-1">Flexible rails, not rigid routines</div>
+            <p class="text-zinc-400 text-sm leading-relaxed">AUDHD paradox: craves predictable routines AND rebels against monotony. Solution: consistent structure with dynamic content. Layout never changes. Each section independently completable. Skipping one never invalidates others.</p>
+          </div>
+        </div>
+        <div class="p-5 rounded-xl bg-surface-800 border border-zinc-800 flex gap-4">
+          <div class="text-accent-green font-mono text-sm font-bold flex-shrink-0 mt-0.5 w-6 text-right">04</div>
+          <div>
+            <div class="text-zinc-100 font-semibold text-sm mb-1">Sensory-safe visual design</div>
+            <p class="text-zinc-400 text-sm leading-relaxed">Muted dark palette. No animations or flashing. High information density, low visual noise. Typography hierarchy (size, weight) for importance, not color. Single column. Works on phone.</p>
+          </div>
+        </div>
+        <div class="p-5 rounded-xl bg-surface-800 border border-zinc-800 flex gap-4">
+          <div class="text-accent-green font-mono text-sm font-bold flex-shrink-0 mt-0.5 w-6 text-right">05</div>
+          <div>
+            <div class="text-zinc-100 font-semibold text-sm mb-1">Progress visibility as dopamine</div>
+            <p class="text-zinc-400 text-sm leading-relaxed">Completion is a neurological accommodation. Visual progress bar at top. Completed items stay visible (struck through). End-of-day effort summary. Show what WAS done, never what wasn't.</p>
+          </div>
+        </div>
+        <div class="p-5 rounded-xl bg-surface-800 border border-zinc-800 flex gap-4">
+          <div class="text-accent-green font-mono text-sm font-bold flex-shrink-0 mt-0.5 w-6 text-right">06</div>
+          <div>
+            <div class="text-zinc-100 font-semibold text-sm mb-1">Body doubling through persistent presence</div>
+            <p class="text-zinc-400 text-sm leading-relaxed">The dashboard is always present. It knows what you committed to. Shows what you are working on. Witnesses without judging. A digital body double that never sighs, checks the clock, or looks disappointed.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="section-divider max-w-4xl mx-auto"></div>
+
+  <!-- Install CTA -->
+  <section id="install" class="py-20 px-6">
+    <div class="max-w-2xl mx-auto">
+      <h2 class="text-2xl sm:text-3xl font-bold text-zinc-100 mb-4 text-center">Install the skill</h2>
+      <p class="text-zinc-400 text-center mb-10 max-w-lg mx-auto">
+        Add it to any Claude Code project. Three files, one behavioral layer that governs everything.
+      </p>
+      <div class="bg-surface-800 border border-zinc-800 rounded-2xl p-6 sm:p-8">
+        <div class="space-y-6">
+          <!-- Step 1 -->
+          <div>
+            <div class="text-zinc-400 text-xs font-mono mb-2">Step 1 / Copy the skill folder</div>
+            <div class="bg-surface-900 rounded-lg p-4 relative font-mono text-sm">
+              <div class="text-zinc-300 overflow-x-auto">
+                <div class="text-zinc-500"># Add to your project</div>
+                <div>.claude/skills/audhd-executive-function/</div>
+                <div class="text-zinc-500 mt-1">&nbsp;&nbsp;SKILL.md</div>
+                <div class="text-zinc-500">&nbsp;&nbsp;references/research.md</div>
+                <div class="text-zinc-500">&nbsp;&nbsp;references/user-profile.md</div>
+              </div>
+            </div>
+          </div>
+          <!-- Step 2 -->
+          <div>
+            <div class="text-zinc-400 text-xs font-mono mb-2">Step 2 / Add to CLAUDE.md</div>
+            <div class="bg-surface-900 rounded-lg p-4 relative font-mono text-sm">
+              <div class="text-zinc-300 overflow-x-auto whitespace-pre">Every output the founder will act on must follow
+the audhd-executive-function skill. Read
+.claude/skills/audhd-executive-function/SKILL.md
+before generating any actionable output.</div>
+              <button onclick="navigator.clipboard.writeText('Every output the founder will act on must follow the audhd-executive-function skill. Read .claude/skills/audhd-executive-function/SKILL.md before generating any actionable output.').then(() => { this.textContent = 'Copied'; setTimeout(() => this.textContent = 'Copy', 1500) })"
+                class="absolute top-3 right-3 px-2.5 py-1 rounded-md bg-accent-green/10 border border-accent-green/30 text-accent-green text-xs font-medium hover:bg-accent-green/20 transition-all cursor-pointer">
+                Copy
+              </button>
+            </div>
+          </div>
+          <!-- Step 3 -->
+          <div>
+            <div class="text-zinc-400 text-xs font-mono mb-2">Step 3 / Customize your profile</div>
+            <p class="text-zinc-400 text-sm leading-relaxed">
+              Edit <code class="text-zinc-300 bg-surface-700 px-1.5 py-0.5 rounded text-xs font-mono">references/user-profile.md</code> with your behavioral patterns, energy rhythms, and known triggers. The more specific your profile, the better the system accommodates you.
+            </p>
+          </div>
+        </div>
+
+        <div class="mt-8 pt-6 border-t border-zinc-800">
+          <div class="flex items-center gap-3 text-sm">
+            <svg class="w-4 h-4 text-accent-green flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <span class="text-zinc-400">Works with any Claude Code project. No external dependencies. No API keys needed.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="py-12 px-6 border-t border-zinc-800/50">
+    <div class="max-w-3xl mx-auto text-center">
+      <p class="text-zinc-600 text-sm">
+        Built for the brains that build everything else.
+      </p>
+    </div>
+  </footer>
+
+</body>
+</html>
