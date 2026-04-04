@@ -1,6 +1,6 @@
 # Template: Reddit Post / Comment
 
-> Used by `/q-market-create reddit [subreddit] [topic]` and `/q-engage`
+> Used by `/q-market-create reddit [r/subreddit - topic]` and `/q-engage`
 > Community-first. Value-add only. No self-promotion until established.
 
 ---

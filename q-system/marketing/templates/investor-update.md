@@ -11,60 +11,61 @@
 2. **Check decisions.md** for major decisions since last update
 3. **Check relationships.md** for investor context (what they care about, last touchpoint)
 4. **Pull pipeline state** from CRM or relationships.md
-5. **Check canonical files** for any positioning changes to highlight
+5. **Check memory/morning-state.md** -> "Investor Update Tracker" for last update date
 
 ## Structure
 
 ```
-Subject: [Company] Update - [Month] | [One-line highlight]
+Subject: {{YOUR_PRODUCT}} Update - [Month] [Year] - [1 headline]
 
-[Investor name] -
+Hi [first name],
 
-**Highlights**
-- [Win 1 - the biggest, most concrete]
-- [Win 2 - traction, validation, or milestone]
-- [Win 3 - team, product, or market signal]
+Quick update on {{YOUR_PRODUCT}} since we last talked.
 
-**Metrics**
-| Metric | Last Update | Now | Delta |
-|--------|------------|-----|-------|
-| [Key metric 1] | | | |
-| [Key metric 2] | | | |
-| [Key metric 3] | | | |
+HIGHLIGHT (1 sentence - the single biggest thing)
+[The one thing that moves the needle most]
 
-**What's working:**
-[1-2 sentences on what's gained traction and why]
+PRODUCT
+- [2-3 bullets, concrete, no fluff]
 
-**What's not:**
-[1-2 sentences on what's stalled or pivoted. Be honest.]
+TRACTION
+- [Design partners, conversations, pipeline numbers]
 
-**Ask:**
-[One specific, actionable ask. Intro, feedback, signal boost, hiring lead.]
+WHAT'S NEXT
+- [2-3 bullets on immediate priorities]
 
-**Next milestones:**
-- [Milestone 1 - with target date]
-- [Milestone 2 - with target date]
+ASK (optional - only if there's a specific, low-effort ask)
+- [Intro to a specific person, feedback on a specific thing]
 
+Thanks for following along.
 {{YOUR_NAME}}
 ```
 
+## Variants
+
+- **Active pipeline VCs** (status: Follow-up, First Meeting): Include ASK tailored to their portfolio
+- **Thesis nod VCs** (status: First Meeting done, no next step): Standard update, no ASK. Let traction speak.
+- **Warm connectors** (people who offered intros): Include specific intro ASK if relevant
+- **BCC list** (everyone else): Standard update, generic sign-off
+
 ## Rules
 
-- Under 500 words total
-- Lead with wins, be honest about misses
-- One clear ask, not three
-- Metrics table is required (even if small)
-- "What's not working" section is required (builds trust)
-- No "exciting" / "thrilled" / "incredible traction"
-- Send from personal email, not a newsletter tool
-- BCC if sending to multiple investors (or personalize per-investor)
+- Under 300 words. VCs scan, they don't read.
+- Plain text email. No HTML, no fancy formatting.
+- Lead with the strongest proof point, not vision.
+- No "we're excited to announce" or "thrilled to share" - just state the fact.
+- Numbers over adjectives. "3 design partners" not "growing traction."
+- The ASK must be specific and low-effort. "Would you intro me to [Name] at [Company]?" not "Let me know if you know anyone."
+- Personalize the ASK per VC based on their portfolio/network (batch of 3-4 variants max).
+- Send from personal email, not a newsletter tool.
 
 ## Output Format
 
-Save to: `output/marketing/investor-updates/investor-update-YYYY-MM-DD.md`
+Save to: `output/investor-updates/investor-update-YYYY-MM-DD.md`
 
 ## Post-Generation
 
 1. Run voice skill on the draft
-2. Personalize per-investor if asks differ
-3. Log send date in relationships.md
+2. Include recipient list with variant assignments
+3. Update `memory/morning-state.md` -> "Investor Update Tracker" with date and summary
+4. Create Action: "Review and send investor update" (Energy: Deep Focus, Time: 15 min)
