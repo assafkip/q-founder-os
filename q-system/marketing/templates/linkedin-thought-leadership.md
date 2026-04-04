@@ -1,6 +1,6 @@
 # Template: LinkedIn Thought Leadership Post
 
-> Used by `/q-market-create linkedin-tl [topic]`
+> Used by `/q-market-create linkedin [topic]`
 > Cadence: 2-3x/week per content-themes.md rotation
 
 ---
