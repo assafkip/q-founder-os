@@ -29,3 +29,9 @@ Same as linkedin-signals.md. Generated from the same signal selection.
 ## Output Format
 
 Saved alongside LinkedIn signals in `output/signals-post-YYYY-MM-DD.md`
+
+## Post-Generation
+
+1. Save to signals file
+2. Add to Daily Posts page (if using Notion)
+3. Create Content Pipeline DB entry if marketing system active

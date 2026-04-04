@@ -73,3 +73,9 @@ TWEET 3:
 
 **Guardrails:** [PASS/FAIL]
 ```
+
+## Post-Generation
+
+1. Run `/q-market-review` against the draft
+2. Generate imagery per Imagery section (if applicable)
+3. Create Content Pipeline DB entry (Status: Drafted)
