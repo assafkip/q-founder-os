@@ -1,0 +1,20 @@
+#!/bin/bash
+set -euo pipefail
+
+# Pre-push validation for kipi-system skeleton
+# Runs full validation (phases 0-5) before pushing to remote.
+# This protects all instances from broken skeleton pushes.
+
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+echo "[pre-push] Running full skeleton validation (phases 0-5)..."
+
+if ! python3 "$SCRIPT_DIR/validate-separation.py" 5 2>/dev/null; then
+    echo ""
+    echo "[pre-push] BLOCKED: Full validation failed."
+    echo "Run 'python3 validate-separation.py 5 --verbose' to see details."
+    echo "Fix all failures before pushing to remote."
+    exit 1
+fi
+
+echo "[pre-push] All phases GREEN. Push allowed."

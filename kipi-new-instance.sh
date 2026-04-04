@@ -81,8 +81,10 @@ cp "$SCRIPT_DIR"/.claude/rules/*.md .claude/rules/ 2>/dev/null || true
 cp -R "$SCRIPT_DIR/.claude-plugin" .claude-plugin 2>/dev/null || true
 cp -R "$SCRIPT_DIR/plugins" plugins 2>/dev/null || true
 
-# Set up .gitignore
+# Set up .gitignore and git hooks
 cp "$SCRIPT_DIR/.gitignore" .gitignore 2>/dev/null || true
+cp -R "$SCRIPT_DIR/.githooks" .githooks 2>/dev/null || true
+git config core.hooksPath .githooks 2>/dev/null || true
 
 echo "  .claude/ configured with hooks, rules, agents, and plugins"
 
