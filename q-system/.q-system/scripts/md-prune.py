@@ -9,7 +9,6 @@ When a file exceeds its budget, archives oldest sections
 Exit 0 always (never blocks). Prints warnings to stdout.
 """
 
-import os
 import re
 import sys
 from datetime import datetime
