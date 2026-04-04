@@ -52,7 +52,7 @@ Phase 7: Synthesis (sequential, opus)
 
 Phase 8: Build + Verify (sequential)
   -> Bash: build-schedule.py (builds HTML from JSON)
-  -> Agent: 08-visual-verify.md (sonnet)     -> bus/{date}/visual-verify.json
+  -> Agent: 08-visual-verify.md (haiku)      -> bus/{date}/visual-verify.json
   -> Bash: audit-morning.py (validates log)
 ```
 
@@ -60,7 +60,7 @@ Phase 8: Build + Verify (sequential)
 
 1. Each agent prompt includes: what bus/ files to READ, what bus/ file to WRITE
 2. Agents that read social posts must save FULL TEXT, never summaries
-3. Sonnet for data pulls and checks. Opus only for synthesis and engagement hitlist.
+3. Haiku for data pulls, scrapes, and simple writes. Sonnet for analysis/content. Opus only for synthesis and engagement hitlist.
 4. If any Phase 0-1 agent fails, HALT everything
 5. Phases 2+ can degrade gracefully (log failure, continue)
 6. Bus files are JSON. Agents parse JSON in, write JSON out.
