@@ -74,11 +74,11 @@ kipi-system/                          # Project root (skeleton/template repo + m
 │   │   └── founder.md                # Founder OS voice baseline
 │   │
 │   ├── rules/                        # Path-scoped instruction files
-│   │   └── (14 files: anti-misclassification, audhd, auto-detection,
+│   │   └── (15 files: anti-misclassification, audhd, auto-detection,
 │   │        coding-standards, content-output, design-auto-invoke,
 │   │        dev-skills-auto-invoke, folder-structure, marketing-system,
-│   │        morning-pipeline, security, sycophancy, token-discipline,
-│   │        voice-enforcement)
+│   │        md-hygiene, morning-pipeline, security, sycophancy,
+│   │        token-discipline, voice-enforcement)
 │   │
 │   └── plans/                        # Plan mode output (auto-created, GITIGNORED)
 │       └── *.md
@@ -125,6 +125,7 @@ kipi-system/                          # Project root (skeleton/template repo + m
 │   │   ├── morning-state.md          # Checkpoint state (written by /q-checkpoint)
 │   │   ├── marketing-state.md        # Publish log + cadence actuals
 │   │   ├── sycophancy-log.json       # Rolling bias audit log
+│   │   ├── archives/                 # Pruned sections (created by md-prune.py, GITIGNORED)
 │   │   ├── working/                  # Working memory (current session)
 │   │   ├── weekly/                   # Weekly memory rollups
 │   │   └── monthly/                  # Monthly memory rollups
