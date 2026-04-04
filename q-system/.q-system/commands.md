@@ -2206,7 +2206,7 @@ Supported types and their templates:
 | `deck` | slide-deck-brief.md | Optional | Yes (presentation format) | output/marketing/decks/ |
 | `follow-up` | follow-up-email.md | No | No | output/marketing/outreach/ |
 | `reddit` | reddit-post.md | No | No | output/marketing/reddit/ |
-| `investor-update` | investor-update.md | No | No | output/marketing/investor-updates/ |
+| `investor-update` | investor-update.md | No | No | output/investor-updates/ |
 
 Workflow for each type:
 1. Read the corresponding template from `marketing/templates/`
@@ -2215,7 +2215,7 @@ Workflow for each type:
 2.5. **Read `marketing/brand-kit.html`** for visual identity (colors, fonts, components, layout patterns). This step is MANDATORY for one-pager, deck, and any HTML/visual output. For linkedin, x, and medium types, reference the brand kit when generating any accompanying visual assets (social cards, carousels, banners). Use the CSS variables (--k- prefix), type scale, component patterns, and CNS color naming from the kit.
 3. Follow template's pre-generation steps (canonical sources, NotebookLM queries, CRM lookup)
 4. Generate content following template structure, informed by content intelligence patterns
-5. **Generate Gamma visual (MANDATORY for all content types except outreach/follow-up):**
+5. **Generate Gamma visual (MANDATORY for all content types except outreach/follow-up/reddit/investor-update):**
    - **linkedin:** Call `mcp__gamma__generate_gamma` with format "social", inputText = post summary + key stat/quote. For thought leadership, generate a carousel (format "presentation", 3-5 slides, one insight per slide). Save Gamma URL + export links alongside the post file.
    - **x:** Call `mcp__gamma__generate_gamma` with format "social", inputText = hot take or key stat. Single image card. Save URL + exports.
    - **medium:** Call `mcp__gamma__generate_gamma` twice: (1) format "social" for article header image (title + key visual), (2) format "social" for LinkedIn/X sharing card. Save both URLs.
