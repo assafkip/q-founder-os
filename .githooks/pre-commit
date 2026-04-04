@@ -1,0 +1,51 @@
+#!/bin/bash
+set -euo pipefail
+
+# Pre-commit validation for kipi-system skeleton
+# Runs fast checks (phases 0-1) to catch regressions before commit.
+# Install: git config core.hooksPath .githooks
+
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+echo "[pre-commit] Running skeleton validation (phases 0-1)..."
+
+# Phase 0: registry + instance paths exist
+# Phase 1: skeleton integrity (agents, scripts, canonical, voice, CLAUDE.md)
+if ! python3 "$SCRIPT_DIR/validate-separation.py" 1 2>/dev/null; then
+    echo ""
+    echo "[pre-commit] BLOCKED: Skeleton validation failed."
+    echo "Run 'python3 validate-separation.py 1 --verbose' to see details."
+    exit 1
+fi
+
+# Check for protected file changes that need extra review
+PROTECTED_FILES=(
+    "q-system/CLAUDE.md"
+    "q-system/.q-system/token-guard.py"
+    "q-system/.q-system/agent-pipeline/agents/step-orchestrator.md"
+    "q-system/.q-system/agent-pipeline/BUS-PROTOCOL.md"
+    "validate-separation.py"
+    ".claude/settings.json"
+    "settings-template.json"
+    "kipi"
+)
+
+STAGED=$(git diff --cached --name-only)
+PROTECTED_CHANGED=()
+
+for pf in "${PROTECTED_FILES[@]}"; do
+    if echo "$STAGED" | grep -q "^${pf}$"; then
+        PROTECTED_CHANGED+=("$pf")
+    fi
+done
+
+if [ ${#PROTECTED_CHANGED[@]} -gt 0 ]; then
+    echo ""
+    echo "[pre-commit] WARNING: Protected files modified:"
+    for f in "${PROTECTED_CHANGED[@]}"; do
+        echo "  - $f"
+    done
+    echo "These files affect all instances. Review carefully before pushing."
+fi
+
+echo "[pre-commit] Validation passed."

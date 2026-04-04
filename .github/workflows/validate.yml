@@ -1,0 +1,58 @@
+name: Skeleton Validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run skeleton validation (Phase 1)
+        run: python3 validate-separation.py 1 --verbose
+        env:
+          CI: true
+
+      - name: Check for protected file changes
+        if: github.event_name == 'pull_request'
+        run: |
+          PROTECTED=(
+            "q-system/CLAUDE.md"
+            "q-system/.q-system/token-guard.py"
+            "q-system/.q-system/agent-pipeline/agents/step-orchestrator.md"
+            "q-system/.q-system/agent-pipeline/BUS-PROTOCOL.md"
+            "validate-separation.py"
+            ".claude/settings.json"
+            "settings-template.json"
+            "kipi"
+          )
+
+          CHANGED=$(gh pr diff ${{ github.event.pull_request.number }} --name-only 2>/dev/null || git diff --name-only origin/main...HEAD)
+          FLAGGED=()
+
+          for pf in "${PROTECTED[@]}"; do
+            if echo "$CHANGED" | grep -q "^${pf}$"; then
+              FLAGGED+=("$pf")
+            fi
+          done
+
+          if [ ${#FLAGGED[@]} -gt 0 ]; then
+            echo "::warning::Protected files modified: ${FLAGGED[*]}"
+            echo "## Protected Files Modified" >> $GITHUB_STEP_SUMMARY
+            for f in "${FLAGGED[@]}"; do
+              echo "- \`$f\`" >> $GITHUB_STEP_SUMMARY
+            done
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "These files affect all instances. Review carefully." >> $GITHUB_STEP_SUMMARY
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
