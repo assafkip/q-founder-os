@@ -117,10 +117,11 @@ def prune_file(qroot, rel_path, budget):
     # Calculate target line count
     target = int(budget * PRUNE_TARGET)
 
-    # Keep sections from the end (newest), archive from the start (oldest)
+    # Separate pinned vs unpinned sections
+    # Pinned sections (contain <!-- pin -->) are never archived
     # Always keep the first section if it has no header (preamble/title)
-    keep_from_end = []
-    archive_from_start = []
+    keep = []
+    archive_candidates = []
     running_lines = 0
 
     # Preserve preamble (content before first ## header)
@@ -131,8 +132,28 @@ def prune_file(qroot, rel_path, budget):
         preamble_lines = preamble[1].count("\n") + 1
         running_lines += preamble_lines
 
-    # Walk from end, keep sections until we hit target
-    for section in reversed(working_sections):
+    # Split into pinned (always keep) and unpinned (archive candidates)
+    pinned = []
+    unpinned = []
+    for section in working_sections:
+        header_str = section[0] or ""
+        body_str = section[1] or ""
+        if "<!-- pin -->" in header_str or "<!-- pin -->" in body_str:
+            pinned.append(section)
+        else:
+            unpinned.append(section)
+
+    # Pinned sections always stay, count their lines
+    for section in pinned:
+        section_lines = (section[1].count("\n") + 1)
+        if section[0]:
+            section_lines += 1
+        running_lines += section_lines
+
+    # Walk unpinned from end (newest first), keep until target
+    keep_from_end = []
+    archive_from_start = []
+    for section in reversed(unpinned):
         section_lines = (section[1].count("\n") + 1)
         if section[0]:
             section_lines += 1  # header line
@@ -149,10 +170,15 @@ def prune_file(qroot, rel_path, budget):
     # Archive old sections
     archive_path = archive_sections(qroot, rel_path, archive_from_start)
 
-    # Rebuild file: preamble + kept sections
+    # Rebuild file: preamble + pinned (original order) + kept unpinned (newest)
+    # Pinned sections go first (they're foundational), then recent unpinned
     rebuilt = ""
     if preamble:
         rebuilt += preamble[1].rstrip() + "\n\n"
+    for section_header, section_body in pinned:
+        if section_header:
+            rebuilt += f"{section_header}\n"
+        rebuilt += section_body.rstrip() + "\n\n"
     for section_header, section_body in keep_from_end:
         if section_header:
             rebuilt += f"{section_header}\n"
