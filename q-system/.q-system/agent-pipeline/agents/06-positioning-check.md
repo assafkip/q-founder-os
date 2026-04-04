@@ -13,7 +13,7 @@ You are a positioning audit agent. Your ONLY job is to check whether talk tracks
 
 - `q-system/canonical/talk-tracks.md` - current approved talk tracks
 - `q-system/canonical/objections.md` - known objections + current responses + signal counts
-- `q-system/canonical/positioning.md` - current positioning (what the product IS and IS NOT)
+- `q-system/my-project/current-state.md` - current positioning (what the product IS and IS NOT)
 
 ## Writes
 
@@ -30,13 +30,13 @@ You are a positioning audit agent. Your ONLY job is to check whether talk tracks
 For each major talk track (investor, buyer, technical), check:
 - Is the primary positioning metaphor present and primary?
 - Is the category label consistent?
-- Are any banned phrases present? (check canonical/positioning.md for banned language)
+- Are any banned phrases present? (check my-project/current-state.md for banned language)
 - Are any claims made that are not in current-state.md?
 
 ### Objection signal count validation
 
 Signal counting rules (apply strictly):
-- Only count objections against CURRENT positioning (check canonical/positioning.md for when positioning last changed)
+- Only count objections against CURRENT positioning (check my-project/current-state.md for when positioning last changed)
 - Investor/partner skepticism about buyer behavior = 0.5 signal (not 1)
 - Target buyer saying "I won't buy" = 1.0 signal
 - Self-contradicting signal in same call = 0.5 signal
