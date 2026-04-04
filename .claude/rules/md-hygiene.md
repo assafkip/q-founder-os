@@ -1,3 +1,11 @@
+---
+description: Line budgets, section pinning, and auto-pruning for canonical and my-project files
+paths:
+  - "q-system/canonical/**"
+  - "q-system/my-project/**"
+  - "q-system/memory/**"
+---
+
 # Markdown Hygiene (ENFORCED)
 
 ## Line Budgets
