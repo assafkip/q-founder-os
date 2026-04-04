@@ -1,22 +1,26 @@
 ---
-description: Auto-invoke design skills when building UI or visual output
+description: Auto-invoke design skills when building NEW UI pages or components
 globs:
-  - "**/*.html"
-  - "**/*.css"
-  - "**/*.tsx"
-  - "**/*.jsx"
-  - "**/*.svelte"
-  - "**/*.vue"
+  - "sites/**/*.html"
+  - "sites/**/*.css"
+  - "sites/**/*.tsx"
+  - "sites/**/*.jsx"
 ---
 
 # Design Skill Auto-Invocation (ENFORCED)
 
-When building any webpage, landing page, UI component, or visual output:
+Invoke design skills ONLY when creating new pages, components, or landing pages from scratch.
 
 | Trigger | Skill | What it does |
 |---------|-------|-------------|
-| Building ANY webpage, landing page, UI, or HTML | `kipi-design:ui-ux-pro-max` | UX guidelines, styling, accessibility |
-| Brand-related output (logo, identity, guidelines) | `kipi-design:brand` | Brand voice, visual identity, messaging |
+| Creating a NEW webpage, landing page, or UI component | `kipi-design:ui-ux-pro-max` | UX guidelines, styling, accessibility |
+| Brand identity work (logo, identity system, guidelines) | `kipi-design:brand` | Brand voice, visual identity, messaging |
 | Comprehensive design (logo, CIP, banners, slides, tokens) | `kipi-design:design` | Orchestrates all design sub-skills |
 
-**Rule:** ALWAYS run `ui-ux-pro-max` first to generate the design system BEFORE writing any HTML/CSS/JS.
+**Rule:** Run `ui-ux-pro-max` first to generate the design system BEFORE writing new pages/components.
+
+**Do NOT invoke for:**
+- Editing existing HTML/CSS (typo fixes, content updates, minor tweaks)
+- Template files, config files, or build output
+- Files outside `sites/` (system HTML like schedule templates)
+- Test files or documentation

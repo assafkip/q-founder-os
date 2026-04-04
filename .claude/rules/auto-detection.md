@@ -16,14 +16,18 @@ When the founder pastes or uploads a conversation transcript, meeting notes, voi
 Handled by `/q-engage` reactive mode. Evaluates post content for market intelligence first (6 lenses), then generates 1 best comment. System picks the style.
 
 ## Council auto-trigger (no command needed)
-The `council` skill fires automatically:
+The `council` skill fires automatically ONLY for significant changes:
 
-- **During `/q-calibrate`:** Before writing ANY change to a canonical file, run a Quick Council check. If 2+ personas object, surface dissent before writing.
+- **During `/q-calibrate` with significant changes:** Before writing changes that alter positioning, strategy, or messaging in a canonical file (>5 lines changed OR new section added), run a Quick Council check. If 2+ personas object, surface dissent before writing.
 - **During `/q-debrief` with conflicting signals:** Auto-run Quick Council: "Is this new signal or noise?"
 - **Design partner feature requests:** If feature doesn't map to current-state.md, auto-run Quick Council: "Build it / Park it / Counter-offer."
 - **Competitive moves:** Auto-run Quick Council: "Respond / Ignore / Reposition."
 
+**Skip council for:**
+- Minor canonical edits (typos, date updates, formatting, adding a data point to an existing section)
+- Changes the founder explicitly dictated (they already decided)
+- Files with `{{PLACEHOLDER}}` content
+
 **Rules:**
 - Always Quick mode for auto-triggers. Full Debate is founder-initiated only.
-- If canonical files contain `{{PLACEHOLDER}}`, skip the council.
 - Log every auto-triggered council result to `canonical/decisions.md` with `[COUNCIL-DEBATED]` origin tag.
