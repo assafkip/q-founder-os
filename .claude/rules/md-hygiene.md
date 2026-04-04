@@ -27,6 +27,8 @@ Every canonical and my-project markdown file has a line budget. Before appending
 | my-project/competitive-landscape.md | 150 |
 | my-project/current-state.md | 100 |
 | my-project/progress.md | 100 |
+| my-project/lead-sources.md | 100 |
+| canonical/lead-lifecycle-rules.md | 100 |
 
 ## Pinning (how to protect important sections)
 
