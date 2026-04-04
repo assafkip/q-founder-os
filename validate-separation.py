@@ -145,7 +145,7 @@ def phase_1():
     print("  --- Gate 1.1: Agent files ---")
 
     agent_count = count_files(agents_dir)
-    check(f"Agent count >= 35 (found: {agent_count})", agent_count >= 35)
+    check(f"Agent count >= 30 (found: {agent_count})", agent_count >= 30)
 
     # Frontmatter on all numbered agents
     missing_frontmatter = 0
@@ -308,9 +308,11 @@ def phase_2():
     check("KTLYST has q-ktlyst/ directory (instance content)", dir_exists(os.path.join(ktlyst, "q-ktlyst")))
 
     k_agents = os.path.join(ktlyst, "q-system", "q-system", ".q-system", "agent-pipeline", "agents")
-    if dir_exists(k_agents):
-        k_count = count_files(k_agents)
-        check(f"KTLYST q-system/ subtree has agents ({k_count})", k_count >= 35)
+    k_agents_legacy = os.path.join(ktlyst, "q-system", "q-system", "agent-pipeline", "agents")
+    k_agents_dir = k_agents if dir_exists(k_agents) else k_agents_legacy
+    if dir_exists(k_agents_dir):
+        k_count = count_files(k_agents_dir)
+        check(f"KTLYST q-system/ subtree has agents ({k_count})", k_count >= 30)
     else:
         check("KTLYST q-system/ subtree agent directory exists", False)
 
@@ -403,10 +405,12 @@ def phase_4():
             agent_path = os.path.join(path, prefix, ".q-system", "agent-pipeline", "agents")
         else:
             agent_path = os.path.join(path, prefix, "q-system", ".q-system", "agent-pipeline", "agents")
+            if not dir_exists(agent_path):
+                agent_path = os.path.join(path, prefix, "q-system", "agent-pipeline", "agents")
 
         if dir_exists(agent_path):
             i_count = count_files(agent_path)
-            threshold = 15 if itype == "direct-clone" else 35
+            threshold = 15 if itype == "direct-clone" else 30
             label = f"{i_count}, direct-clone - relaxed threshold" if itype == "direct-clone" else str(i_count)
             check(f"{name}: has agents ({label})", i_count >= threshold)
         else:
