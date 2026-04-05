@@ -64,11 +64,12 @@ while IFS='|' read -r name path prefix itype; do
       git stash push -m "kipi-update auto-stash $(date '+%Y-%m-%d %H:%M')" 2>&1 || true
       STASHED=true
     fi
-    # Also commit untracked files that would block subtree
-    UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null | head -1)
-    if [ -n "$UNTRACKED" ]; then
-      echo "  Auto-committing untracked files..."
-      git add -A 2>/dev/null || true
+    # Auto-commit only tracked modified files that would block subtree
+    # Do NOT auto-commit untracked files (they may be instance artifacts)
+    MODIFIED=$(git diff --name-only 2>/dev/null | head -1)
+    if [ -n "$MODIFIED" ]; then
+      echo "  Auto-committing modified tracked files..."
+      git add -u 2>/dev/null || true
       git commit -m "chore: auto-commit before kipi update" 2>/dev/null || true
     fi
   fi
@@ -187,9 +188,17 @@ print('    settings.json updated (MCP, plugins, permissions, tools preserved)')
     cp "$SCRIPT_DIR"/.claude/output-styles/*.md "$path/.claude/output-styles/" 2>/dev/null || true
     cp "$SCRIPT_DIR"/.claude/rules/*.md "$path/.claude/rules/" 2>/dev/null || true
 
-    # Sync plugins
-    cp -R "$SCRIPT_DIR/.claude-plugin" "$path/.claude-plugin" 2>/dev/null || true
-    cp -R "$SCRIPT_DIR/plugins" "$path/plugins" 2>/dev/null || true
+    # Sync plugins (copy contents, not directory, to avoid plugins/plugins/ nesting)
+    if [ -d "$SCRIPT_DIR/plugins" ]; then
+      mkdir -p "$path/plugins"
+      for plugin_dir in "$SCRIPT_DIR"/plugins/*/; do
+        if [ -d "$plugin_dir" ]; then
+          plugin_name="$(basename "$plugin_dir")"
+          rm -rf "$path/plugins/$plugin_name"
+          cp -R "$plugin_dir" "$path/plugins/$plugin_name"
+        fi
+      done
+    fi
 
     echo "  Config synced"
   fi
