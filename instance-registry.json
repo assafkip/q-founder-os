@@ -61,16 +61,26 @@
       "has_git": true
     }
   ],
-  "excluded": [
+  "standalone": [
+    {
+      "name": "4_points_consulting",
+      "path": "/Users/assafkip/Desktop/4_points_consulting",
+      "purpose": "Threat intelligence investigation (4 Points client)",
+      "has_skeleton": false,
+      "note": "Custom OSINT architecture with q-investigate/"
+    },
     {
       "name": "Pure_spectrum_Q",
       "path": "/Users/assafkip/Desktop/Pure_spectrum_Q",
-      "reason": "Custom architecture, not skeleton-based"
+      "purpose": "Strategic advisory engagement hub (PureSpectrum client)",
+      "has_skeleton": false,
+      "note": "Custom .q-system/ predates skeleton architecture"
     },
     {
       "name": "q-investigate-osint-bot",
       "path": "/Users/assafkip/Desktop/q-investigate-osint-bot",
-      "reason": "Standalone OSINT system, not skeleton-based"
+      "purpose": "Standalone OSINT collection system",
+      "has_skeleton": false
     }
   ],
   "eliminated": [
