@@ -17,8 +17,7 @@ A portable entrepreneur operating system for Claude Code. Strategy, execution, r
 - Gamma API for deck/one-pager generation (optional)
 
 ## Project Structure
-- `.claude-plugin/marketplace.json` - Marketplace manifest (distributes plugins to instances)
-- `plugins/` - Marketplace plugin groups
+- `plugins/` - Plugin groups (loaded directly from disk)
   - `kipi-core/` - AUDHD executive function + founder voice + research mode (every instance)
   - `kipi-ops/` - Council debates + customer fit reviews (GTM instances)
   - `kipi-design/` - UI/UX, brand identity, visual assets (design instances)
