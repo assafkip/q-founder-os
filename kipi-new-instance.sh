@@ -40,6 +40,11 @@ if [ ! -d .git ]; then
   echo "  Initialized git repo"
 fi
 
+# Ensure at least one commit exists (required by git subtree add)
+if ! git rev-parse HEAD >/dev/null 2>&1; then
+  git commit --allow-empty -m "Initial commit"
+fi
+
 # Add subtree
 echo "  Adding kipi-system subtree at $PREFIX/..."
 git subtree add --prefix="$PREFIX" "$SKELETON_REMOTE" "$SKELETON_BRANCH" --squash
