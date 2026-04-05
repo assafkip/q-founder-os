@@ -103,7 +103,7 @@ The SessionStart hook auto-injects last handoff and founder context. The PostCom
 
 ## Skills and Plugins
 
-Skills are distributed via the kipi marketplace (`.claude-plugin/marketplace.json`), not `.claude/skills/`:
+Skills live in `plugins/` (loaded directly from disk), not `.claude/skills/`:
 - **kipi-core** - audhd-executive-function, founder-voice, research-mode (every instance)
 - **kipi-ops** - council, customer-fit-review (GTM instances)
 - **kipi-design** - ui-ux-pro-max, brand, design (design instances)
