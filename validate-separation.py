@@ -314,10 +314,14 @@ def phase_2():
     check("KTLYST has q-system/ directory (subtree)", dir_exists(os.path.join(ktlyst, "q-system")))
     check("KTLYST has q-ktlyst/ directory (instance content)", dir_exists(os.path.join(ktlyst, "q-ktlyst")))
 
-    k_agents = os.path.join(ktlyst, "q-system", "q-system", ".q-system", "agent-pipeline", "agents")
-    k_agents_legacy = os.path.join(ktlyst, "q-system", "q-system", "agent-pipeline", "agents")
-    k_agents_dir = k_agents if dir_exists(k_agents) else k_agents_legacy
-    if dir_exists(k_agents_dir):
+    # Try multiple path layouts: archive overlay (flat), subtree (nested), legacy
+    k_agents_paths = [
+        os.path.join(ktlyst, "q-system", ".q-system", "agent-pipeline", "agents"),
+        os.path.join(ktlyst, "q-system", "q-system", ".q-system", "agent-pipeline", "agents"),
+        os.path.join(ktlyst, "q-system", "q-system", "agent-pipeline", "agents"),
+    ]
+    k_agents_dir = next((p for p in k_agents_paths if dir_exists(p)), None)
+    if k_agents_dir and dir_exists(k_agents_dir):
         k_count = count_files(k_agents_dir)
         check(f"KTLYST q-system/ subtree has agents ({k_count})", k_count >= 30)
     else:
@@ -357,8 +361,12 @@ def phase_2():
     else:
         warn(f"kipi-pipeline-plugin references in KTLYST ({plugin_refs}) - clean in Phase 3")
 
-    # Scripts parse
-    k_scripts = os.path.join(ktlyst, "q-system", "q-system", ".q-system")
+    # Scripts parse (try flat and nested paths)
+    k_scripts_paths = [
+        os.path.join(ktlyst, "q-system", ".q-system"),
+        os.path.join(ktlyst, "q-system", "q-system", ".q-system"),
+    ]
+    k_scripts = next((p for p in k_scripts_paths if dir_exists(p)), k_scripts_paths[0])
     audit_path = os.path.join(k_scripts, "audit-morning.py")
     if file_exists(audit_path):
         check("Subtree audit-morning.py parses without errors", python_parses(audit_path))

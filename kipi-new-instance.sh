@@ -82,19 +82,24 @@ cp "$SCRIPT_DIR"/.claude/agents/*.md .claude/agents/ 2>/dev/null || true
 cp "$SCRIPT_DIR"/.claude/output-styles/*.md .claude/output-styles/ 2>/dev/null || true
 cp "$SCRIPT_DIR"/.claude/rules/*.md .claude/rules/ 2>/dev/null || true
 
-# Set up marketplace plugins
-cp -R "$SCRIPT_DIR/.claude-plugin" .claude-plugin 2>/dev/null || true
-cp -R "$SCRIPT_DIR/plugins" plugins 2>/dev/null || true
+# Set up plugins (copy contents, not directory, to avoid nesting)
+if [ -d "$SCRIPT_DIR/plugins" ]; then
+  mkdir -p plugins
+  for plugin_dir in "$SCRIPT_DIR"/plugins/*/; do
+    if [ -d "$plugin_dir" ]; then
+      plugin_name="$(basename "$plugin_dir")"
+      cp -R "$plugin_dir" "plugins/$plugin_name"
+    fi
+  done
+fi
 
-# Set up .gitignore and git hooks
+# Set up .gitignore (no .githooks - instances should not run skeleton validation)
 cp "$SCRIPT_DIR/.gitignore" .gitignore 2>/dev/null || true
-cp -R "$SCRIPT_DIR/.githooks" .githooks 2>/dev/null || true
-git config core.hooksPath .githooks 2>/dev/null || true
 
-echo "  .claude/ configured with hooks, rules, agents, and plugins"
+echo "  .claude/ configured with rules, agents, and plugins"
 
-# Commit
-git add -A
+# Commit only instance files (never skeleton root files like validate-separation.py, instance-registry.json, kipi-*.sh)
+git add "$PREFIX/" .claude/ plugins/ .gitignore CLAUDE.md 2>/dev/null || true
 git commit -m "Add kipi-system skeleton as subtree with .claude config"
 
 # Register in instance-registry.json
