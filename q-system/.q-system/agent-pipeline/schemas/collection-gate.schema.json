@@ -42,7 +42,7 @@
             "since": { "type": ["string", "null"] }
           }
         },
-        "notion": {
+        "crm": {
           "type": "object",
           "required": ["verdict", "reason", "threshold_hours"],
           "properties": {

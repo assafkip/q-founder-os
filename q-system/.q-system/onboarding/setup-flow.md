@@ -92,7 +92,7 @@ For EACH integration, explain what it does in Kipi before asking:
 
 | Tool | What it does in Kipi |
 |------|---------------------|
-| Notion | Your CRM - tracks contacts, interactions, pipeline, and content status |
+| Notion or Obsidian | Your CRM - tracks contacts, interactions, pipeline, and content status. Notion = cloud database views. Obsidian = local markdown vault (free, works offline). |
 | Google Calendar | Pulls your schedule into morning briefings so I can plan your day |
 | Gmail | Reads recent emails to surface follow-ups and conversation context |
 | Chrome/LinkedIn | Reads LinkedIn profiles, posts, and DMs for engagement and lead research |
@@ -109,7 +109,7 @@ For EACH integration:
 7. If not sure: Briefly explain when they'd use it (from the table), then ask: "Want to try connecting it now, or skip and add it later?"
 
 **Order of integrations (when multiple are required):**
-1. Notion (most integrations depend on CRM being set up)
+1. CRM: Notion or Obsidian (most integrations depend on CRM being set up). Ask: "Do you want to track contacts in Notion (cloud, database views) or Obsidian (local, works offline)?" Then follow the matching guide.
 2. Google Calendar
 3. Gmail
 4. Chrome automation (SKIP if on claude.ai/code - tell user: "LinkedIn automation requires the Claude Code desktop app. You can add this later if you switch to the desktop version.")
@@ -410,7 +410,10 @@ Create `memory/sycophancy-log.json` with content `[]` (unless option D).
 
 ### Step 7: CRM Setup
 
-If Notion is connected, explain what you'll create before creating it. Database list varies by archetype:
+**If Notion:** explain what you'll create before creating it. Database list varies by archetype:
+**If Obsidian:** CRM data lives in `my-project/relationships.md` and `my-project/progress.md`. No database creation needed. Say: "Your contacts and pipeline are tracked in markdown files. Open the CRM-Dashboard.md file in Obsidian to see your data as tables." Then skip to Step 8.
+
+**Notion database setup** (Notion CRM only):
 
 **For GTM founders and operators:**
 > - **Contacts** - everyone you're tracking (prospects, investors, partners, etc.)
@@ -442,8 +445,8 @@ Then:
 - Save all database IDs to `my-project/notion-ids.md`
 - Test by creating a sample contact, then ask: "I created a test contact to verify the connection. Want me to delete it or keep it?"
 
-If Notion is NOT connected:
-- Say: "Your relationships and pipeline will be tracked in local files. This works fine - you can always add Notion later."
+If neither Notion nor Obsidian is connected:
+- Say: "Your relationships and pipeline will be tracked in local files. This works fine - you can always add Notion or Obsidian later."
 
 ### Step 8: Confirmation
 

@@ -17,7 +17,7 @@ You are a copy generation agent. Your job is to produce a copy-paste-ready engag
 - `{{BUS_DIR}}/linkedin-dms.json` - DM activity (replies needed, active conversations)
 - `{{BUS_DIR}}/pipeline-followup.json` - overdue follow-ups with drafted messages
 - `{{BUS_DIR}}/loop-review.json` - stale loops needing escalation
-- `{{BUS_DIR}}/notion.json` - relationship stages for all contacts
+- `{{BUS_DIR}}/crm.json` - relationship stages for all contacts
 
 ## Writes
 

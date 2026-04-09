@@ -193,6 +193,73 @@ The temperature dashboard in the FYI section must be WIRED to actions:
 
 ---
 
+## PEAK SCHEDULING AND BREAKS
+
+### Schedule Around Cognitive Peaks
+If the user's profile specifies peak hours, place Deep Focus and high-demand tasks there. Place Quick Wins and low-friction tasks in off-peak windows. Never place the hardest task in the lowest-energy slot.
+
+### Break Architecture
+Offer two break patterns based on user preference (set in user-profile.md):
+- **Consolidated:** Combine micro-breaks into one extended recovery block mid-session
+- **Distributed:** Insert 2-3 minute micro-resets between energy mode switches
+
+Default to distributed if no preference is set. Always insert a recovery buffer after People tasks (calls, meetings). The buffer is mandatory, not optional.
+
+### Interest-Based Task Pairing
+Pair boring-but-essential tasks with peak focus windows. Fill remaining time with tasks the user finds engaging. This is sequencing around neurology, not a reward system.
+
+---
+
+## TASK SEPARATION
+
+### Granularity Rule
+If a task has more than 2 sub-steps, break it into separate checklist items. Each item = one action + one completion state. Multi-step items overwhelm working memory.
+
+### Action vs. Detail Layering
+When context or instructions are needed, separate the action (what to DO) from the detail (what to KNOW). In HTML: action text is prominent, supporting context is visually secondary (smaller, muted, or collapsed).
+
+---
+
+## IMPULSE AND MEETING SCAFFOLDING
+
+### Pre-Meeting Prep
+Before any scheduled meeting, include a prep item with:
+- Agenda bullet points (what will be discussed)
+- Space prompt: "Write your thoughts here before the call"
+- One-line reminder of what NOT to bring up (if relevant from relationship context)
+
+This channels impulsive thoughts into structured form before the meeting happens.
+
+---
+
+## MASKING RECOVERY
+
+### Post-Meeting Buffers
+After any People-energy task (call, meeting, networking event), insert a 10-15 min buffer before the next task. Label it: "Recovery buffer. No tasks." Not a suggestion. A scheduled gap.
+
+### Stacking Limit
+Never schedule more than 2 People tasks in sequence. If the calendar has 3+ meetings back-to-back, flag it: "Heavy meeting block. Consider moving [lowest priority meeting] if possible."
+
+---
+
+## COGNITIVE DISTORTION COUNTERMEASURES (AUTOMATIC)
+
+The system never names distortions or lectures. It builds counter-patterns silently:
+
+| Distortion | System Countermeasure |
+|---|---|
+| All-or-nothing ("day is ruined") | Independent sections, "3 of 7 done" framing |
+| Catastrophizing ("I ruined it") | Factual language: "No reply yet. Draft ready." |
+| Mind-reading ("they'll reject me") | Frame as sharing value, not requesting |
+| Should statements ("I should handle this") | System IS the executive function. No apology needed. |
+| Emotional reasoning ("feels impossible") | Offer micro-action: smallest possible next step |
+| Discounting wins ("that was easy") | Keep completed items visible, celebrate effort totals |
+
+### Micro-Action Ladder
+When a task has been carried forward 2+ days, the system is not helping. Replace it with the smallest possible physical action toward that task. "Send the email" becomes "Open the compose window." Shrink the wall.
+
+---
+
 ## ANTI-PATTERNS (NEVER DO)
 
 1. **Dashboard without actions.** A score means nothing unless the draft is right there.

@@ -33,7 +33,7 @@ This is the easiest way to get started. No terminal, no installs, no coding.
 - Just say **"hello"** or **"let's get started"**
 - Kipi will detect this is a fresh install and walk you through everything
 - It will ask you questions one at a time - just answer naturally
-- It will help you connect your tools (Notion, Gmail, Calendar, etc.) step by step
+- It will help you connect your tools (Notion or Obsidian, Gmail, Calendar, etc.) step by step
 - The whole setup takes about 10-15 minutes
 
 **5. You're done!**
@@ -46,7 +46,7 @@ This is the easiest way to get started. No terminal, no installs, no coding.
 During setup, Kipi will ask which tools you use and walk you through connecting them. You don't need to prepare anything in advance. The setup guides use plain language and tell you exactly where to click.
 
 Tools you might connect:
-- **Notion** - for tracking contacts, pipeline, and actions
+- **Notion or Obsidian** - for tracking contacts, pipeline, and actions
 - **Google Calendar** - so Kipi can prep you for meetings
 - **Gmail** - for drafting follow-up emails
 - **LinkedIn** (via Chrome) - for profiles, posts, DMs, and engagement

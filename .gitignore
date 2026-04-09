@@ -36,6 +36,9 @@ template-repo/
 # Bus data (daily pipeline, ephemeral)
 q-system/.q-system/agent-pipeline/bus/
 
+# Obsidian vault config (user-specific, not committed)
+q-system/.obsidian/
+
 # Pruned markdown archives (historical, not loaded in context)
 q-system/memory/archives/
 

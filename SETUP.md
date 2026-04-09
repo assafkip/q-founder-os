@@ -36,7 +36,7 @@ export APIFY_TOKEN="your-apify-token"
 
 Get your Apify token at https://apify.com (Account > Integrations). Only needed if you want Apify for X/Twitter. All other platforms use Chrome or RSS feeds.
 
-> **Notion:** Connect via Claude.ai integrations panel (preferred) or set NOTION_TOKEN for CLI-only usage. See `q-system/.q-system/onboarding/guides/connect-notion.md`.
+> **CRM:** Connect Notion via Claude.ai integrations panel or Obsidian by opening q-system/ as a vault. See `q-system/.q-system/onboarding/guides/connect-notion.md` or `connect-obsidian.md`.
 
 ### 4. Configure Claude Code global settings
 Copy `settings-template.json` to `~/.claude/settings.json` (or merge into your existing settings). This configures MCP servers in your global settings.
@@ -56,7 +56,7 @@ The project already ships with:
 ### 5. Install recommended plugins
 In Claude Code, enable these plugins:
 - `document-skills@anthropic-agent-skills`
-- `Notion@claude-plugins-official`
+- `Notion@claude-plugins-official` (if using Notion CRM)
 - `github@claude-plugins-official`
 - Research mode is built into kipi-core. Use `/research <topic>` to force citations and source grounding.
 
@@ -77,7 +77,7 @@ The system will detect `{{SETUP_NEEDED}}` in `founder-profile.md` and walk you t
 4. **Your voice** (writing style, words you use/avoid, samples)
 5. **Your platforms** (LinkedIn, X, Medium, Reddit, Substack, GitHub handles)
 6. **Your tools** (which MCP servers to configure)
-7. **Your CRM** (Notion database setup or local-only mode)
+7. **Your CRM** (Notion, Obsidian, or local-only mode)
 8. **Your network** (top 10 contacts to seed the system)
 
 ### 8. Run your first morning
@@ -101,7 +101,7 @@ q-founder-os/
       content-output.md              # Content generation rules (path-scoped to output/)
     agents/                          # Custom agent definitions
       preflight.md                   # Haiku - pipeline gate-keeper
-      data-ingest.md                 # Haiku - calendar/email/Notion pulls
+      data-ingest.md                 # Haiku - calendar/email/CRM pulls
       engagement-hitlist.md          # Opus - copy-paste engagement actions
       synthesizer.md                 # Opus - daily schedule assembly
       content-reviewer.md            # Sonnet - 4-pass content review

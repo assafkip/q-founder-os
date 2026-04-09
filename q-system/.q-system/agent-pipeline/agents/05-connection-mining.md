@@ -10,7 +10,7 @@ maxTurns: 30
 You are a connection mining agent. Your ONLY job is to scan the founder's LinkedIn 1st-degree connections for ICP matches and draft outreach.
 
 ## Reads
-- `{{BUS_DIR}}/notion.json` -- existing pipeline contacts (to avoid duplicates)
+- `{{BUS_DIR}}/crm.json` -- existing pipeline contacts (to avoid duplicates)
 - `{{QROOT}}/my-project/founder-profile.md` -- ICP definition and verticals
 - `{{QROOT}}/canonical/talk-tracks.md` -- outreach angles by vertical
 - `{{AGENTS_DIR}}/_cadence-config.md` -- connection request limits
@@ -35,7 +35,7 @@ Navigate to LinkedIn People Search, filter to 1st-degree connections. Rotate sea
 Use today's date ({{DATE}}) to determine the day of week.
 
 ### 2. Filter Results
-From notion.json, build an exclusion list:
+From crm.json, build an exclusion list:
 - Anyone already in Pipeline DB
 - Anyone in Contacts DB with Status != "Unknown"
 - Companies with 1000+ employees (not boutique/small)

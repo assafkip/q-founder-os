@@ -139,7 +139,7 @@ The orchestrator runs phases 0-9. The logging/audit system uses step IDs. `bus-t
 | Phase | Agents | Step IDs (for logging) |
 |-------|--------|----------------------|
 | 0: Preflight | 00-preflight, 00-session-bootstrap, canonical-digest.py | 0f_connection_check, 0a_checkpoint, 0b_missed_debrief, 0b.5_loop_escalation, 0c_load_canonical, 0c_canonical_digest, 0d_load_voice, 0e_load_audhd |
-| 1: Data Ingest | 01-calendar-pull, 01-gmail-pull, 01-notion-pull, 01-vc-pipeline-pull, copy-diff.py | 1_calendar, 1_gmail, 1_notion_actions, 1_notion_pipeline, 1_vc_pipeline, 1c_copy_diff |
+| 1: Data Ingest | 01-calendar-pull, 01-gmail-pull, 01-crm-pull, 01-vc-pipeline-pull, copy-diff.py | 1_calendar, 1_gmail, 1_crm_contacts, 1_crm_pipeline, 1_vc_pipeline, 1c_copy_diff |
 | 2: Analysis | 02-meeting-prep, 02-warm-intro-match, 02-x-activity | 2_meeting_prep, 1.5_warm_intro, 2.5_x_activity |
 | 3: LinkedIn | 03-linkedin-posts, 03-linkedin-dms, 03-prospect-pipeline, 03-content-intel | 3_linkedin_activity, 3.8_dm_check, 3.5_dp_pipeline, 3.7_content_intel |
 | 4: Content | 04-signals-content, 04-value-routing, 04-post-visuals, 04-founder-brand-post | 4_signals_linkedin, 4_x_signals, 4_x_hot_take, 4_x_bts, 4.1_value_drops |
@@ -147,7 +147,7 @@ The orchestrator runs phases 0-9. The logging/audit system uses step IDs. `bus-t
 | 6: Compliance | compliance-check.py, 06-positioning-check, 06-client-deliverables, 04-marketing-health, 06-sycophancy-audit | 6_decision_compliance, 7_positioning_freshness, 4.5_marketing_health |
 | 7: Synthesis | 07-synthesize | 8_briefing_output, 8.5_start_here |
 | 8: Build | build-schedule.py, 08-visual-verify, bus-to-log.py, audit-morning.py | 11_html_output |
-| 9: Notion | 09-notion-push, 10-daily-checklists | 9_notion_push, 10_daily_checklists |
+| 9: CRM Write-back | 09-crm-push, 10-daily-checklists | 9_crm_push, 10_daily_checklists |
 
 ---
 
@@ -205,7 +205,7 @@ Every step writes to `output/morning-log-YYYY-MM-DD.json` as it completes. This 
     "7_positioning_freshness": { "status": "done", "timestamp": "...", "result": "all current" },
     "8_briefing_output": { "status": "done", "timestamp": "...", "result": "briefing printed" },
     "8.5_start_here": { "status": "done", "timestamp": "...", "result": "Reply to Phil Venables" },
-    "9_notion_push": { "status": "done", "timestamp": "...", "result": "5 actions created" },
+    "9_crm_push": { "status": "done", "timestamp": "...", "result": "5 actions created" },
     "10_daily_checklists": { "status": "done", "timestamp": "...", "result": "pages updated" },
     "11_html_output": { "status": "done", "timestamp": "...", "result": "daily-schedule-2026-03-13.html opened" }
   },
@@ -257,7 +257,7 @@ Certain steps MUST NOT start until all prior steps are done or explicitly skippe
 | Gate | Phase | Step ID | Cannot Start Until | Why |
 |------|-------|---------|-------------------|-----|
 | **Synthesis** | Phase 7 | 8_briefing_output | Phases 0-6 all logged as done/skipped | Briefing must reflect ALL collected data, not partial |
-| **Notion push** | Phase 9 | 9_notion_push | Phases 0-8 done/skipped | Can't push actions that weren't generated |
+| **Notion push** | Phase 9 | 9_crm_push | Phases 0-8 done/skipped | Can't push actions that weren't generated |
 | **HTML build** | Phase 8 | 11_html_output | Phases 0-7 done/skipped | HTML is the final deliverable, must include everything |
 
 ### Deliverables Checklist (ENFORCED at Phase 7 gate)

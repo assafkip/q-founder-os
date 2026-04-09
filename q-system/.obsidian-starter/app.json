@@ -1,0 +1,10 @@
+{
+  "showLineNumber": true,
+  "spellcheck": false,
+  "readableLineLength": true,
+  "strictLineBreaks": false,
+  "foldHeading": true,
+  "foldIndent": true,
+  "defaultViewMode": "preview",
+  "theme": "obsidian"
+}

@@ -41,8 +41,12 @@
 - **Instagram:** <!-- @handle or blank -->
 - **TikTok:** <!-- @handle or blank -->
 
+## CRM
+- **crm_source:** (notion / obsidian / none)
+
 ## Connected Tools
 - **Notion:** not connected
+- **Obsidian:** not connected
 - **Google Calendar:** not connected
 - **Gmail:** not connected
 - **Apify (X/Twitter only):** not connected

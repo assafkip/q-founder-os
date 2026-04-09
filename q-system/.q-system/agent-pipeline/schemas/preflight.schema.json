@@ -25,7 +25,7 @@
       "properties": {
         "calendar": { "type": "boolean" },
         "gmail": { "type": "boolean" },
-        "notion": { "type": "boolean" },
+        "notion": { "type": ["boolean", "string"], "description": "true, false, or 'skipped' (when crm_source is obsidian)" },
         "chrome": { "type": "boolean" },
         "apify": { "type": ["boolean", "string"], "description": "true, false, or 'fallback_chrome'. X/Twitter only." },
         "reddit_mcp": { "type": ["boolean", "string"], "description": "true, false, or 'skipped'. Reddit MCP server. No Chrome fallback." },

@@ -9,7 +9,7 @@
 1. Detects the user's archetype (what kind of user they are)
 2. Walks them through connecting only the tools relevant to their archetype
 3. Collects their identity, positioning, voice, and network info
-4. Sets up their CRM (Notion or local files)
+4. Sets up their CRM (Notion, Obsidian, or local files)
 5. Tests every connection live and confirms everything works
 6. Handles errors gracefully - skip and come back later, never block
 
@@ -20,7 +20,7 @@
 - `.q-system/onboarding/validators/test-*.md` - Live connection tests
 - `.q-system/onboarding/settings-builder.md` - How to assemble .mcp.json and config files
 
-**Tone:** Talk like a helpful friend. Never say "MCP server," "API key," "environment variable," or "JSON." Say "connect your Notion," "your personal access code," "settings." One question at a time. Celebrate each connection.
+**Tone:** Talk like a helpful friend. Never say "MCP server," "API key," "environment variable," or "JSON." Say "connect your Notion," "connect your Obsidian," "your personal access code," "settings." One question at a time. Celebrate each connection.
 
 **On-demand connections:** After setup, users can say "connect my [tool]" at any time and get walked through the matching guide from `guides/`.
 
@@ -110,7 +110,7 @@ Skills live in `plugins/` (loaded directly from disk), not `.claude/skills/`:
 
 Custom agents in `.claude/agents/` provide model/tool isolation:
 - `preflight` (Haiku) - pipeline gate-keeper
-- `data-ingest` (Haiku) - calendar/email/Notion pulls
+- `data-ingest` (Haiku) - calendar/email/CRM pulls
 - `engagement-hitlist` (Opus) - copy-paste-ready engagement actions
 - `synthesizer` (Opus) - daily schedule HTML assembly
 - `content-reviewer` (Sonnet) - 4-pass content review

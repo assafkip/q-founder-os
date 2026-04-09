@@ -27,7 +27,7 @@ Each archetype has a required, recommended, and optional tier. Only walk the use
 
 | Tier | Integration | Why |
 |------|------------|-----|
-| Required | Notion | CRM: contacts, pipeline, actions |
+| Required | Notion OR Obsidian | CRM: contacts, pipeline, actions (Notion = cloud DB views, Obsidian = local markdown) |
 | Required | Google Calendar | Meeting prep in morning routine |
 | Required | Gmail | Draft follow-ups, track threads |
 | Recommended | Chrome automation | LinkedIn profiles, posts, DMs, engagement |
@@ -40,7 +40,7 @@ Each archetype has a required, recommended, and optional tier. Only walk the use
 
 | Tier | Integration | Why |
 |------|------------|-----|
-| Required | Notion | Task tracking, light CRM |
+| Required | Notion OR Obsidian | Task tracking, light CRM |
 | Recommended | Google Calendar | Know what's coming today |
 | Optional | Gmail | Draft emails when needed |
 | Optional | Apify | X/Twitter scraping for research |
@@ -51,19 +51,19 @@ Each archetype has a required, recommended, and optional tier. Only walk the use
 | Tier | Integration | Why |
 |------|------------|-----|
 | Required (CLI/Desktop) | Chrome automation | LinkedIn engagement, post scraping, DMs |
-| Recommended | Notion | Content calendar, asset library |
+| Recommended | Notion OR Obsidian | Content calendar, asset library |
 | Optional | Apify | X/Twitter scraping for engagement |
 | Optional | Gamma | Create visual content, slide decks |
 | Optional | Google Calendar | Schedule content drops |
 
-**Web users (claude.ai/code):** Chrome automation is not available. Recommend Notion as the primary integration instead. Say: "On the web version, I can't automate LinkedIn directly. I'd recommend connecting Notion to track your content pipeline. You can still use `/q-engage` to generate comments - you'll just paste them manually."
+**Web users (claude.ai/code):** Chrome automation is not available. Recommend Notion or Obsidian as the primary integration instead. Say: "On the web version, I can't automate LinkedIn directly. I'd recommend connecting Notion or Obsidian to track your content pipeline. You can still use `/q-engage` to generate comments - you'll just paste them manually."
 
 ### operator
 **Focus:** Keep the founder on track, manage calendar, follow up on actions
 
 | Tier | Integration | Why |
 |------|------------|-----|
-| Required | Notion | CRM, action tracking, pipeline |
+| Required | Notion OR Obsidian | CRM, action tracking, pipeline |
 | Required | Google Calendar | Calendar management |
 | Required | Gmail | Email drafts, follow-ups |
 | Optional | Apify | X/Twitter research for the founder |
@@ -75,14 +75,14 @@ Each archetype has a required, recommended, and optional tier. Only walk the use
 |------|------------|-----|
 | None required | -- | Everything runs on local files |
 
-Tell the user: "You're all set. The system works with just local files. Whenever you want to connect a tool, just say 'connect my notion' or 'connect my calendar' and I'll walk you through it."
+Tell the user: "You're all set. The system works with just local files. Your files are already an Obsidian vault if you want to browse them visually. Just say 'connect my obsidian' or 'connect my calendar' anytime."
 
 ## Progressive Enhancement
 
 After setup, the system should detect when an unconnected integration would help and gently suggest it. Examples:
 
 - Morning routine without Calendar: "I can't see your meetings today. Want to connect Google Calendar? Just say 'connect my calendar'."
-- Debrief without Notion: "I saved this debrief to local files. If you connect Notion, I can track all your relationships in one place."
+- Debrief without CRM: "I saved this debrief to local files. If you connect Notion or Obsidian, you get visual CRM views of all your relationships."
 - Engagement hitlist without Chrome: "I can write better comments if I can see actual LinkedIn posts. Want to connect Chrome? Just say 'connect my chrome'."
 - Research or competitive analysis without research mode: "I'm making claims here that I haven't verified. Want me to switch to research mode? I'll cite everything. Just say '/q-research'."
 

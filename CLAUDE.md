@@ -8,7 +8,7 @@ A portable entrepreneur operating system for Claude Code. Strategy, execution, r
 ## Tech Stack
 - Claude Code with MCP server integrations
 - Marketplace-distributed plugins (kipi-core, kipi-ops, kipi-design)
-- Notion API for CRM and task management (optional)
+- CRM: Obsidian (local markdown vault) or Notion API (cloud database) (optional)
 - Google Calendar + Gmail for scheduling and email (optional)
 - Apify for X/Twitter scraping only (optional)
 - Reddit MCP for Reddit data (no auth needed)
@@ -80,6 +80,6 @@ A portable entrepreneur operating system for Claude Code. Strategy, execution, r
 - When blocked, do NOT brute-force. Try a different approach or ask the founder.
 
 ## Tool Preferences
-- Use project-scoped Notion API server for CRM (not workspace-wide plugins)
+- CRM: Obsidian (open q-system/ as vault) or Notion API (project-scoped server, not workspace-wide plugins)
 - Use Chrome for all LinkedIn data (profiles, posts, DMs, engagement). Use Reddit MCP for Reddit. Use Apify for X/Twitter only. Use RSS feeds (WebFetch) for Medium, Substack.
 - Gamma for decks and one-pagers (if configured)

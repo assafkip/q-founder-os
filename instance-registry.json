@@ -6,7 +6,7 @@
   "instances": [
     {
       "name": "KTLYST_strategy",
-      "path": "/Users/assafkip/Desktop/KTLYST_strategy",
+      "path": "/Users/assafkip/Desktop/ktlyst-hub/strategy",
       "subtree_prefix": "q-system",
       "instance_q_dir": "q-ktlyst",
       "type": "subtree",
@@ -14,7 +14,7 @@
     },
     {
       "name": "ktlyst",
-      "path": "/Users/assafkip/Desktop/ktlyst",
+      "path": "/Users/assafkip/Desktop/ktlyst-hub/product",
       "subtree_prefix": "q-system",
       "instance_q_dir": null,
       "type": "subtree",
@@ -54,7 +54,7 @@
     },
     {
       "name": "ktlyst-website",
-      "path": "/Users/assafkip/Desktop/ktlyst-website",
+      "path": "/Users/assafkip/Desktop/ktlyst-hub/website",
       "subtree_prefix": "q-system",
       "instance_q_dir": null,
       "type": "subtree",
@@ -82,7 +82,7 @@
     },
     {
       "name": "ktlyst_lawyer",
-      "path": "/Users/assafkip/Desktop/KTLYST_lawyer",
+      "path": "/Users/assafkip/Desktop/ktlyst-hub/lawyer",
       "subtree_prefix": "q-system",
       "instance_q_dir": null,
       "type": "subtree",

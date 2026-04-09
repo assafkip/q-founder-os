@@ -14,6 +14,8 @@ usage() {
   echo "  kipi check [phase]   Run validation harness (default: all phases)"
   echo "  kipi migrate <path>  Migrate instance to full kipi compliance"
   echo "  kipi migrate <path> --dry-run  Preview migration without changes"
+  echo "  kipi cluster add <path> <name> <role>  Plug an instance into the KTLYST cluster"
+  echo "  kipi cluster sync    Re-run all bridge writers (push latest state to all instances)"
   echo "  kipi list            Show all registered projects"
   echo "  kipi home            Print the skeleton path"
   echo ""
@@ -53,6 +55,27 @@ case "${1:-help}" in
   migrate)
     shift
     python3 "$KIPI_HOME/kipi-migrate.py" "$@"
+    ;;
+  cluster)
+    shift
+    case "${1:-}" in
+      add)
+        shift
+        python3 "$KIPI_HOME/kipi-cluster-add.py" "$@"
+        ;;
+      sync)
+        echo "Syncing KTLYST cluster bridge..."
+        python3 "$HOME/.ktlyst/bridge/bridge-sync.py" 2>&1
+        python3 "$HOME/.ktlyst/bridge/write-legal-flags.py" 2>&1
+        python3 "$HOME/.ktlyst/bridge/write-website-state.py" 2>&1
+        echo "Done. All bridge files updated."
+        ;;
+      *)
+        echo "Usage:"
+        echo "  kipi cluster add <path> <name> <role>"
+        echo "  kipi cluster sync"
+        ;;
+    esac
     ;;
   list)
     python3 -c "

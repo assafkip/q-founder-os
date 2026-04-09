@@ -1,6 +1,8 @@
 # Q Instance Commands
 
-> These are conventions for interacting with the Q Entrepreneur OS. Use them as natural language triggers — they tell Claude which mode to enter and what to do.
+> These are conventions for interacting with the Q Entrepreneur OS. Use them as natural language triggers -- they tell Claude which mode to enter and what to do.
+>
+> **CRM note:** Workflows below reference "Notion" as the CRM. If your instance uses Obsidian (`crm_source: obsidian` in founder-profile.md), the agent pipeline reads/writes local markdown instead. The commands and workflows are the same -- only the data layer differs.
 
 | Command | Purpose | Mode |
 |---------|---------|------|

@@ -11,10 +11,10 @@
       "last_bus_date": null,
       "bus_file": "gmail.json"
     },
-    "notion": {
+    "crm": {
       "last_collected": null,
       "last_bus_date": null,
-      "bus_file": "notion.json"
+      "bus_file": "crm.json"
     },
     "x-activity": {
       "last_collected": null,

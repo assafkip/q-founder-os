@@ -11,7 +11,7 @@ You are an analysis agent. Your ONLY job is to prepare context for today's meeti
 
 ## Reads
 - `{{BUS_DIR}}/calendar.json` - today's meetings
-- `{{BUS_DIR}}/notion.json` - contact context, last interactions, open actions
+- `{{BUS_DIR}}/crm.json` - contact context, last interactions, open actions
 
 ## Writes
 - `{{BUS_DIR}}/meeting-prep.json`
@@ -20,7 +20,7 @@ You are an analysis agent. Your ONLY job is to prepare context for today's meeti
 
 1. Read `{{BUS_DIR}}/calendar.json`. Extract only meetings from the `today` array.
 2. If there are no meetings today, write `{"bus_version": 1, "date": "{{DATE}}", "generated_by": "02-meeting-prep", "meetings": []}` and exit.
-3. Read `{{BUS_DIR}}/notion.json`. For each meeting attendee, find matching contact records and recent interactions.
+3. Read `{{BUS_DIR}}/crm.json`. For each meeting attendee, find matching contact records and recent interactions.
 4. For each today meeting, produce a prep block:
    - `who`: name, role, company (from Notion contact or calendar attendee data)
    - `last_interaction`: date + summary of last logged interaction (from Notion Interactions DB)

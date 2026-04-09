@@ -240,7 +240,7 @@ def main():
     linkedin_dms = read_bus_file(bus_dir, "linkedin-dms.json")
     linkedin_posts = read_bus_file(bus_dir, "linkedin-posts.json")
     gmail = read_bus_file(bus_dir, "gmail.json")
-    notion = read_bus_file(bus_dir, "notion.json")
+    notion = read_bus_file(bus_dir, "crm.json")
 
     missing = []
     if not linkedin_dms:
@@ -250,7 +250,7 @@ def main():
     if not gmail:
         missing.append("gmail.json")
     if not notion:
-        missing.append("notion.json")
+        missing.append("crm.json")
 
     if missing:
         print(f"Note: Missing bus files (continuing with available): {', '.join(missing)}")

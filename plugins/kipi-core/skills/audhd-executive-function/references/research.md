@@ -98,3 +98,36 @@ Brief interstitial between energy modes. Pre-load context for next task. Suggest
 
 ### Body Doubling
 Dashboard is always present. Knows what you committed to. Shows what you're working on. Witnesses without judging.
+
+## CBT-Informed AUDHD Accommodations
+
+> Sources: JAN (Job Accommodation Network, U.S. Dept of Labor), JAN A-to-Z Autism Spectrum publication (updated 2026-04-07), CBT for adult ADHD (Safren, Ramsay & Rostain), ACT-informed approaches.
+
+### Executive Functioning Is Not a Diagnosis
+Executive functioning describes the brain's self-management system. It is not a separate condition. ADHD, ASD, brain injuries, and sleep disorders all produce executive functioning deficits differently. Accommodation should target the specific deficit (working memory, initiation, impulse control, time management), not the diagnosis label. Two people with identical ADHD diagnoses may need completely different accommodations based on which executive functions are most affected and what tasks they perform.
+
+### Peak Attentiveness Scheduling
+Concentration limitations fluctuate throughout the day. CBT behavioral activation principle: schedule high-demand cognitive tasks during peak attentiveness windows, not arbitrarily. The system should learn and respect the user's circadian cognitive curve. Rest periods are not breaks from work; they are cognitive recharge that enables the next focus block. Modified break protocols: combine small breaks into one extended recovery period, or split a long break into micro-resets between focus blocks. Both are valid. The user's profile determines which pattern works.
+
+### Interest-Based Task Pairing (Dodson, operationalized)
+The ADHD nervous system activates on interest, challenge, novelty, or urgency. Not importance. Accommodation: pair low-interest essential tasks with high-focus windows. Fill remaining time with high-interest tasks. This is not a reward system. It is sequencing around neurological reality. Rico pattern (JAN): complete complicated/mundane tasks during peak focus, then fill with engaging tasks. The mundane tasks get done. The interesting tasks sustain momentum.
+
+### Task Separation as Cognitive Accommodation
+Complex tasks overwhelm working memory. Accommodation: decompose into discrete, independently completable units. Each unit has one clear action and one clear completion state. This differs from friction-ordering (which is about sequence). Task separation is about granularity. Sally pattern (JAN): detailed procedures rewritten as color-coded action steps (main actions highlighted separately from supporting detail). The user sees what to DO vs. what to KNOW.
+
+### Impulse Management Scaffolding
+Impulsivity is an executive function deficit, not a character flaw. ADHD brains have reduced inhibitory control. Accommodation: pre-structure situations where impulsivity causes problems. Lee pattern (JAN): pre-meeting agenda with notes space channels impulsive thoughts into written form before speaking. System implication: before any meeting, provide a structured prep template that captures thoughts in advance, reducing in-meeting impulsivity.
+
+### Stress Intolerance and Recovery Protocols
+AUDHD individuals have lower thresholds for cognitive and sensory overload (ASD) combined with emotional dysregulation (ADHD). Masking in professional interactions (calls, meetings, networking) depletes a finite social energy budget. CBT principle: identify stress signals early, intervene with scheduled recovery. Never schedule People tasks back-to-back. Build explicit recovery buffers after high-masking activities (calls, presentations, networking). The buffer is not optional downtime. It is a required accommodation.
+
+### Cognitive Distortions Common in AUDHD
+Six patterns appear most frequently in AUDHD adults:
+- **All-or-nothing:** One missed step = "the whole day is ruined." Accommodation: independent sections, progress framing
+- **Catastrophizing:** One missed email = "I destroyed the relationship." Accommodation: factual language, effort tracking
+- **Mind-reading:** Assuming rejection before evidence. Accommodation: frame outreach as sharing value, not asking
+- **Should statements:** "I should be able to do this without help." Accommodation: normalize the system AS the executive function
+- **Emotional reasoning:** "I feel overwhelmed, therefore this IS impossible." Accommodation: micro-action ladder (smallest possible next step)
+- **Discounting positives:** "That win doesn't count, it was easy." Accommodation: visible completion tracking, effort celebration
+
+The system does not name these distortions to the user. It simply builds the counter-accommodation into every output.

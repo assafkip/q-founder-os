@@ -39,7 +39,7 @@ bus/
     ├── collection-gate.json        # Phase 0 (script)
     ├── calendar.json               # Phase 1
     ├── gmail.json                  # Phase 1
-    ├── notion.json                 # Phase 1
+    ├── crm.json                 # Phase 1
     ├── vc-pipeline.json            # Phase 1 (optional)
     ├── copy-diffs.json             # Phase 1 (script)
     ├── meeting-prep.json           # Phase 2
@@ -67,7 +67,7 @@ bus/
     ├── sycophancy-audit.json       # Phase 6
     ├── schedule-data-*.json        # Phase 7 (output/)
     ├── visual-verify.json          # Phase 8
-    ├── notion-push.json            # Phase 9
+    ├── crm-push.json            # Phase 9
     └── daily-checklists.json       # Phase 9
 ```
 
@@ -81,37 +81,37 @@ bus/
 | 0 | collection-gate.py | collection-gate.json | memory/collection-state.json |
 | 1 | 01-calendar-pull | calendar.json | (Calendar API) |
 | 1 | 01-gmail-pull | gmail.json | (Gmail API) |
-| 1 | 01-notion-pull | notion.json | (Notion API) |
+| 1 | 01-crm-pull | crm.json | (CRM: Notion API or local markdown) |
 | 1 | 01-vc-pipeline-pull | vc-pipeline.json (optional) | (VC Pipeline API) |
 | 1 | 01c-copy-diff / copy-diff.py | copy-diffs.json | yesterday's hitlist.json, linkedin-posts.json |
-| 2 | 02-meeting-prep | meeting-prep.json | calendar.json, notion.json |
-| 2 | 02-warm-intro-match | warm-intros.json | vc-pipeline.json (optional), notion.json |
+| 2 | 02-meeting-prep | meeting-prep.json | calendar.json, crm.json |
+| 2 | 02-warm-intro-match | warm-intros.json | vc-pipeline.json (optional), crm.json |
 | 2 | 02-x-activity | x-activity.json | (Chrome/Apify) |
 | 3 | 03-linkedin-posts | linkedin-posts.json | (Chrome) |
 | 3 | 03-linkedin-dms | linkedin-dms.json | (Chrome) |
-| 3 | 03-prospect-pipeline | prospect-pipeline.json | notion.json |
+| 3 | 03-prospect-pipeline | prospect-pipeline.json | crm.json |
 | 3 | 03-content-intel (Mon) | content-intel.json | (Chrome/RSS) |
 | 3 | publish-reconciliation.py | publish-reconciliation.json | linkedin-posts.json |
 | 4 | 04-signals-content | signals.json | linkedin-posts.json, x-activity.json |
 | 4 | 04-founder-brand-post (brand day) | founder-brand-post.json | signals.json |
-| 4 | 04-value-routing | value-routing.json | signals.json, notion.json, gmail.json |
+| 4 | 04-value-routing | value-routing.json | signals.json, crm.json, gmail.json |
 | 4 | 04-post-visuals | post-visuals.json | signals.json, founder-brand-post.json |
-| 4 | 04-marketing-health | marketing-health.json | marketing-state.md, notion.json, publish-reconciliation.json |
-| 5 | temperature-scoring.py | temperature.json | notion.json, linkedin-*, gmail.json |
+| 4 | 04-marketing-health | marketing-health.json | marketing-state.md, crm.json, publish-reconciliation.json |
+| 5 | temperature-scoring.py | temperature.json | crm.json, linkedin-*, gmail.json |
 | 5 | 05-lead-sourcing | leads.json | (Chrome/Reddit/RSS/Apify) |
-| 5 | 05-pipeline-followup | pipeline-followup.json | gmail.json, linkedin-dms.json, notion.json, signals.json |
-| 5 | 05-loop-review | loop-review.json | notion.json, prospect-pipeline.json |
-| 5 | 05-connection-mining | connection-mining.json | notion.json, founder-profile.md |
+| 5 | 05-pipeline-followup | pipeline-followup.json | gmail.json, linkedin-dms.json, crm.json, signals.json |
+| 5 | 05-loop-review | loop-review.json | crm.json, prospect-pipeline.json |
+| 5 | 05-connection-mining | connection-mining.json | crm.json, founder-profile.md |
 | 5 | 05-engagement-hitlist | hitlist.json | temperature.json, leads.json, linkedin-*, pipeline-followup.json, loop-review.json |
 | 6 | compliance-check.py | compliance.json | canonical/ files |
 | 6 | 06-positioning-check | positioning.json | canonical/ files |
-| 6 | 06-client-deliverables | client-deliverables.json | bootstrap.json, calendar.json, notion.json |
+| 6 | 06-client-deliverables | client-deliverables.json | bootstrap.json, calendar.json, crm.json |
 | 6 | 06-sycophancy-audit | sycophancy-audit.json | ALL bus/*.json, decisions.md |
 | 7 | 07-synthesize | schedule-data-*.json | ALL bus/*.json |
 | 8 | build-schedule.py | daily-schedule-*.html | schedule-data-*.json |
 | 8 | 08-visual-verify | visual-verify.json | daily-schedule-*.html |
 | 8 | bus-to-log.py | morning-log-*.json | ALL bus/*.json |
-| 9 | 09-notion-push | notion-push.json | hitlist.json, loop-review.json, pipeline-followup.json, value-routing.json |
+| 9 | 09-crm-push | crm-push.json | hitlist.json, loop-review.json, pipeline-followup.json, value-routing.json |
 | 9 | 10-daily-checklists | daily-checklists.json | hitlist.json, signals.json, founder-brand-post.json |
 
 ## Terminal Bus Files
@@ -124,8 +124,8 @@ These files are written but not consumed by downstream pipeline agents. They are
 | x-activity.json | Synthesizer (included in schedule briefing) |
 | copy-diffs.json | Synthesizer (voice learning feedback) |
 | visual-verify.json | Founder review (QA gate) |
-| notion-push.json | Notion API (write-back confirmation) |
-| daily-checklists.json | Notion API (task creation) |
+| crm-push.json | CRM write-back (Notion API or local markdown) |
+| daily-checklists.json | CRM task creation (Notion or local markdown) |
 | client-deliverables.json | Synthesizer (included in schedule briefing) |
 | content-intel.json | Synthesizer (weekly content intelligence) |
 | publish-reconciliation.json | 04-marketing-health (cadence tracking) |
