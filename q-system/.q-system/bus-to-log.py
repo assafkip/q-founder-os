@@ -20,7 +20,7 @@ bus_to_steps = {
                         "0c_load_canonical", "0d_load_voice", "0e_load_audhd", "0f_connection_check"],
     "calendar.json": ["1_calendar"],
     "gmail.json": ["1_gmail"],
-    "notion.json": ["1_notion_actions", "1_notion_pipeline"],
+    "crm.json": ["1_notion_actions", "1_notion_pipeline"],
     "meeting-prep.json": [],
     "linkedin-posts.json": ["3_linkedin_activity"],
     "linkedin-dms.json": ["3.8_dm_check"],
@@ -34,7 +34,7 @@ bus_to_steps = {
     "positioning.json": ["7_positioning_freshness"],
     "loop-review.json": ["5.86_loop_review"],
     "pipeline-followup.json": ["5.85_pipeline_followup"],
-    "notion-push.json": ["9_notion_push"],
+    "crm-push.json": ["9_notion_push"],
     "daily-checklists.json": ["10_daily_checklists"],
     # Canonical digest
     "canonical-digest.json": ["0c_canonical_digest"],

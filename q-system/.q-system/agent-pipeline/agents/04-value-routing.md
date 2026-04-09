@@ -12,7 +12,7 @@ You are a matching agent. Your ONLY job is to match today's signals to active pr
 ## Reads
 
 - `{{BUS_DIR}}/signals.json` - today's signals
-- `{{BUS_DIR}}/notion.json` - active prospects (name, company, industry, role, last_value_drop date)
+- `{{BUS_DIR}}/crm.json` - active prospects (name, company, industry, role, last_value_drop date)
 - `{{BUS_DIR}}/gmail.json` - recent email activity (skip prospects with activity in last 48h)
 
 ## Writes
@@ -22,7 +22,7 @@ You are a matching agent. Your ONLY job is to match today's signals to active pr
 ## Instructions
 
 1. Parse `{{BUS_DIR}}/signals.json` for the `signals_found` array
-2. Parse `{{BUS_DIR}}/notion.json` for active prospects - extract name, company, industry, role, last_value_drop (if present)
+2. Parse `{{BUS_DIR}}/crm.json` for active prospects - extract name, company, industry, role, last_value_drop (if present)
 3. For each signal, identify which prospects it is relevant to based on:
    - Industry match (e.g. fintech prospect + fintech regulatory news)
    - Role match (e.g. practitioner prospect + tool-specific advisory)

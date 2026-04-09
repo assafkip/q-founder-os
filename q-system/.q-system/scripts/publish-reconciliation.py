@@ -83,7 +83,7 @@ def extract_x_posts(x_data):
 
 
 def extract_drafts(notion_data):
-    """Extract drafted/scheduled content from notion.json."""
+    """Extract drafted/scheduled content from crm.json."""
     drafts = []
     if not notion_data:
         return drafts
@@ -135,7 +135,7 @@ def main():
     # Read inputs
     linkedin_data = read_bus_file(bus_dir, "linkedin-posts.json")
     x_data = read_bus_file(bus_dir, "x-activity.json")
-    notion_data = read_bus_file(bus_dir, "notion.json")
+    notion_data = read_bus_file(bus_dir, "crm.json")
 
     founder_posts = extract_founder_posts(linkedin_data) + extract_x_posts(x_data)
     drafts = extract_drafts(notion_data)

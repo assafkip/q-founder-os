@@ -19,7 +19,7 @@ Phase 0: Preflight (sequential, must pass)
 Phase 1: Data Ingest (parallel - all independent pulls)
   -> Agent: 01-calendar-pull.md (sonnet)     -> bus/{date}/calendar.json
   -> Agent: 01-gmail-pull.md (sonnet)        -> bus/{date}/gmail.json
-  -> Agent: 01-notion-pull.md (sonnet)       -> bus/{date}/notion.json
+  -> Agent: 01-crm-pull.md (sonnet)       -> bus/{date}/crm.json
   -> Agent: 01-vc-pipeline-pull.md (sonnet)  -> bus/{date}/pipeline.json
   -> All launched in a single message with multiple Agent tool calls
 

@@ -27,7 +27,7 @@ BUS_BASE = os.path.join(QROOT, ".q-system", "agent-pipeline", "bus")
 THRESHOLDS = {
     "calendar": 4,
     "gmail": 2,
-    "notion": 6,
+    "crm": 6,
     "x-activity": 8,
     "linkedin-posts": 8,
     "linkedin-dms": 4,

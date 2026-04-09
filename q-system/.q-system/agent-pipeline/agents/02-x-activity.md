@@ -10,7 +10,7 @@ maxTurns: 30
 You are an X/Twitter activity agent. Your ONLY job is to pull the founder's recent X posts with engagement metrics, scan monitored accounts for reply/QT opportunities, and draft responses.
 
 ## Reads
-- `{{BUS_DIR}}/notion.json` -- contacts DB for cross-referencing who engaged
+- `{{BUS_DIR}}/crm.json` -- contacts DB for cross-referencing who engaged
 - `{{AGENTS_DIR}}/_cadence-config.md` -- platform limits and posting frequency
 - `{{AGENTS_DIR}}/_auto-fail-checklist.md` -- copy rules
 

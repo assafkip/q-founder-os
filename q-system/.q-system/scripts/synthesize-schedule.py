@@ -838,7 +838,7 @@ def main():
     # Load all bus files
     calendar = load_bus(bus_dir, "calendar.json")
     gmail = load_bus(bus_dir, "gmail.json")
-    notion = load_bus(bus_dir, "notion.json")
+    notion = load_bus(bus_dir, "crm.json")
     meeting_prep = load_bus(bus_dir, "meeting-prep.json")
     linkedin_posts = load_bus(bus_dir, "linkedin-posts.json")
     linkedin_dms = load_bus(bus_dir, "linkedin-dms.json")

@@ -64,7 +64,7 @@ Your context window will compact automatically at ~50% capacity (set by session-
    ```
    Read your instructions from {{AGENTS_DIR}}/{agent-file}. Template vars: DATE={{DATE}}, BUS_DIR={{BUS_DIR}}, QROOT={{QROOT}}, AGENTS_DIR={{AGENTS_DIR}}. If your instructions reference voice or AUDHD skill files, read them yourself from the paths specified. Write output to the bus file specified in your instructions.
    ```
-3. Model allocation: haiku for data pulls and simple writes (00-*, 01-*, 03-linkedin-posts, 03-linkedin-dms, 08-visual-verify, 09-notion-push, 10-daily-checklists), sonnet for analysis/content agents, opus for 05-engagement-hitlist only
+3. Model allocation: haiku for data pulls and simple writes (00-*, 01-*, 03-linkedin-posts, 03-linkedin-dms, 08-visual-verify, 09-crm-push, 10-daily-checklists), sonnet for analysis/content agents, opus for 05-engagement-hitlist only
 4. When multiple agents in a phase are independent, launch them ALL in a single message (parallel)
 5. When a phase depends on the previous phase's output, wait for completion first
 6. After each phase, verify the expected bus/ JSON files exist using `test -f` or `ls`. Do NOT read bus file contents for verification. Only read bus files if: (a) a phase failed and you need to diagnose, (b) Phase 0 preflight ready=true gate check, or (c) collection-gate.json for Phase 1 prompt injection. These are small, justified reads.
@@ -104,16 +104,16 @@ Some instances may cut agents to save tokens. If an agent was cut for this insta
 ```
 \n\n## Collection Gate Verdict\n<JSON verdict object for this source>
 ```
-Source keys: calendar -> 01-calendar-pull, gmail -> 01-gmail-pull, notion -> 01-notion-pull.
+Source keys: calendar -> 01-calendar-pull, gmail -> 01-gmail-pull, crm -> 01-crm-pull.
 Same injection for Phase 2 (x-activity -> 02-x-activity), Phase 3 (linkedin-posts -> 03-linkedin-posts, linkedin-dms -> 03-linkedin-dms), Phase 5 (lead-sourcing -> 05-lead-sourcing).
 If collection-gate.json is missing or unreadable, skip injection and let agents collect normally.
 
 Launch in ONE message with 4 Agent tool calls:
 - 01-calendar-pull.md (haiku)
 - 01-gmail-pull.md (haiku)
-- 01-notion-pull.md (haiku)
+- 01-crm-pull.md (haiku) - reads from Notion or local markdown based on crm_source in founder-profile.md
 - 01-vc-pipeline-pull.md (haiku) - OPTIONAL: skip if no VC pipeline API configured
-Verify: calendar.json, gmail.json, notion.json all exist in bus/ (vc-pipeline.json optional)
+Verify: calendar.json, gmail.json, crm.json all exist in bus/ (vc-pipeline.json optional)
 If any required agent fails: log the failure, continue with available data
 THEN run SCRIPT: `python3 {{QROOT}}/.q-system/scripts/copy-diff.py {date}`
 - Reads yesterday's hitlist.json + today's linkedin-posts.json, writes copy-diffs.json
@@ -121,8 +121,8 @@ THEN run SCRIPT: `python3 {{QROOT}}/.q-system/scripts/copy-diff.py {date}`
 
 ### Phase 2: Analysis (3 agents, PARALLEL)
 Launch in ONE message with 3 Agent tool calls:
-- 02-meeting-prep.md (sonnet) - reads calendar.json + notion.json
-- 02-warm-intro-match.md (sonnet) - reads vc-pipeline.json + notion.json (skips gracefully if vc-pipeline.json missing)
+- 02-meeting-prep.md (sonnet) - reads calendar.json + crm.json
+- 02-warm-intro-match.md (sonnet) - reads vc-pipeline.json + crm.json (skips gracefully if vc-pipeline.json missing)
 - 02-x-activity.md (sonnet) - pulls founder's X posts + engagement, scans monitored handles
 Verify: meeting-prep.json, warm-intros.json, x-activity.json
 
@@ -130,7 +130,7 @@ Verify: meeting-prep.json, warm-intros.json, x-activity.json
 Chrome agents (SEQUENTIAL -- one tab at a time):
 - 03-linkedin-posts.md (haiku) - writes linkedin-posts.json
 - 03-linkedin-dms.md (haiku) - writes linkedin-dms.json
-- 03-prospect-pipeline.md (sonnet) - reads notion.json, writes prospect-pipeline.json
+- 03-prospect-pipeline.md (sonnet) - reads crm.json, writes prospect-pipeline.json
 THEN (can run after posts + x-activity are done):
 - Run SCRIPT (not agent): `python3 {{QROOT}}/.q-system/scripts/publish-reconciliation.py {date}` - fuzzy-matches published posts against Content Pipeline, writes publish-reconciliation.json
 - 03-content-intel.md (sonnet, MONDAYS ONLY) - multi-platform content performance scrape, writes content-intel.json. Skip on non-Mondays.
@@ -138,7 +138,7 @@ THEN (can run after posts + x-activity are done):
 ### Phase 4: Content (2-4 agents, SEQUENTIAL then PARALLEL)
 - 04-signals-content.md (sonnet) - writes signals.json
 - THEN in PARALLEL:
-  - 04-value-routing.md (sonnet) - reads signals.json + notion.json, writes value-routing.json
+  - 04-value-routing.md (sonnet) - reads signals.json + crm.json, writes value-routing.json
   - 04-post-visuals.md (sonnet) - reads signals.json (+ founder-brand-post.json if weekly brand day), generates Gamma social cards + carousels, writes post-visuals.json
   - IF weekly brand day: 04-founder-brand-post.md (sonnet) - writes founder-brand-post.json. NOTE: If brand day, run founder-brand-post BEFORE post-visuals so visuals agent can read both drafts. Sequence: signals -> founder-brand-post -> [value-routing + post-visuals] in parallel.
 
@@ -147,8 +147,8 @@ THEN (can run after posts + x-activity are done):
 Run SCRIPT first: `python3 {{QROOT}}/.q-system/scripts/temperature-scoring.py {date}` - writes temperature.json
 THEN launch in ONE message:
 - 05-lead-sourcing.md (sonnet) - runs Chrome (LinkedIn) + Reddit MCP + RSS (Medium) + Apify (X only), writes leads.json
-- 05-pipeline-followup.md (sonnet) - reads notion.json + DMs + gmail, writes pipeline-followup.json (includes warming ladder stage advancement)
-- 05-loop-review.md (sonnet) - reads notion.json + prospect-pipeline.json, writes loop-review.json
+- 05-pipeline-followup.md (sonnet) - reads crm.json + DMs + gmail, writes pipeline-followup.json (includes warming ladder stage advancement)
+- 05-loop-review.md (sonnet) - reads crm.json + prospect-pipeline.json, writes loop-review.json
 - 05-connection-mining.md (sonnet) - scans LinkedIn 1st-degree connections for ICP matches, writes connection-mining.json
 
 **NOTE:** lead-sourcing uses Chrome ONLY for LinkedIn search (not Reddit - Reddit uses its own MCP). connection-mining also uses Chrome for LinkedIn People Search. Both use Chrome but at different times within their own execution. The Agent tool runs them as independent sub-agents, each making sequential Chrome calls within their own flow. This is safe as long as Chrome calls don't literally overlap. If Chrome contention occurs, the orchestrator will detect it via errors in leads.json or connection-mining.json and log it.
@@ -202,9 +202,9 @@ Run SCRIPT (not agent): `python3 {{QROOT}}/.q-system/scripts/synthesize-schedule
 5. Show audit output to founder
 Steps 3-4 are NON-OPTIONAL. A hook enforces this - see .claude/settings.json.
 
-### Phase 9: Notion Write-back (2 agents, PARALLEL)
+### Phase 9: CRM Write-back (2 agents, PARALLEL)
 Launch in ONE message:
-- 09-notion-push.md (haiku) - pushes actions to Notion Actions DB, writes notion-push.json
+- 09-crm-push.md (haiku) - pushes actions to Notion Actions DB, writes crm-push.json
 - 10-daily-checklists.md (haiku) - updates Daily Actions + Daily Posts pages, writes daily-checklists.json
 These are the final agents. If either fails, log the error - do not retry.
 

@@ -206,12 +206,12 @@ def verify(date, phase):
             }
         },
         1: {
-            "required": ["calendar.json", "gmail.json", "notion.json"],
+            "required": ["calendar.json", "gmail.json", "crm.json"],
             "optional": ["vc-pipeline.json", "content-metrics.json", "copy-diffs.json"],
             "checks": {
                 "calendar.json": lambda d: "today" in d or "this_week" in d,
                 "gmail.json": lambda d: "emails" in d,
-                "notion.json": lambda d: "contacts" in d and "actions" in d,
+                "crm.json": lambda d: "contacts" in d and "actions" in d,
                 "canonical-digest.json": lambda d: "talk_tracks" in d and "objections" in d and "decisions" in d,
             }
         },
@@ -266,7 +266,7 @@ def verify(date, phase):
         },
         9: {
             "required": [],
-            "optional": ["notion-push.json", "daily-checklists.json"],
+            "optional": ["crm-push.json", "daily-checklists.json"],
             "checks": {}
         },
     }

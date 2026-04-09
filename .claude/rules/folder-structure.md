@@ -57,7 +57,7 @@ kipi-system/                          # Project root (skeleton/template repo + m
 │   │
 │   ├── agents/                       # Custom agent definitions
 │   │   ├── preflight.md              # Haiku - pipeline gate-keeper
-│   │   ├── data-ingest.md            # Haiku - calendar/email/Notion pulls
+│   │   ├── data-ingest.md            # Haiku - calendar/email/CRM pulls
 │   │   ├── engagement-hitlist.md     # Opus - copy-paste engagement actions
 │   │   ├── synthesizer.md            # Opus - daily schedule assembly
 │   │   └── content-reviewer.md       # Sonnet - 4-pass content review
@@ -78,6 +78,11 @@ kipi-system/                          # Project root (skeleton/template repo + m
 │
 ├── q-system/                         # Core operating system
 │   ├── CLAUDE.md                     # Q-system behavioral rules (<200 lines)
+│   ├── CRM-Dashboard.md              # Obsidian Dataview CRM queries
+│   ├── .obsidian/                    # Obsidian vault config (GITIGNORED, user-specific)
+│   ├── .obsidian-starter/            # Obsidian config template (committed)
+│   │   ├── app.json
+│   │   └── community-plugins.json
 │   │
 │   ├── canonical/                    # Source of truth (IMMUTABLE by agents)
 │   │   ├── decisions.md

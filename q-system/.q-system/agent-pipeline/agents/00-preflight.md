@@ -10,7 +10,8 @@ maxTurns: 30
 You are a preflight agent for the morning routine. Your job is to verify all tools are available and the system is ready.
 
 ## Reads
-- `q-system/my-project/notion-ids.md` -- database IDs and data_source_ids for Notion tool check
+- `q-system/my-project/founder-profile.md` -- check `crm_source` field (notion/obsidian/none)
+- `q-system/my-project/notion-ids.md` -- database IDs (Notion CRM only)
 - `q-system/memory/last-handoff.md` -- file existence check
 - `q-system/canonical/talk-tracks.md` -- file existence check
 - `q-system/canonical/objections.md` -- file existence check
@@ -21,7 +22,7 @@ You are a preflight agent for the morning routine. Your job is to verify all too
 1. Check that these MCP tools respond (use ToolSearch to load deferred tools first):
    - Google Calendar: `mcp__claude_ai_Google_Calendar__gcal_list_events` (list events for today)
    - Gmail: `mcp__claude_ai_Gmail__gmail_search_messages` (search last 48h)
-   - Notion: `mcp__claude_ai_Notion__notion-search` with query "Actions" to verify cloud Notion is connected and can see the CRM workspace.
+   - Notion (SKIP if `crm_source: obsidian`): `mcp__claude_ai_Notion__notion-search` with query "Actions" to verify cloud Notion is connected and can see the CRM workspace. If crm_source is obsidian, mark as "skipped" (local files used instead).
    - Chrome: `mcp__claude-in-chrome__tabs_context_mcp` (returns tab list). Load via `ToolSearch("select:mcp__claude-in-chrome__tabs_context_mcp")` first.
    - Apify (X/Twitter only, NON-CRITICAL): `ToolSearch("+apify")` - check if any `mcp__apify__*` tool loads. If not, mark as "fallback_chrome" (not failed). Apify down only affects X/Twitter scraping.
    - Reddit MCP (NON-CRITICAL): `ToolSearch("+reddit")` then call `mcp__reddit__search` with query "test", limit 1. If it returns post data, PASS. If fails, mark as "skipped" (no Chrome fallback for Reddit).
