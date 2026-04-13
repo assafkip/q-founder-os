@@ -1,5 +1,13 @@
 ---
 description: Strict folder structure adherence for the kipi-system project
+paths:
+  - "CLAUDE.md"
+  - ".claude/**/*"
+  - "plugins/**/*"
+  - "q-system/**/*"
+  - "kipi"
+  - "*.sh"
+  - "*.py"
 ---
 
 # Folder Structure (ENFORCED)
