@@ -785,7 +785,7 @@ If today is Friday:
 
 **Source archive pruning (1st of month only, automatic):**
 If today is the 1st:
-1. Delete files in `q-system/sources/` older than 90 days
+1. Delete `*.md` files in `q-system/sources/` older than 90 days (preserve `.gitkeep`)
 2. Log count of deleted files
 
 **After wrap (all automatic, founder does nothing):**
