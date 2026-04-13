@@ -21,6 +21,9 @@ import subprocess
 import sys
 
 QROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
+# Subtree instances nest q-system/ inside q-system/
+if not os.path.isdir(os.path.join(QROOT, "canonical")) and os.path.isdir(os.path.join(QROOT, "q-system", "canonical")):
+    QROOT = os.path.join(QROOT, "q-system")
 SCRIPTS = os.path.dirname(__file__)
 RIPPLE_GRAPH = os.path.join(QROOT, ".q-system", "ripple-graph.json")
 
