@@ -1,3 +1,10 @@
+---
+description: Memory freshness verification rules for fast/medium/slow decay
+paths:
+  - "memory/**/*"
+  - "q-system/memory/**/*"
+---
+
 # Memory Freshness (ENFORCED)
 
 The auto-memory system at `~/.claude/projects/<project>/memory/` stores facts that persist across sessions. Some of those facts decay fast (project state, deadlines, demo status). Others are stable (voice rules, process rules, user facts). The frontmatter `decay` field is authoritative.
