@@ -776,6 +776,18 @@ Use the `/q-wrap` skill for the full workflow (5 steps).
 4. **Canonical drift check** (2 min): Any insights not yet in canonical files?
 5. **Tomorrow preview** (2 min): Calendar + prep status for tomorrow's meetings.
 
+**Structural lint (Fridays only, automatic):**
+If today is Friday:
+1. Run `python3 q-system/.q-system/scripts/content-lint.py --json`
+2. Exit 0: log "Content lint: clean"
+3. Exit 1: surface warnings to founder with one-line summaries
+4. Exit 2: surface errors as blockers
+
+**Source archive pruning (1st of month only, automatic):**
+If today is the 1st:
+1. Delete files in `q-system/sources/` older than 90 days
+2. Log count of deleted files
+
 **After wrap (all automatic, founder does nothing):**
 - Auto-checkpoint (update morning-state.md)
 - Promote working memory to weekly if still relevant (`memory/working/` -> `memory/weekly/`)
