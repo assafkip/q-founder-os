@@ -8,7 +8,7 @@
 |---------|---------|------|
 | `/q-begin` | Start a new session. Claude reads all canonical files first to load current state. | — |
 | `/q-status` | Report current state from `my-project/progress.md`. Quick snapshot of where things stand. | — |
-| `/q-calibrate` | Enter Calibrate mode. Update canonical files based on new information, feedback, or market changes. | CALIBRATE |
+| `/q-calibrate` | Enter Calibrate mode. Update canonical files based on new information, feedback, or market changes. **Post-edit ripple check enforced:** after every canonical edit, run `changelog-write.py` then `ripple-verify.py`. See Post-Edit Ripple Check below. | CALIBRATE |
 | `/q-create [type] [audience]` | Enter Create mode. Generate a specific output (talk track, email, slide text, diagram, memo) for a specific audience. | CREATE |
 | `/q-debrief [person]` | Enter Debrief mode. Use the structured debrief template to process a conversation. Includes 12 strategic implications lenses, market intelligence routing, and **Design Partner Conversion** (mandatory for practitioner/CISO calls - produces copy-paste message to convert conversation into trial). **Highest-priority workflow.** | DEBRIEF |
 | `/q-plan` | Enter Plan mode. Review relationships, objections, and proof gaps. Propose prioritized next actions. | PLAN |
@@ -40,6 +40,15 @@
 - **`/q-draft` vs `/q-create`:** Use `/q-create` for structured deliverables (talk tracks, workflow packs). Use `/q-draft` for one-off outputs (specific email, DM, talking points for a meeting).
 - **`/q-ingest-feedback [file]`** expects a file in `q-system/output/`. Place the file there first.
 - **Modes are not sequential.** Switch freely. You can `/q-debrief` then immediately `/q-plan` then `/q-create`.
+
+## Post-Edit Ripple Check (ENFORCED for /q-calibrate and /q-debrief)
+
+After every canonical file edit during calibrate or debrief:
+1. Run `python3 q-system/.q-system/scripts/changelog-write.py <file> <workflow> "<summary>" --source "<source>"`
+2. Read the `ripple_targets` from stdout JSON
+3. For each target: read the file, check if the edit creates an inconsistency, update if needed
+4. After all edits: run `python3 q-system/.q-system/scripts/ripple-verify.py q-system/canonical/changelog.md YYYY-MM-DD`
+5. Exit 0 = done. Exit 1 = surface missing targets to founder (soft gate). Do NOT block completion.
 
 ## Example Flows
 

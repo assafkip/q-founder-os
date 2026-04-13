@@ -1,0 +1,58 @@
+{
+  "_version": 1,
+  "_description": "When SOURCE changes, check each TARGET for consistency. File-level edges only (v1). Section-level targeting deferred to v1.1 with header validation.",
+  "graph": {
+    "my-project/current-state.md": [
+      "canonical/talk-tracks.md",
+      "canonical/objections.md",
+      "my-project/competitive-landscape.md",
+      "canonical/market-intelligence.md",
+      "canonical/discovery.md"
+    ],
+    "canonical/objections.md": [
+      "canonical/talk-tracks.md",
+      "canonical/discovery.md",
+      "my-project/competitive-landscape.md"
+    ],
+    "canonical/talk-tracks.md": [
+      "canonical/objections.md",
+      "canonical/market-intelligence.md",
+      "my-project/current-state.md"
+    ],
+    "canonical/market-intelligence.md": [
+      "canonical/talk-tracks.md",
+      "my-project/icp.md",
+      "my-project/icp-signals.md",
+      "my-project/competitive-landscape.md",
+      "canonical/objections.md"
+    ],
+    "canonical/discovery.md": [
+      "canonical/objections.md",
+      "canonical/talk-tracks.md",
+      "my-project/current-state.md"
+    ],
+    "my-project/competitive-landscape.md": [
+      "canonical/objections.md",
+      "canonical/talk-tracks.md",
+      "canonical/market-intelligence.md"
+    ],
+    "my-project/relationships.md": [
+      "my-project/progress.md"
+    ],
+    "canonical/pricing-framework.md": [
+      "canonical/talk-tracks.md",
+      "canonical/objections.md"
+    ],
+    "canonical/verticals.md": [
+      "canonical/talk-tracks.md",
+      "my-project/icp.md",
+      "canonical/market-intelligence.md"
+    ],
+    "canonical/engagement-playbook.md": [],
+    "canonical/lead-lifecycle-rules.md": [],
+    "canonical/content-intelligence.md": [
+      "canonical/market-intelligence.md",
+      "marketing/content-themes.md"
+    ]
+  }
+}
