@@ -106,7 +106,7 @@ cp "$SCRIPT_DIR/.gitignore" .gitignore 2>/dev/null || true
 echo "  .claude/ configured with rules, agents, and plugins"
 
 # Commit only instance files (never skeleton root files like validate-separation.py, instance-registry.json, kipi-*.sh)
-git add "$PREFIX/" .claude/ plugins/ .gitignore CLAUDE.md 2>/dev/null || true
+git add "$PREFIX/" .claude/ plugins/ .gitignore CLAUDE.md .mcp.json 2>/dev/null || true
 git commit -m "Add kipi-system skeleton as subtree with .claude config"
 
 # Register in instance-registry.json
