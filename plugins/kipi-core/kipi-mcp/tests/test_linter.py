@@ -838,7 +838,7 @@ class TestLinkedInGateWrapsLinters:
         assert r["lint_voice"]["pass"] is False
 
     def test_passive_voice_in_draft_blocks(self, linter):
-        draft = "The report was written by the team. " + _CLEAN_DRAFT
+        draft = "The report was reviewed by the team. " + _CLEAN_DRAFT
         r = linter.linkedin_gate(draft)
         assert r["pass"] is False
         assert r["lint_copy"]["pass"] is False

@@ -909,7 +909,7 @@ def kipi_monthly_learnings(days: int = 30) -> str:
 
 
 # ============================================================
-# Linter Tools (6 tools — deterministic text validation)
+# Linter Tools (9 tools — deterministic text validation + LinkedIn cadence)
 # ============================================================
 
 

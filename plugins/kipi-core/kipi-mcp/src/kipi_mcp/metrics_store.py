@@ -382,7 +382,7 @@ class MetricsStore:
                 "detail": f"{posts_this_week} posts this week — cap is 3. Drafting a new post is blocked.",
             })
 
-        if total >= 5 and engage_ratio < 0.6:
+        if total >= 3 and engage_ratio < 0.6:
             warnings.append({
                 "type": "engage_ratio",
                 "detail": (
