@@ -35,27 +35,29 @@ Check sources in this order. Stop at the first level that answers the question.
 **Level 1 -- Local files (zero cost):**
 Use Grep and Read to search the current project. Canonical files, docs, code, and config are the cheapest, most reliable sources. If the claim is about this project, local files ARE the citation.
 
-**Level 2 -- WebSearch snippets only (low cost):**
-Run WebSearch. The result snippets usually contain the key fact. Cite as: "According to [Source Name] ([URL]): [snippet text]". DO NOT call WebFetch unless the snippet is ambiguous or incomplete.
+**Level 2 -- Perplexity (low cost, preferred for all web research):**
+Call `mcp__perplexity__perplexity_ask` with a focused question. Perplexity returns a grounded answer with inline citations in a single call. Cite the Perplexity response and its source URLs verbatim. Do NOT paraphrase without attribution.
 
-**Level 3 -- WebFetch for direct quotes (high cost, use sparingly):**
-Only fetch full pages when:
-- The snippet is ambiguous and you need the surrounding context
-- The user explicitly asked for direct quotes or full text
-- You need to verify a specific number, date, or technical detail the snippet doesn't include
+- Use `sonar` for general questions, `sonar-pro` for technical depth or multi-source synthesis.
+- Ask one question per call. Do not stuff multiple topics into one prompt.
+- If Perplexity returns "I don't know" or no citations, treat it as no answer. Escalate to Level 3 only if the founder explicitly asks for direct source text.
+
+**Level 3 -- WebFetch for direct quotes (rare, high cost):**
+Only when Perplexity's summary is insufficient and you need word-for-word text from a specific page. Use sparingly.
 
 **Level 4 -- Scholar Gateway (for academic claims):**
 For academic papers or research findings, use Scholar Gateway MCP if available. Structured results, no page scraping.
 
 ### Token budget
-- Maximum 5 WebSearch calls per research question
-- Maximum 3 WebFetch calls per research question
+- Maximum 3 Perplexity calls per research question
+- Maximum 2 WebFetch calls per research question (only if Level 2 was insufficient)
+- WebSearch is deprecated in this skill. Use Perplexity instead.
 - If you hit the limit: summarize what you found, list what remains unverified, and ask the user if they want to go deeper
-- Parallel searches are fine. Serial retry loops are not.
+- Parallel calls are fine. Serial retry loops are not.
 
 ### What counts as "cited"
 - Local file path + line number = cited
-- WebSearch snippet + URL = cited
+- Perplexity answer + source URLs it returned = cited
 - Named paper/author + year = cited (mark `{{VERIFY_URL}}` if no link)
 - "I recall from training data" = NOT cited. Say "I believe X but cannot cite a specific source."
 

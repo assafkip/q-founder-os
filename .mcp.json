@@ -15,6 +15,13 @@
     "playwright": {
       "command": "npx",
       "args": ["@playwright/mcp@latest"]
+    },
+    "perplexity": {
+      "command": "npx",
+      "args": ["-y", "server-perplexity-ask"],
+      "env": {
+        "PERPLEXITY_API_KEY": "${PERPLEXITY_API_KEY}"
+      }
     }
   }
 }
