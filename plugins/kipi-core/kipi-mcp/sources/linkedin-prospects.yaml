@@ -1,0 +1,22 @@
+name: linkedin-prospects
+schema_version: 1
+method: chrome
+chrome:
+  actions_file: linkedin-prospects.md
+  throttle_ms: 3000
+schedule:
+  frequency: daily
+  skip_if_hours: 40
+  energy_gate: 3
+output:
+  full_text: true
+  schema:
+    prospect: string
+    posts:
+      - text: string
+        engagement:
+          likes: int
+          comments: int
+          reposts: int
+        date: string
+on_error: skip

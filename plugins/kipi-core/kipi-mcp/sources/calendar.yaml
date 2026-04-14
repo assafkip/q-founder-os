@@ -1,0 +1,14 @@
+name: calendar
+schema_version: 1
+method: mcp
+mcp:
+  server: google-calendar
+  tool: gcal_list_events
+  calls:
+    - args:
+        maxResults: 50
+schedule:
+  frequency: daily
+output:
+  full_text: false
+on_error: skip

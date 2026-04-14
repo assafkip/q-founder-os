@@ -1,0 +1,29 @@
+[project]
+name = "kipi-mcp"
+version = "1.1.0"
+description = "MCP server for kipi founder OS instance management"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.0.0,<2.0.0",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+    "tenacity>=8.0",
+    "apify-client>=1.0",
+    "feedparser>=6.0",
+    "google-analytics-data>=0.18",
+    "google-auth>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-mock", "pytest-asyncio"]
+
+[project.scripts]
+kipi-mcp = "kipi_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

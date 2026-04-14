@@ -1,0 +1,16 @@
+name: linkedin-dms
+schema_version: 1
+method: chrome
+chrome:
+  actions_file: linkedin-dms.md
+  throttle_ms: 3000
+schedule:
+  frequency: daily
+output:
+  full_text: true
+  schema:
+    contact: string
+    thread_id: string
+    messages: array
+    needs_reply: bool
+on_error: skip

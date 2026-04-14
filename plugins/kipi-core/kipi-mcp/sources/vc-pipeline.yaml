@@ -1,0 +1,12 @@
+name: vc-pipeline
+schema_version: 1
+method: http
+http:
+  url: "${VC_PIPELINE_URL}"
+  verb: GET
+schedule:
+  frequency: daily
+  skip_if_hours: 20
+output:
+  full_text: false
+on_error: skip

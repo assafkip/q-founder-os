@@ -1,0 +1,17 @@
+name: x-lead-search
+schema_version: 1
+method: apify
+apify:
+  actor_id: apidojo/tweet-scraper
+  input:
+    searchTerms: "${X_LEAD_SEARCH_TERMS}"
+    maxTweets: 50
+schedule:
+  frequency: daily
+  skip_if_hours: 20
+output:
+  full_text: true
+incremental:
+  cursor_field: timestamp
+  state_key: x-lead-search
+on_error: skip

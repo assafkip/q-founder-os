@@ -1,0 +1,18 @@
+name: linkedin-notifications
+schema_version: 1
+method: chrome
+chrome:
+  actions_file: linkedin-notifications.md
+  throttle_ms: 3000
+schedule:
+  frequency: daily
+output:
+  full_text: false
+  schema:
+    contact: string
+    signal_type: string
+    weight: int
+    timestamp: string
+persist:
+  method: kipi_insert_behavioral_signals
+on_error: skip

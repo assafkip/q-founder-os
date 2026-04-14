@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "kipi": {
+      "command": "uv",
+      "args": ["--directory", "${CLAUDE_PLUGIN_ROOT}/kipi-mcp", "run", "kipi-mcp"],
+      "env": {
+        "KIPI_PLUGIN_DATA": "${CLAUDE_PLUGIN_DATA}",
+        "KIPI_PLUGIN_ROOT": "${CLAUDE_PLUGIN_ROOT}"
+      }
+    }
+  }
+}

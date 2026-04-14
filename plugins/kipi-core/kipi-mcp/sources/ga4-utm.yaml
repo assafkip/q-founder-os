@@ -1,0 +1,31 @@
+name: ga4-utm
+schema_version: 1
+method: http
+http:
+  url: "https://analyticsdata.googleapis.com/v1beta/properties/${GA4_PROPERTY_ID}:runReport"
+  verb: POST
+  is_ga4: true
+  headers:
+    Authorization: "Bearer ${GA4_ACCESS_TOKEN}"
+  body_template:
+    dimensions:
+      - name: sessionCampaignName
+      - name: sessionSource
+      - name: sessionMedium
+    metrics:
+      - name: sessions
+      - name: activeUsers
+      - name: conversions
+    dateRanges:
+      - startDate: "7daysAgo"
+        endDate: "today"
+  records_path: ["rows"]
+schedule:
+  frequency: monday
+  skip_if_hours: 144
+output:
+  full_text: false
+  schema:
+    dimensions: [sessionCampaignName, sessionSource, sessionMedium]
+    metrics: [sessions, activeUsers, conversions]
+on_error: skip

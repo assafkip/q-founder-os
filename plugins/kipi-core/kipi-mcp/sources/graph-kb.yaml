@@ -1,0 +1,11 @@
+name: graph-kb
+schema_version: 1
+method: local
+local:
+  file_path: "${DATA_DIR}/memory/graph.jsonl"
+  format: jsonl
+schedule:
+  frequency: daily
+output:
+  full_text: false
+on_error: skip

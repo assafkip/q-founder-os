@@ -1,0 +1,21 @@
+name: linkedin-feed
+schema_version: 1
+method: chrome
+chrome:
+  actions_file: linkedin-feed.md
+  throttle_ms: 3000
+schedule:
+  frequency: daily
+output:
+  full_text: true
+  schema:
+    author: string
+    headline: string
+    text: string
+    engagement:
+      likes: int
+      comments: int
+      reposts: int
+    url: string
+    timestamp: string
+on_error: skip

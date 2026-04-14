@@ -1,0 +1,33 @@
+name: ga4-metrics
+schema_version: 1
+method: http
+http:
+  url: "https://analyticsdata.googleapis.com/v1beta/properties/${GA4_PROPERTY_ID}:runReport"
+  verb: POST
+  is_ga4: true
+  headers:
+    Authorization: "Bearer ${GA4_ACCESS_TOKEN}"
+  body_template:
+    dimensions:
+      - name: sessionDefaultChannelGroup
+      - name: pagePath
+    metrics:
+      - name: activeUsers
+      - name: sessions
+      - name: engagementRate
+      - name: averageSessionDuration
+    dateRanges:
+      - startDate: "14daysAgo"
+        endDate: "8daysAgo"
+      - startDate: "7daysAgo"
+        endDate: "today"
+  records_path: ["rows"]
+schedule:
+  frequency: monday
+  skip_if_hours: 144
+output:
+  full_text: false
+  schema:
+    dimensions: [sessionDefaultChannelGroup, pagePath]
+    metrics: [activeUsers, sessions, engagementRate, averageSessionDuration]
+on_error: skip

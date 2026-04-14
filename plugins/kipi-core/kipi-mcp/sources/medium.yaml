@@ -1,0 +1,13 @@
+name: medium
+schema_version: 1
+method: http
+http:
+  url: "https://medium.com/feed/@${MEDIUM_USERNAME}"
+  verb: GET
+  is_rss: true
+schedule:
+  frequency: daily
+  skip_if_hours: 20
+output:
+  full_text: false
+on_error: skip

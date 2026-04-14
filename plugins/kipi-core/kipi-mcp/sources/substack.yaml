@@ -1,0 +1,13 @@
+name: substack
+schema_version: 1
+method: http
+http:
+  url: "https://${SUBSTACK_PUB}.substack.com/api/v1/posts?limit=10"
+  verb: GET
+  records_path: []
+schedule:
+  frequency: daily
+  skip_if_hours: 20
+output:
+  full_text: false
+on_error: skip

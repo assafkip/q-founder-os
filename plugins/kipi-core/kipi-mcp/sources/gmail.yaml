@@ -1,0 +1,15 @@
+name: gmail
+schema_version: 1
+method: mcp
+mcp:
+  server: gmail
+  tool: gmail_search_messages
+  calls:
+    - args:
+        query: "newer_than:2d"
+        maxResults: 50
+schedule:
+  frequency: daily
+output:
+  full_text: true
+on_error: skip

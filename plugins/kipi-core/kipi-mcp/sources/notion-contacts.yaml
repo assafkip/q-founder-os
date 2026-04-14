@@ -1,0 +1,22 @@
+name: notion-contacts
+schema_version: 1
+method: mcp
+mcp:
+  server: notion
+  tool: query-data-source
+  calls:
+    - args:
+        data_source_id: "${NOTION_CONTACTS_DS}"
+        filter:
+          timestamp: last_edited_time
+          last_edited_time:
+            on_or_after: "${HARVEST_SINCE}"
+schedule:
+  frequency: daily
+  skip_if_hours: 20
+incremental:
+  cursor_field: last_edited_time
+  state_key: notion-contacts
+output:
+  full_text: false
+on_error: skip

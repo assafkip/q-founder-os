@@ -1,0 +1,14 @@
+name: notion-actions
+schema_version: 1
+method: mcp
+mcp:
+  server: notion
+  tool: query-data-source
+  calls:
+    - args:
+        data_source_id: "${NOTION_ACTIONS_DS}"
+schedule:
+  frequency: daily
+output:
+  full_text: false
+on_error: skip
