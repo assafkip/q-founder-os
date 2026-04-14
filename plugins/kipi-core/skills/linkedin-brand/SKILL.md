@@ -45,6 +45,9 @@ If those instance files do not exist, ask the founder to create them before draf
 - Personal-adjacent outperforms pure professional.
 
 ### AI-detection patterns (scrub before publishing)
+
+Enforced deterministically by `kipi_voice_lint` in the pre-publish checklist. The list below is the underlying ruleset the linter catches automatically.
+
 - No em-dashes. Ever.
 - No rule-of-three lists ("faster, smarter, better").
 - No AI filler: "leverage," "robust," "seamless," "ecosystem," "landscape," "paradigm," "synergy," "utilize," "facilitate," "streamline," "empower," "holistic," "scalable," "next-gen," "disruptive," "excited to share," "in today's landscape."
@@ -71,17 +74,30 @@ Before drafting a reaction (comment, reply, quote-post, DM about someone's conte
 
 ## Pre-Publish Checklist
 
-Run before returning any draft:
+Run in this order. Do not return a draft until every step passes.
+
+### Step 1: Deterministic linters (BLOCKING)
+
+Call both MCP tools on the full draft text before returning anything to the founder:
+
+1. `kipi_voice_lint(draft)` — parse the returned JSON. If `pass: false`, read every entry in `violations[]`, fix each one, re-run until `pass: true`. Violation types the linter catches: `emdash`, `banned_word`, `banned_phrase`, `filler_opener`, `structural_opener`, `sentence_length` (avg >20 words), `paragraph_uniformity`.
+2. `kipi_copy_edit_lint(draft)` — parse the returned JSON. If `pass: false`, apply each `replacements[].suggested`, remove every `filler_words[].word` instance, and rewrite each `passive_voice[].context` as active voice. Re-run until `pass: true`.
+
+Never return a draft with `pass: false` on either linter. If after 3 iterations a rule still fails, surface the specific violation to the founder verbatim and ask whether to override.
+
+### Step 2: Self-check (subjective, not covered by linters)
+
+The linters do NOT check these. Verify manually before returning:
 
 1. Hashtag count: 0 or 1?
 2. External links: in first comment only, not body?
-3. Zero em-dashes, zero rule-of-three lists, zero AI filler phrases?
-4. First sentence scar-anchored? No hedging?
-5. Matches one of the founder's committed pillars (from instance file)?
-6. Day-of-week = Tue/Wed/Thu?
-7. First-hour engagement plan stated (3-5 2nd-degree comments to land)?
+3. First sentence scar-anchored? No hedging?
+4. Matches one of the founder's committed pillars (from `my-project/linkedin-playbook.md`)?
+5. Day-of-week = Tue/Wed/Thu?
+6. First-hour engagement plan stated (3-5 2nd-degree comments to land)?
+7. Pillar tag declared (`[Pillar 1: scar]`, `[Pillar 2: founder-op]`, `[Pillar 3: AI/visibility]`)?
 
-If any check fails, fix before returning the draft.
+If any self-check fails, fix before returning the draft.
 
 ## LLM Visibility Mode
 
