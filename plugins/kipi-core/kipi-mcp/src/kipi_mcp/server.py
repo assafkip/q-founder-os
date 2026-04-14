@@ -1093,7 +1093,8 @@ def kipi_log_linkedin_activity(
 def kipi_linkedin_cadence_check(today: str = "") -> str:
     """Report LinkedIn cadence: posts this week, engage ratio, last post day.
 
-    Blocks drafting a 4th post in a week. Warns if engage ratio <60%.
+    Advisory only. Always returns pass=True. Surfaces weekly post cap and
+    engage-ratio signals in warnings[] for the caller to display; never blocks.
 
     Args:
         today: ISO date (YYYY-MM-DD). Defaults to today. Week = Mon–Sun.

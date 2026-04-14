@@ -251,13 +251,14 @@ class TestLinkedInCadenceCheck:
         assert r["engage_ratio"] == 0.0
         assert r["last_post_day"] is None
 
-    def test_fourth_post_blocks(self, store):
+    def test_fourth_post_warns(self, store):
         monday = self._monday("2026-04-15")
         for i in range(3):
             store.log_linkedin_activity("post", f"url-{i}", activity_date=monday)
         r = store.linkedin_cadence_check(today="2026-04-15")
-        assert r["pass"] is False
-        assert any(v["type"] == "weekly_post_cap" for v in r["violations"])
+        assert r["pass"] is True
+        assert "violations" not in r
+        assert any(w["type"] == "weekly_post_cap" for w in r["warnings"])
 
     def test_engage_ratio_warning_below_60(self, store):
         monday = self._monday("2026-04-15")
