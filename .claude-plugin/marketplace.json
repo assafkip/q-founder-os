@@ -1,0 +1,11 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "kipi",
+  "description": "Kipi System plugin marketplace",
+  "owner": { "name": "Assaf Kipnis", "email": "[REDACTED]" },
+  "plugins": [
+    { "name": "kipi-core", "source": "./plugins/kipi-core", "description": "Core founder OS skills (voice, research, AUDHD, linkedin-brand)", "category": "productivity" },
+    { "name": "kipi-ops", "source": "./plugins/kipi-ops", "description": "GTM and council skills", "category": "productivity" },
+    { "name": "kipi-design", "source": "./plugins/kipi-design", "description": "Brand, UI/UX, and design skills", "category": "productivity" }
+  ]
+}

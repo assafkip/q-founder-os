@@ -1,0 +1,9 @@
+{
+  "name": "kipi-core",
+  "version": "1.2.0",
+  "description": "Core founder OS skills — voice, research, AUDHD, LinkedIn/brand",
+  "author": { "name": "Assaf Kipnis", "email": "[REDACTED]" },
+  "repository": "https://github.com/assafkip/kipi-system",
+  "license": "MIT",
+  "skills": "./skills/"
+}
