@@ -17,10 +17,11 @@ def test_init_db_creates_all_tables(tmp_path):
     db = tmp_path / "metrics.db"
     s = MetricsStore(db_path=db)
     tables = s.init_db()
-    assert len(tables) == 7
+    assert len(tables) == 8
     expected = {
         "content_performance", "outreach_log", "copy_edits",
         "behavioral_signals", "daily_metrics", "ab_tests", "ab_assignments",
+        "linkedin_activity",
     }
     assert set(tables) == expected
 
@@ -220,3 +221,71 @@ def test_generate_monthly_learnings_with_edits(store):
     assert isinstance(report["avg_length_change_pct"], float)
     assert "outreach" in report["edit_frequency_by_context"]
     assert report["edit_frequency_by_context"]["outreach"] == 2
+
+
+class TestLinkedInActivity:
+    def test_log_post_inserts_row(self, store):
+        r = store.log_linkedin_activity("post", "https://linkedin.com/posts/abc", pillar="scar")
+        assert r["kind"] == "post"
+        assert r["inserted"] == 1
+
+    def test_log_rejects_invalid_kind(self, store):
+        with pytest.raises(ValueError):
+            store.log_linkedin_activity("story", "https://x.com/y")
+
+    def test_duplicate_url_same_kind_ignored(self, store):
+        store.log_linkedin_activity("post", "https://linkedin.com/posts/x")
+        r2 = store.log_linkedin_activity("post", "https://linkedin.com/posts/x")
+        assert r2["inserted"] == 0
+
+
+class TestLinkedInCadenceCheck:
+    def _monday(self, today_str):
+        d = datetime.strptime(today_str, "%Y-%m-%d")
+        return (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
+
+    def test_empty_history_passes(self, store):
+        r = store.linkedin_cadence_check(today="2026-04-15")
+        assert r["pass"] is True
+        assert r["posts_this_week"] == 0
+        assert r["engage_ratio"] == 0.0
+        assert r["last_post_day"] is None
+
+    def test_fourth_post_blocks(self, store):
+        monday = self._monday("2026-04-15")
+        for i in range(3):
+            store.log_linkedin_activity("post", f"url-{i}", activity_date=monday)
+        r = store.linkedin_cadence_check(today="2026-04-15")
+        assert r["pass"] is False
+        assert any(v["type"] == "weekly_post_cap" for v in r["violations"])
+
+    def test_engage_ratio_warning_below_60(self, store):
+        monday = self._monday("2026-04-15")
+        for i in range(2):
+            store.log_linkedin_activity("post", f"post-{i}", activity_date=monday)
+        for i in range(2):
+            store.log_linkedin_activity("comment", f"c-{i}", activity_date=monday)
+        r = store.linkedin_cadence_check(today="2026-04-15")
+        assert r["engage_ratio"] == 0.5
+        assert any(w["type"] == "engage_ratio" for w in r["warnings"])
+
+    def test_engage_ratio_no_warning_when_below_sample(self, store):
+        monday = self._monday("2026-04-15")
+        store.log_linkedin_activity("post", "p1", activity_date=monday)
+        r = store.linkedin_cadence_check(today="2026-04-15")
+        assert r["warnings"] == []
+
+    def test_last_post_day_populated(self, store):
+        store.log_linkedin_activity("post", "old", activity_date="2026-04-01")
+        store.log_linkedin_activity("post", "new", activity_date="2026-04-10")
+        r = store.linkedin_cadence_check(today="2026-04-15")
+        assert r["last_post_day"] == "2026-04-10"
+
+    def test_comments_only_exclude_from_post_cap(self, store):
+        monday = self._monday("2026-04-15")
+        for i in range(5):
+            store.log_linkedin_activity("comment", f"c-{i}", activity_date=monday)
+        r = store.linkedin_cadence_check(today="2026-04-15")
+        assert r["pass"] is True
+        assert r["posts_this_week"] == 0
+        assert r["comments_this_week"] == 5

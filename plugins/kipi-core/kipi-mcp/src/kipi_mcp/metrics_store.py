@@ -88,11 +88,21 @@ _SCHEMA = [
         variant TEXT NOT NULL,
         outcome TEXT
     )""",
+    """CREATE TABLE IF NOT EXISTS linkedin_activity (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL CHECK(kind IN ('post', 'comment')),
+        url TEXT NOT NULL,
+        pillar TEXT,
+        activity_date TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(kind, url)
+    )""",
 ]
 
 _TABLE_NAMES = [
     "content_performance", "outreach_log", "copy_edits",
     "behavioral_signals", "daily_metrics", "ab_tests", "ab_assignments",
+    "linkedin_activity",
 ]
 
 
@@ -303,6 +313,94 @@ class MetricsStore:
             return [dict(r) for r in rows]
         finally:
             conn.close()
+
+    def log_linkedin_activity(
+        self,
+        kind: str,
+        url: str,
+        pillar: str | None = None,
+        activity_date: str | None = None,
+    ) -> dict:
+        if kind not in ("post", "comment"):
+            raise ValueError(f"kind must be 'post' or 'comment', got '{kind}'")
+        now = datetime.now()
+        activity_date = activity_date or now.strftime("%Y-%m-%d")
+        created_at = now.strftime("%Y-%m-%dT%H:%M:%S")
+        conn = self._connect()
+        try:
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO linkedin_activity
+                (kind, url, pillar, activity_date, created_at)
+                VALUES (?, ?, ?, ?, ?)""",
+                (kind, url, pillar, activity_date, created_at),
+            )
+            conn.commit()
+            return {
+                "id": cur.lastrowid,
+                "kind": kind,
+                "activity_date": activity_date,
+                "inserted": cur.rowcount,
+            }
+        finally:
+            conn.close()
+
+    def linkedin_cadence_check(self, today: str | None = None) -> dict:
+        if today:
+            today_dt = datetime.strptime(today, "%Y-%m-%d")
+        else:
+            today_dt = datetime.now()
+        week_start = today_dt - timedelta(days=today_dt.weekday())
+        week_start_str = week_start.strftime("%Y-%m-%d")
+
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT kind, activity_date FROM linkedin_activity
+                WHERE activity_date >= ?""",
+                (week_start_str,),
+            ).fetchall()
+            last_post_row = conn.execute(
+                """SELECT activity_date FROM linkedin_activity
+                WHERE kind = 'post'
+                ORDER BY activity_date DESC LIMIT 1"""
+            ).fetchone()
+        finally:
+            conn.close()
+
+        posts_this_week = sum(1 for r in rows if r["kind"] == "post")
+        comments_this_week = sum(1 for r in rows if r["kind"] == "comment")
+        total = posts_this_week + comments_this_week
+        engage_ratio = (comments_this_week / total) if total else 0.0
+        last_post_day = last_post_row["activity_date"] if last_post_row else None
+
+        violations: list[dict] = []
+        warnings: list[dict] = []
+
+        if posts_this_week >= 3:
+            violations.append({
+                "type": "weekly_post_cap",
+                "detail": f"{posts_this_week} posts this week — cap is 3. Drafting a new post is blocked.",
+            })
+
+        if total >= 5 and engage_ratio < 0.6:
+            warnings.append({
+                "type": "engage_ratio",
+                "detail": (
+                    f"engage ratio {engage_ratio:.0%} below 60% target "
+                    f"({comments_this_week} comments / {posts_this_week} posts)"
+                ),
+            })
+
+        return {
+            "pass": len(violations) == 0,
+            "week_start": week_start_str,
+            "posts_this_week": posts_this_week,
+            "comments_this_week": comments_this_week,
+            "engage_ratio": round(engage_ratio, 2),
+            "last_post_day": last_post_day,
+            "violations": violations,
+            "warnings": warnings,
+        }
 
     def generate_monthly_learnings(self, days: int = 30) -> dict:
         edits = self.query_copy_edits(days=days)

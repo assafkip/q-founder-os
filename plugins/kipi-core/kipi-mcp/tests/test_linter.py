@@ -761,3 +761,84 @@ class TestCopyEditLintTotalIssues:
         result = linter.copy_edit_lint(text)
         expected = len(result["replacements"]) + len(result["filler_words"]) + len(result["passive_voice"])
         assert result["total_issues"] == expected
+
+
+# ===========================================================================
+# linkedin_gate
+# ===========================================================================
+
+_CLEAN_DRAFT = (
+    "Four companies. Same broken loop.\n\n"
+    "I watched four trust teams fight the same problem.\n\n"
+    "None of it compounded. The loop breaks because tagging is manual.\n\n"
+    "If you run trust ops and feel this, how do you route the signal today?"
+)
+
+
+class TestLinkedInGateClean:
+    def test_clean_draft_no_day_passes(self, linter):
+        r = linter.linkedin_gate(_CLEAN_DRAFT)
+        assert r["pass"] is True
+        assert r["violations"] == []
+        assert r["hashtag_count"] == 0
+        assert r["body_links"] == []
+
+    def test_clean_draft_allowed_day_passes(self, linter):
+        r = linter.linkedin_gate(_CLEAN_DRAFT, day_of_week="tue")
+        assert r["pass"] is True
+        assert r["day_ok"] is True
+
+
+class TestLinkedInGateHashtags:
+    def test_single_hashtag_passes(self, linter):
+        r = linter.linkedin_gate(_CLEAN_DRAFT + " #trust")
+        assert r["hashtag_count"] == 1
+        assert not any(v["type"] == "hashtag_count" for v in r["violations"])
+
+    def test_two_hashtags_blocks(self, linter):
+        r = linter.linkedin_gate(_CLEAN_DRAFT + " #trust #safety")
+        assert r["pass"] is False
+        assert r["hashtag_count"] == 2
+        assert any(v["type"] == "hashtag_count" for v in r["violations"])
+
+
+class TestLinkedInGateBodyLinks:
+    def test_body_link_blocks(self, linter):
+        draft = _CLEAN_DRAFT + "\n\nSee https://example.com/post for more."
+        r = linter.linkedin_gate(draft)
+        assert r["pass"] is False
+        assert len(r["body_links"]) == 1
+        assert any(v["type"] == "body_link" for v in r["violations"])
+
+
+class TestLinkedInGateDayOfWeek:
+    @pytest.mark.parametrize("day", ["tue", "tuesday", "wed", "wednesday", "thu", "thursday"])
+    def test_allowed_days_pass(self, linter, day):
+        r = linter.linkedin_gate(_CLEAN_DRAFT, day_of_week=day)
+        assert r["day_ok"] is True
+        assert not any(v["type"] == "day_of_week" for v in r["violations"])
+
+    @pytest.mark.parametrize("day", ["mon", "fri", "sat", "sun"])
+    def test_disallowed_days_block(self, linter, day):
+        r = linter.linkedin_gate(_CLEAN_DRAFT, day_of_week=day)
+        assert r["pass"] is False
+        assert r["day_ok"] is False
+
+    def test_override_day_bypasses_gate(self, linter):
+        r = linter.linkedin_gate(_CLEAN_DRAFT, day_of_week="mon", override_day=True)
+        assert r["pass"] is True
+        assert r["day_ok"] is True
+
+
+class TestLinkedInGateWrapsLinters:
+    def test_banned_word_in_draft_blocks(self, linter):
+        draft = "We leverage the platform. " + _CLEAN_DRAFT
+        r = linter.linkedin_gate(draft)
+        assert r["pass"] is False
+        assert r["lint_voice"]["pass"] is False
+
+    def test_passive_voice_in_draft_blocks(self, linter):
+        draft = "The report was written by the team. " + _CLEAN_DRAFT
+        r = linter.linkedin_gate(draft)
+        assert r["pass"] is False
+        assert r["lint_copy"]["pass"] is False

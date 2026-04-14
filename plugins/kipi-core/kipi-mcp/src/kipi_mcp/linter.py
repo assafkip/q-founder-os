@@ -71,6 +71,10 @@ _PASSIVE_RE = re.compile(r"\b(is|are|was|were|been|being)\s+\w+ed\b", re.IGNOREC
 
 _RULE_OF_THREE_RE = re.compile(r"\b\w+,\s+\w+,\s+\w+\b")
 
+_HASHTAG_RE = re.compile(r"#\w+")
+_URL_RE = re.compile(r"https?://\S+")
+_LINKEDIN_ALLOWED_DAYS = {"tue", "tuesday", "wed", "wednesday", "thu", "thursday"}
+
 _SUBJECT_SALESY = re.compile(
     r"\b(increase|boost|ROI)\b", re.IGNORECASE
 )
@@ -490,6 +494,59 @@ class Linter:
             "avg_sentence_length": round(avg_sentence_length, 2),
             "errors": errors,
             "warnings": warnings,
+        }
+
+    def linkedin_gate(
+        self,
+        draft: str,
+        day_of_week: str = "",
+        override_day: bool = False,
+    ) -> dict:
+        voice = self.voice_lint(draft)
+        copy_edit = self.copy_edit_lint(draft)
+
+        violations: list[dict] = []
+
+        hashtag_matches = _HASHTAG_RE.findall(draft)
+        hashtag_count = len(hashtag_matches)
+        if hashtag_count > 1:
+            violations.append({
+                "type": "hashtag_count",
+                "detail": f"{hashtag_count} hashtags found (max 1)",
+                "context": ", ".join(hashtag_matches[:5]),
+            })
+
+        body_links = _URL_RE.findall(draft)
+        if body_links:
+            violations.append({
+                "type": "body_link",
+                "detail": f"{len(body_links)} link(s) in body — move to first comment",
+                "context": body_links[0],
+            })
+
+        day_ok = True
+        day_norm = day_of_week.strip().lower()
+        if day_norm and not override_day:
+            if day_norm not in _LINKEDIN_ALLOWED_DAYS:
+                day_ok = False
+                violations.append({
+                    "type": "day_of_week",
+                    "detail": f"day={day_of_week} — allowed Tue/Wed/Thu (pass override_day=true to bypass)",
+                    "context": "",
+                })
+
+        return {
+            "pass": (
+                voice["pass"]
+                and copy_edit["pass"]
+                and len(violations) == 0
+            ),
+            "lint_voice": voice,
+            "lint_copy": copy_edit,
+            "hashtag_count": hashtag_count,
+            "body_links": body_links,
+            "day_ok": day_ok,
+            "violations": violations,
         }
 
     def copy_edit_lint(self, text: str) -> dict:

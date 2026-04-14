@@ -1031,6 +1031,69 @@ def kipi_copy_edit_lint(text: str) -> str:
         raise ToolError(str(e))
 
 
+@mcp.tool()
+def kipi_linkedin_gate(
+    draft: str, day_of_week: str = "", override_day: bool = False,
+) -> str:
+    """Run the full LinkedIn pre-publish gate on a draft.
+
+    Wraps kipi_voice_lint + kipi_copy_edit_lint plus LinkedIn-specific checks:
+    hashtag count (max 1), body links (none allowed), day-of-week (Tue/Wed/Thu).
+
+    Args:
+        draft: The full LinkedIn post text.
+        day_of_week: Weekday the post will ship (e.g. "tue"). Blank = skip day check.
+        override_day: Set true to bypass the day-of-week gate.
+    """
+    try:
+        return json.dumps(linter.linkedin_gate(draft, day_of_week, override_day))
+    except Exception as e:
+        logger.error("kipi_linkedin_gate failed", exc_info=True)
+        raise ToolError(str(e))
+
+
+@mcp.tool()
+def kipi_log_linkedin_activity(
+    kind: str, url: str, pillar: str = "", activity_date: str = "",
+) -> str:
+    """Log a shipped LinkedIn post or comment for cadence tracking.
+
+    Call after publishing a post or a 2nd-degree engagement comment.
+
+    Args:
+        kind: "post" or "comment".
+        url: Link to the post or comment.
+        pillar: Optional pillar tag (e.g. "scar", "founder-op", "AI/visibility").
+        activity_date: ISO date (YYYY-MM-DD). Defaults to today.
+    """
+    try:
+        return json.dumps(metrics_store.log_linkedin_activity(
+            kind=kind,
+            url=url,
+            pillar=pillar or None,
+            activity_date=activity_date or None,
+        ))
+    except Exception as e:
+        logger.error("kipi_log_linkedin_activity failed", exc_info=True)
+        raise ToolError(str(e))
+
+
+@mcp.tool()
+def kipi_linkedin_cadence_check(today: str = "") -> str:
+    """Report LinkedIn cadence: posts this week, engage ratio, last post day.
+
+    Blocks drafting a 4th post in a week. Warns if engage ratio <60%.
+
+    Args:
+        today: ISO date (YYYY-MM-DD). Defaults to today. Week = Mon–Sun.
+    """
+    try:
+        return json.dumps(metrics_store.linkedin_cadence_check(today or None))
+    except Exception as e:
+        logger.error("kipi_linkedin_cadence_check failed", exc_info=True)
+        raise ToolError(str(e))
+
+
 # ============================================================
 # Scorer Tools (5 tools — deterministic scoring and calculation)
 # ============================================================
