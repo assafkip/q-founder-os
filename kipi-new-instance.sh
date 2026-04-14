@@ -82,6 +82,13 @@ cp "$SCRIPT_DIR"/.claude/agents/*.md .claude/agents/ 2>/dev/null || true
 cp "$SCRIPT_DIR"/.claude/output-styles/*.md .claude/output-styles/ 2>/dev/null || true
 cp "$SCRIPT_DIR"/.claude/rules/*.md .claude/rules/ 2>/dev/null || true
 
+# Copy root .mcp.json so research-mode (Perplexity) and other MCP servers
+# are available at the instance root, where Claude Code looks for .mcp.json
+if [ ! -f .mcp.json ] && [ -f "$SCRIPT_DIR/.mcp.json" ]; then
+  cp "$SCRIPT_DIR/.mcp.json" .mcp.json
+  echo "  Copied .mcp.json (set PERPLEXITY_API_KEY + other tokens in env)"
+fi
+
 # Set up plugins (copy contents, not directory, to avoid nesting)
 if [ -d "$SCRIPT_DIR/plugins" ]; then
   mkdir -p plugins

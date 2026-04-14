@@ -162,6 +162,7 @@ Same as CLI - full local access. Friendlier UI than terminal.
 | Reddit | .mcp.json | .mcp.json | .mcp.json | No token needed | `npx reddit-mcp-buddy` |
 | Telegram | NOT AVAILABLE | .mcp.json | .mcp.json | API credentials from my.telegram.org | `npm i -g telegram-mcp` |
 | Playwright | Maybe (sandbox) | Works | Works | No token needed | `npx @playwright/mcp@latest` |
+| Perplexity | .mcp.json | .mcp.json | .mcp.json | `PERPLEXITY_API_KEY` env var (required by research-mode skill) | `npx -y server-perplexity-ask` |
 | Gamma | Built-in (if available) | .mcp.json | .mcp.json | Varies | Claude.ai integration |
 
 ## When Things Go Wrong

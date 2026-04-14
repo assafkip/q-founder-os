@@ -32,10 +32,19 @@ cp -R "$SCRIPT_DIR/plugins" "$TEMPLATE_DIR/plugins"
 mkdir -p "$TEMPLATE_DIR/memory"
 touch "$TEMPLATE_DIR/memory/.gitkeep"
 
-# 5. Create the template .mcp.json (empty - built during onboarding)
+# 5. Create the template .mcp.json (perplexity required by research-mode skill;
+#    other servers added during onboarding based on archetype)
 cat > "$TEMPLATE_DIR/.mcp.json" << 'EOF'
 {
-  "mcpServers": {}
+  "mcpServers": {
+    "perplexity": {
+      "command": "npx",
+      "args": ["-y", "server-perplexity-ask"],
+      "env": {
+        "PERPLEXITY_API_KEY": "${PERPLEXITY_API_KEY}"
+      }
+    }
+  }
 }
 EOF
 
