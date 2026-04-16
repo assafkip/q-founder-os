@@ -1,12 +1,12 @@
 {
   "skeleton": {
-    "path": "/Users/assafkip/Desktop/kipi-system",
+    "path": "/Users/assafkip/projects/kipi-system",
     "remote": "https://github.com/assafkip/kipi-system.git"
   },
   "instances": [
     {
       "name": "KTLYST_strategy",
-      "path": "/Users/assafkip/Desktop/ktlyst-hub/strategy",
+      "path": "/Users/assafkip/projects/ktlyst-hub/strategy",
       "subtree_prefix": "q-system",
       "instance_q_dir": "q-ktlyst",
       "type": "subtree",
@@ -14,7 +14,7 @@
     },
     {
       "name": "ktlyst",
-      "path": "/Users/assafkip/Desktop/ktlyst-hub/product",
+      "path": "/Users/assafkip/projects/ktlyst-hub/product",
       "subtree_prefix": "q-system",
       "instance_q_dir": null,
       "type": "subtree",
@@ -46,7 +46,7 @@
     },
     {
       "name": "ASK_AI_consultant",
-      "path": "/Users/assafkip/Desktop/ASK_AI_consultant",
+      "path": "/Users/assafkip/projects/ASK_AI_consultant",
       "subtree_prefix": "q-system",
       "instance_q_dir": "q-consult",
       "type": "subtree",
@@ -54,7 +54,7 @@
     },
     {
       "name": "ktlyst-website",
-      "path": "/Users/assafkip/Desktop/ktlyst-hub/website",
+      "path": "/Users/assafkip/projects/ktlyst-hub/website",
       "subtree_prefix": "q-system",
       "instance_q_dir": null,
       "type": "subtree",
@@ -64,7 +64,7 @@
     },
     {
       "name": "4_points_consulting",
-      "path": "/Users/assafkip/Desktop/4_points_consulting",
+      "path": "/Users/assafkip/projects/4_points_consulting",
       "subtree_prefix": "q-system",
       "instance_q_dir": "q-investigate",
       "type": "subtree",
@@ -73,7 +73,7 @@
     },
     {
       "name": "Pure_spectrum_Q",
-      "path": "/Users/assafkip/Desktop/Pure_spectrum_Q",
+      "path": "/Users/assafkip/projects/Pure_spectrum_Q",
       "subtree_prefix": "q-system",
       "instance_q_dir": "q-pure",
       "type": "subtree",
@@ -82,7 +82,7 @@
     },
     {
       "name": "ktlyst_lawyer",
-      "path": "/Users/assafkip/Desktop/ktlyst-hub/lawyer",
+      "path": "/Users/assafkip/projects/ktlyst-hub/lawyer",
       "subtree_prefix": "q-system",
       "instance_q_dir": null,
       "type": "subtree",
