@@ -95,6 +95,14 @@
       "instance_q_dir": null,
       "type": "subtree",
       "has_git": true
+    },
+    {
+      "name": "AUDHD_KIDS",
+      "path": "/Users/assafkip/projects/AUDHD_KIDS",
+      "subtree_prefix": "q-system",
+      "instance_q_dir": null,
+      "type": "subtree",
+      "has_git": true
     }
   ],
   "standalone": [
