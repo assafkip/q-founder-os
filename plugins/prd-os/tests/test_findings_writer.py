@@ -397,6 +397,24 @@ def test_findings_writer_output_unblocks_approval(
     assert run_findings_writer(
         fake_repo, "set-disposition", prd_id, "finding-1", "accepted"
     ).returncode == 0
+    # G1: every accepted finding needs a manifest entry for approval.
+    spec_path = fake_repo / ".prd-os/prds" / f"{prd_id}.md"
+    spec_text = spec_path.read_text()
+    manifest = json.dumps(
+        [
+            {
+                "id": "issue-1",
+                "title": "fix 1",
+                "finding_id": "finding-1",
+                "allowed_files": ["src/a.py"],
+                "required_checks": ["pytest"],
+            }
+        ],
+        indent=2,
+    )
+    spec_path.write_text(
+        spec_text.replace("```json\n[]\n```", f"```json\n{manifest}\n```")
+    )
     r_ok = run_prd_runner(fake_repo, "advance", "approved")
     assert r_ok.returncode == 0, r_ok.stderr
 

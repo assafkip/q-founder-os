@@ -85,6 +85,10 @@ def write_issue_spec() -> Callable[..., Path]:
                 return "[]"
             return "\n" + "\n".join(f"  - {p}" for p in items)
 
+        marker = (
+            f"<!-- generated-by: prd_split.py prd=prd-fixture "
+            f"finding=finding-fixture at=2026-04-20T00:00:00Z -->"
+        )
         body = (
             "---\n"
             f"id: {issue_id}\n"
@@ -96,6 +100,7 @@ def write_issue_spec() -> Callable[..., Path]:
             "required_checks: []\n"
             "required_reviews: []\n"
             "---\n\n"
+            f"{marker}\n\n"
             f"Fixture spec for {issue_id}.\n"
         )
         path = issues_dir / f"{issue_id}.md"

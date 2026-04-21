@@ -179,6 +179,18 @@ def _stamp_reviewed(repo: Path, prd_id: str) -> None:
     spec.write_text(head + "codex_reviewed_at: 2026-04-16T00:00:00Z\n" + rest)
 
 
+def _write_manifest(repo: Path, prd_id: str, entries: list[dict]) -> None:
+    """Replace the template's empty `[]` manifest with a real one."""
+    spec = repo / f".prd-os/prds/{prd_id}.md"
+    text = spec.read_text()
+    payload = json.dumps(entries, indent=2)
+    if "```json\n[]\n```" in text:
+        spec.write_text(text.replace("```json\n[]\n```", f"```json\n{payload}\n```"))
+        return
+    # Template shape changed; append a fresh manifest section at the end.
+    spec.write_text(text + f"\n## Issues\n\n```json\n{payload}\n```\n")
+
+
 def test_approve_blocked_when_no_codex_review_stamp(
     fake_repo, write_config, run_prd_runner
 ):
@@ -237,6 +249,19 @@ def test_approve_allowed_when_all_dispositioned(fake_repo, write_config, run_prd
     prd_id = _read_state(fake_repo)["prd_id"]
     _walk_to_in_review(fake_repo, run_prd_runner)
     _stamp_reviewed(fake_repo, prd_id)
+    _write_manifest(
+        fake_repo,
+        prd_id,
+        [
+            {
+                "id": "issue-1",
+                "title": "fix 1",
+                "finding_id": "finding-1",
+                "allowed_files": ["src/a.py"],
+                "required_checks": ["pytest"],
+            }
+        ],
+    )
     _write_findings(
         fake_repo,
         prd_id,

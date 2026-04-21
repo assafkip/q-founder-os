@@ -61,6 +61,7 @@ def _entry(**overrides) -> dict:
     base = {
         "id": "issue-a",
         "title": "Issue A",
+        "finding_id": "finding-a",
         "allowed_files": ["src/a.py"],
         "required_checks": ["pytest -q"],
     }
@@ -293,6 +294,7 @@ def test_split_rejects_missing_required_checks(fake_repo, write_config, run_prd_
             {
                 "id": "issue-nocheck",
                 "title": "no check",
+                "finding_id": "finding-a",
                 "allowed_files": ["src/a.py"],
             }
         ],
@@ -312,6 +314,7 @@ def test_split_rejects_empty_required_checks(fake_repo, write_config, run_prd_sp
             {
                 "id": "issue-empty-check",
                 "title": "empty check",
+                "finding_id": "finding-a",
                 "allowed_files": ["src/a.py"],
                 "required_checks": [],
             }
