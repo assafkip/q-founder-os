@@ -247,6 +247,12 @@ def cmd_advance(cfg: Config, args: argparse.Namespace) -> int:
             sys.stderr.write(err)
             return rc
 
+    if target == "archived":
+        rc, err = _archive_coverage_gate(cfg, state)
+        if rc != 0:
+            sys.stderr.write(err)
+            return rc
+
     spec_path = cfg.repo_root / state["spec_path"]
     text = spec_path.read_text()
     new_text = re.sub(r"(?m)^status:\s*.+$", f"status: {target}", text, count=1)
@@ -269,6 +275,10 @@ def cmd_archive(cfg: Config, args: argparse.Namespace) -> int:
     if current == "archived":
         print(json.dumps({"archived": state["prd_id"], "note": "already"}))
         return 0
+    rc, err = _archive_coverage_gate(cfg, state)
+    if rc != 0:
+        sys.stderr.write(err)
+        return rc
     spec_path = cfg.repo_root / state["spec_path"]
     text = spec_path.read_text()
     new_text = re.sub(r"(?m)^status:\s*.+$", "status: archived", text, count=1)
@@ -445,6 +455,135 @@ def _findings_gate(cfg: Config, state: dict) -> tuple[int, str]:
             f"approval blocked: {len(pending)} pending finding(s): "
             f"{', '.join(pending)}. Set a disposition on each before advancing.\n"
         )
+    return 0, ""
+
+
+# ---------------------------------------------------------------------------
+# Archive coverage gate
+# ---------------------------------------------------------------------------
+
+
+DEFERRED_WARN_DAYS = 30
+
+
+def _load_receipts_for_prd(path: Path, prd_id: str) -> set[str]:
+    covered: set[str] = set()
+    if not path.is_file():
+        return covered
+    with path.open() as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(rec, dict):
+                continue
+            if rec.get("prd_id") != prd_id:
+                continue
+            fid = rec.get("finding_id")
+            if isinstance(fid, str) and fid:
+                covered.add(fid)
+    return covered
+
+
+def _parse_iso_z(value: str) -> datetime | None:
+    try:
+        if value.endswith("Z"):
+            return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        return datetime.fromisoformat(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def _archive_coverage_gate(cfg: Config, state: dict) -> tuple[int, str]:
+    """G4: every accepted finding must have a matching closed-issue receipt.
+
+    Rejected findings pass through. Deferred findings require a non-empty
+    `rationale`; warnings (>30 days old) go to stderr but don't block.
+    """
+    prd_id = state.get("prd_id")
+    if not prd_id:
+        return 2, "archive blocked: no active PRD\n"
+
+    spec_path = cfg.repo_root / state["spec_path"]
+    try:
+        fm = _parse_frontmatter(spec_path.read_text())
+    except ValueError as exc:
+        return 2, f"{spec_path}: {exc}\n"
+
+    rel = fm.get("findings_path")
+    if not rel:
+        return 0, ""
+    findings_file = cfg.repo_root / rel
+    if not findings_file.is_file():
+        return 0, ""
+
+    accepted: list[str] = []
+    deferred: list[tuple[str, str, str]] = []  # (fid, rationale, created_at)
+    with findings_file.open() as fh:
+        for lineno, raw in enumerate(fh, start=1):
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError as exc:
+                return 2, (
+                    f"{findings_file}:{lineno}: invalid JSONL ({exc}). "
+                    "Fix or remove the line before archiving.\n"
+                )
+            if not isinstance(rec, dict):
+                return 2, f"{findings_file}:{lineno}: record must be an object\n"
+            disposition = rec.get("disposition")
+            fid = rec.get("id") or f"line-{lineno}"
+            if disposition == "accepted":
+                if isinstance(fid, str):
+                    accepted.append(fid)
+            elif disposition == "deferred":
+                rationale = (rec.get("rationale") or "").strip()
+                created_at = rec.get("created_at") or ""
+                deferred.append((fid, rationale, created_at))
+            # rejected / other: pass through
+
+    covered = _load_receipts_for_prd(cfg.receipts_path, prd_id)
+    missing = [fid for fid in accepted if fid not in covered]
+    if missing:
+        lines = [
+            "archive blocked: accepted findings missing an issue receipt for "
+            f"prd_id={prd_id!r}:"
+        ]
+        for fid in missing:
+            lines.append(f"  - {fid}")
+        lines.append(
+            f"(receipts source: {_relpath(cfg, cfg.receipts_path)}; "
+            "close each issue with `issue_runner.py close` to record a receipt.)"
+        )
+        return 2, "\n".join(lines) + "\n"
+
+    empty_rationale = [fid for fid, rationale, _ in deferred if not rationale]
+    if empty_rationale:
+        lines = ["archive blocked: deferred findings without rationale:"]
+        for fid in empty_rationale:
+            lines.append(f"  - {fid}")
+        return 2, "\n".join(lines) + "\n"
+
+    now = datetime.now(timezone.utc)
+    stale = []
+    for fid, _, created_at in deferred:
+        ts = _parse_iso_z(created_at) if isinstance(created_at, str) else None
+        if ts and (now - ts).days > DEFERRED_WARN_DAYS:
+            stale.append((fid, created_at))
+    if stale:
+        warn_lines = [
+            f"archive warning: deferred findings older than {DEFERRED_WARN_DAYS} days:"
+        ]
+        for fid, created_at in stale:
+            warn_lines.append(f"  - {fid} (created_at={created_at})")
+        sys.stderr.write("\n".join(warn_lines) + "\n")
+
     return 0, ""
 
 

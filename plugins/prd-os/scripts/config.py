@@ -38,6 +38,7 @@ DEFAULTS = {
     "issues_dir": ".prd-os/issues",
     "findings_dir": ".prd-os/findings",
     "state_dir": ".claude/state",
+    "receipts_path": ".prd-os/receipts.jsonl",
     "codex": {
         "base_ref": "origin/main",
         "review_mode": "background",
@@ -69,6 +70,7 @@ class Config:
     issues_dir: Path
     findings_dir: Path
     state_dir: Path
+    receipts_path: Path
     codex_base_ref: str
     codex_review_mode: str
     control_plane_files: tuple[str, ...]
@@ -152,6 +154,7 @@ def load(repo_root: Optional[Path] = None, *, strict: bool = True) -> Config:
         issues_dir=_resolve(root, _require_str(data, "issues_dir", DEFAULTS["issues_dir"])),
         findings_dir=_resolve(root, _require_str(data, "findings_dir", DEFAULTS["findings_dir"])),
         state_dir=_resolve(root, _require_str(data, "state_dir", DEFAULTS["state_dir"])),
+        receipts_path=_resolve(root, _require_str(data, "receipts_path", DEFAULTS["receipts_path"])),
         codex_base_ref=base_ref,
         codex_review_mode=review_mode,
         control_plane_files=tuple(cpf),
@@ -193,6 +196,7 @@ def default_config_payload() -> dict:
         "issues_dir": DEFAULTS["issues_dir"],
         "findings_dir": DEFAULTS["findings_dir"],
         "state_dir": DEFAULTS["state_dir"],
+        "receipts_path": DEFAULTS["receipts_path"],
         "codex": dict(DEFAULTS["codex"]),
         "control_plane_files": list(DEFAULTS["control_plane_files"]),
     }
