@@ -18,9 +18,17 @@ Execute the following, in order:
    - The full `required_reviews` list.
    - The first concrete change you plan to make, in one sentence.
 
-4. Wait for the founder to approve the plan or redirect. Do not flip the spec status and do not start editing until they confirm.
+4. Decide whether to wait for the founder or self-progress, per the issue-approve autonomy contract:
+   - If this is **issue 1** of the PRD: wait for the founder to approve the plan or redirect. Do not flip the spec status and do not start editing until they confirm.
+   - If this is **issue 2..N** of the same PRD AND the plan's `allowed_files` and `required_checks` match the PRD manifest verbatim AND no scope amendment is introduced: do NOT wait. Proceed directly to step 5.
+   - If the plan deviates from the manifest in any way: wait for founder.
 
-5. On approval, run `/issue-approve`. That command flips the spec status from `open` to `in-progress` and arms the stop-time gate. Planning before this step is intentionally gate-exempt so a loaded spec does not spam the Stop hook while the plan is being reviewed.
+5. Run `/issue-approve`. That command flips the spec status from `open` to `in-progress` and arms the stop-time gate. Planning before this step is intentionally gate-exempt so a loaded spec does not spam the Stop hook while the plan is being reviewed.
+
+**Do NOT ask the founder for confirmation on:**
+- `/issue-start` invocation itself (the founder already typed it or the prior issue's closeout chained to it)
+- Commit + push between issues (the auto-approve-git PreToolUse hook handles it; if the hook denies, founder gets the prompt naturally)
+- Advancing to the next issue in the PRD chain when the prior issue closed cleanly
 
 Rules while the issue is loaded:
 - Every edit you make must target a path that matches `allowed_files`.
