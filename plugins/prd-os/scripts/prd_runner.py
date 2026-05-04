@@ -257,6 +257,10 @@ def cmd_advance(cfg: Config, args: argparse.Namespace) -> int:
         if rc != 0:
             sys.stderr.write(err)
             return rc
+        rc, err = _manifest_status_gate(cfg, state)
+        if rc != 0:
+            sys.stderr.write(err)
+            return rc
 
     spec_path = cfg.repo_root / state["spec_path"]
     text = spec_path.read_text()
@@ -281,6 +285,10 @@ def cmd_archive(cfg: Config, args: argparse.Namespace) -> int:
         print(json.dumps({"archived": state["prd_id"], "note": "already"}))
         return 0
     rc, err = _archive_coverage_gate(cfg, state)
+    if rc != 0:
+        sys.stderr.write(err)
+        return rc
+    rc, err = _manifest_status_gate(cfg, state)
     if rc != 0:
         sys.stderr.write(err)
         return rc
@@ -528,6 +536,104 @@ def _parse_iso_z(value: str) -> datetime | None:
         return datetime.fromisoformat(value)
     except (ValueError, TypeError):
         return None
+
+
+def _manifest_status_gate(cfg: Config, state: dict) -> tuple[int, str]:
+    """G6: every issue in the PRD's `## Issues` manifest must be `status: closed`.
+
+    Closes the failure mode observed 2026-05-04 in the warming-ladder PRD: a
+    parent PRD archived with 5 issues at `status: open` and 0 implementation
+    files on disk. The existing `_archive_coverage_gate` (G4) only verifies
+    that *accepted findings* have receipts. A PRD whose findings were rejected
+    or deferred could archive with every manifest issue still open.
+
+    PRDs without a `## Issues` section pass through (legacy / content-only).
+    """
+    spec_path = cfg.repo_root / state["spec_path"]
+    try:
+        text = spec_path.read_text()
+    except OSError as exc:
+        return 2, f"{spec_path}: {exc}\n"
+
+    if not text.startswith("---"):
+        return 2, f"{spec_path}: spec missing YAML frontmatter\n"
+    fm_end = text.find("\n---", 3)
+    if fm_end == -1:
+        return 2, f"{spec_path}: frontmatter not closed with ---\n"
+    body = text[fm_end + len("\n---"):]
+
+    issues_match = re.search(r"(?m)^##\s+Issues\s*$", body)
+    if not issues_match:
+        return 0, ""
+    rest = body[issues_match.end():]
+    fence = re.search(r"```(?:json)?\s*\n(.*?)\n```", rest, flags=re.DOTALL)
+    if not fence:
+        return 0, ""
+    try:
+        entries = json.loads(fence.group(1))
+    except json.JSONDecodeError as exc:
+        return 2, f"archive blocked: issues manifest is not valid JSON ({exc}).\n"
+    if not isinstance(entries, list):
+        return 2, "archive blocked: issues manifest must be a JSON array.\n"
+
+    open_issues: list[tuple[str, str]] = []
+    missing_specs: list[str] = []
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            return 2, f"archive blocked: manifest entry #{index} must be a JSON object.\n"
+        issue_id = entry.get("id")
+        if not isinstance(issue_id, str) or not issue_id:
+            return 2, (
+                f"archive blocked: manifest entry #{index} is missing a non-empty "
+                "`id` string.\n"
+            )
+        issue_path = cfg.issues_dir / f"{issue_id}.md"
+        if not issue_path.is_file():
+            missing_specs.append(issue_id)
+            continue
+        try:
+            issue_text = issue_path.read_text()
+        except OSError as exc:
+            return 2, f"{issue_path}: {exc}\n"
+        if not issue_text.startswith("---"):
+            return 2, f"{issue_path}: spec missing YAML frontmatter\n"
+        i_end = issue_text.find("\n---", 3)
+        if i_end == -1:
+            return 2, f"{issue_path}: frontmatter not closed with ---\n"
+        block = issue_text[3:i_end].strip("\n")
+        status: str | None = None
+        for raw in block.splitlines():
+            line = raw.rstrip()
+            if line.startswith("status:"):
+                status = line.partition(":")[2].strip()
+                break
+        if status != "closed":
+            open_issues.append((issue_id, status or "<missing>"))
+
+    if missing_specs:
+        lines = [
+            "archive blocked: PRD manifest references issue specs that do not "
+            "exist on disk:"
+        ]
+        for iid in missing_specs:
+            lines.append(f"  - {iid} (expected at {_relpath(cfg, cfg.issues_dir / (iid + '.md'))})")
+        lines.append(
+            "(run `prd_split.py` to materialize the manifest, or fix the entries.)"
+        )
+        return 2, "\n".join(lines) + "\n"
+
+    if open_issues:
+        lines = [
+            "archive blocked: PRD manifest issues are not all closed:"
+        ]
+        for iid, status in open_issues:
+            lines.append(f"  - {iid}: status={status}")
+        lines.append(
+            "(close each issue with `issue_runner.py close` before archiving the PRD.)"
+        )
+        return 2, "\n".join(lines) + "\n"
+
+    return 0, ""
 
 
 def _archive_coverage_gate(cfg: Config, state: dict) -> tuple[int, str]:

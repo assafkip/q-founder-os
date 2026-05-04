@@ -380,3 +380,180 @@ def test_clear_wipes_state_only(fake_repo, write_config, run_prd_runner):
     assert state["prd_id"] is None
     # Spec file untouched
     assert _read_spec_status(fake_repo, prd_id) == "idea"
+
+
+# ---------------------------------------------------------------------------
+# archive: manifest-status gate (G6)
+#
+# Closes the failure mode observed 2026-05-04 in the warming-ladder PRD: a
+# parent PRD archived with 5 issues at status: open. _archive_coverage_gate
+# only checks accepted findings, so a PRD with rejected/deferred-only findings
+# could archive with every manifest issue still open. The new gate walks the
+# `## Issues` manifest and requires every entry's spec to be `status: closed`.
+# ---------------------------------------------------------------------------
+
+
+def _append_issues_manifest(repo: Path, prd_id: str, entries: list[dict]) -> None:
+    """Replace the PRD template's empty `## Issues` JSON block with entries.
+
+    The PRD template ships with a `## Issues` section containing an empty
+    fenced `[]` array. Tests need to populate it; appending a second `## Issues`
+    section would not be picked up because the gate finds the first match.
+    """
+    import re as _re
+
+    spec_path = repo / f".prd-os/prds/{prd_id}.md"
+    text = spec_path.read_text()
+    block = json.dumps(entries, indent=2)
+    new_text = _re.sub(
+        r"(?ms)(##\s+Issues\b.*?```(?:json)?\s*\n)(.*?)(\n```)",
+        lambda m: m.group(1) + block + m.group(3),
+        text,
+        count=1,
+    )
+    if new_text == text:
+        new_text = text + f"\n## Issues\n\n```json\n{block}\n```\n"
+    spec_path.write_text(new_text)
+
+
+def test_archive_blocks_when_manifest_issue_is_open(
+    fake_repo, write_config, run_prd_runner, write_issue_spec
+):
+    _bootstrap(fake_repo, write_config)
+    assert run_prd_runner(fake_repo, "new", "still-open").returncode == 0
+    prd_id = _read_state(fake_repo)["prd_id"]
+    write_issue_spec(
+        fake_repo / ".prd-os/issues",
+        "still-open-issue-1",
+        status="open",
+        allowed_files=["foo.py"],
+    )
+    _append_issues_manifest(
+        fake_repo,
+        prd_id,
+        [
+            {
+                "id": "still-open-issue-1",
+                "title": "Open issue blocks archive",
+                "finding_id": "finding-1",
+                "allowed_files": ["foo.py"],
+                "required_checks": ["pytest -q"],
+            }
+        ],
+    )
+    r = run_prd_runner(fake_repo, "archive")
+    assert r.returncode == 2, r.stdout
+    assert "still-open-issue-1" in r.stderr
+    assert "status=open" in r.stderr
+
+
+def test_archive_passes_when_all_manifest_issues_closed(
+    fake_repo, write_config, run_prd_runner, write_issue_spec
+):
+    _bootstrap(fake_repo, write_config)
+    assert run_prd_runner(fake_repo, "new", "all-closed").returncode == 0
+    prd_id = _read_state(fake_repo)["prd_id"]
+    write_issue_spec(
+        fake_repo / ".prd-os/issues",
+        "all-closed-issue-1",
+        status="closed",
+        allowed_files=["bar.py"],
+    )
+    write_issue_spec(
+        fake_repo / ".prd-os/issues",
+        "all-closed-issue-2",
+        status="closed",
+        allowed_files=["baz.py"],
+    )
+    _append_issues_manifest(
+        fake_repo,
+        prd_id,
+        [
+            {
+                "id": "all-closed-issue-1",
+                "title": "First",
+                "finding_id": "finding-1",
+                "allowed_files": ["bar.py"],
+                "required_checks": ["pytest -q"],
+            },
+            {
+                "id": "all-closed-issue-2",
+                "title": "Second",
+                "finding_id": "finding-2",
+                "allowed_files": ["baz.py"],
+                "required_checks": ["pytest -q"],
+            },
+        ],
+    )
+    r = run_prd_runner(fake_repo, "archive")
+    assert r.returncode == 0, r.stderr
+    assert _read_spec_status(fake_repo, prd_id) == "archived"
+
+
+def test_archive_blocks_when_manifest_issue_spec_missing(
+    fake_repo, write_config, run_prd_runner
+):
+    _bootstrap(fake_repo, write_config)
+    assert run_prd_runner(fake_repo, "new", "phantom").returncode == 0
+    prd_id = _read_state(fake_repo)["prd_id"]
+    _append_issues_manifest(
+        fake_repo,
+        prd_id,
+        [
+            {
+                "id": "phantom-issue-not-on-disk",
+                "title": "Phantom",
+                "finding_id": "finding-1",
+                "allowed_files": ["x.py"],
+                "required_checks": ["pytest -q"],
+            }
+        ],
+    )
+    r = run_prd_runner(fake_repo, "archive")
+    assert r.returncode == 2
+    assert "phantom-issue-not-on-disk" in r.stderr
+    assert "do not exist on disk" in r.stderr
+
+
+def test_archive_passes_when_prd_has_no_issues_section(
+    fake_repo, write_config, run_prd_runner
+):
+    """Legacy / content-only PRDs without a ## Issues manifest are passed through."""
+    _bootstrap(fake_repo, write_config)
+    assert run_prd_runner(fake_repo, "new", "content-only").returncode == 0
+    prd_id = _read_state(fake_repo)["prd_id"]
+    # No manifest appended.
+    r = run_prd_runner(fake_repo, "archive")
+    assert r.returncode == 0, r.stderr
+    assert _read_spec_status(fake_repo, prd_id) == "archived"
+
+
+def test_advance_archived_also_runs_manifest_gate(
+    fake_repo, write_config, run_prd_runner, write_issue_spec
+):
+    """`advance archived` (not just `archive`) must run the manifest-status gate."""
+    _bootstrap(fake_repo, write_config)
+    assert run_prd_runner(fake_repo, "new", "via-advance").returncode == 0
+    prd_id = _read_state(fake_repo)["prd_id"]
+    write_issue_spec(
+        fake_repo / ".prd-os/issues",
+        "via-advance-issue-1",
+        status="open",
+        allowed_files=["a.py"],
+    )
+    _append_issues_manifest(
+        fake_repo,
+        prd_id,
+        [
+            {
+                "id": "via-advance-issue-1",
+                "title": "Open issue",
+                "finding_id": "finding-1",
+                "allowed_files": ["a.py"],
+                "required_checks": ["pytest -q"],
+            }
+        ],
+    )
+    r = run_prd_runner(fake_repo, "advance", "archived")
+    assert r.returncode == 2
+    assert "via-advance-issue-1" in r.stderr
