@@ -903,6 +903,233 @@ def test_missing_manifest_is_observable_not_silent(tmp_path):
     assert r["error"] == "manifest_missing"
 
 
+# ---------------------------------------------------------------- project folders
+# Founder-directed 2026-09-05 (plan knowledge-supply-project-folders-2026-09-05):
+# every project reads its OWN folder, and each 4_points investigation is its own
+# knowledge base. Reproducer: 4_points had 1,475 case files and an index of 40;
+# a consulting instance had 83 files and an index of 0, so the reader never woke up.
+
+INVESTIGATION_MANIFEST = HERE.parent / "knowledge-sources.investigation.json"
+
+
+def add_store(q: Path, name: str, scope_line: str, finding_line: str) -> Path:
+    s = q / "investigations" / name
+    (s / "canonical").mkdir(parents=True)
+    (s / "memory").mkdir()
+    (s / "investigation" / "findings").mkdir(parents=True)
+    (s / "investigation" / "targets").mkdir(parents=True)
+    (s / "canonical" / "scope.md").write_text(f"# Investigation Scope\n\n## Primary Question\n\n{scope_line}\n")
+    (s / "investigation" / "findings" / "finding-001.md").write_text(
+        f"# Finding 001\n\n## Summary\n\n{finding_line}\n\n## Next Steps\n\n- none\n")
+    return s
+
+
+def make_bare_instance(tmp: Path) -> tuple[Path, Path]:
+    """A project with NO graph, relationships, commitments or meetings: documents only.
+    a consulting instance's shape on 2026-09-05."""
+    root = tmp / "bare"
+    q = root / "q-bare"
+    for d in ("canonical", "memory", "output", ".q-system"):
+        (q / d).mkdir(parents=True)
+    shutil.copy(MANIFEST, q / ".q-system" / "knowledge-sources.json")
+    (q / "canonical" / "client-profile.md").write_text("# Client\n\nThe client sells gold coins.\n")
+    (q / "output" / "brief-2026-08-14.md").write_text(
+        "# Brief\n\nBluepeak asked for a name column on the intake form.\n\n## Next Steps\n\n- reply to the carrier\n")
+    return root, q
+
+
+def receipt_row(bundle, cls):
+    return next(r for r in bundle["receipt"]["sources"] if r["class"] == cls)
+
+
+def test_store_named_in_prompt_scopes_to_that_store(tmp_path):
+    root, q = make_instance(tmp_path)
+    add_store(q, "case-001-foo-bar", "Why does Foo Bar keep getting breached?", "Dana Okafor briefed the Foo Bar victim list.")
+    add_store(q, "case-002-other-thing", "What is Other Thing?", "Dana Okafor also appears in the Other Thing case.")
+    b = run(root, "what do we know about foo bar")
+    assert b is not None
+    ents = {e["name"]: e for e in b["entities"]}
+    assert "foo bar" in ents and ents["foo bar"]["kind"] == "store" and ents["foo bar"]["store"] == "case-001-foo-bar"
+    srcs = [i["src"] for i in b["items"]]
+    assert any("investigations/case-001-foo-bar/canonical/scope.md:5" in s for s in srcs), srcs
+    assert any("investigations/case-001-foo-bar/investigation/findings/finding-001.md:5" in s for s in srcs), srcs
+    assert not any("case-002-other-thing" in s for s in srcs), srcs
+
+
+def test_store_plus_person_never_leaks_the_other_store(tmp_path):
+    root, q = make_instance(tmp_path)
+    add_store(q, "case-001-foo-bar", "scope", "Dana Okafor briefed the Foo Bar victim list.")
+    add_store(q, "case-002-other-thing", "scope", "Dana Okafor also appears in the Other Thing case.")
+    b = run(root, "in foo bar, what did Dana Okafor brief")
+    dana = items_of(b, entity="Dana Okafor")
+    assert any("case-001-foo-bar" in i["src"] for i in dana), [i["src"] for i in dana]
+    assert not any("case-002-other-thing" in i["src"] for i in b["items"]), [i["src"] for i in b["items"]]
+    assert any(i["kind"] == "graph" for i in dana)   # project-level stores are always in scope
+
+
+def test_no_store_named_searches_every_store(tmp_path):
+    root, q = make_instance(tmp_path)
+    add_store(q, "case-001-foo-bar", "scope", "Dana Okafor briefed the Foo Bar victim list.")
+    add_store(q, "case-002-other-thing", "scope", "Dana Okafor also appears in the Other Thing case.")
+    b = run(root, "what do we know about Dana Okafor")
+    srcs = [i["src"] for i in items_of(b, kind="doc")]
+    assert any("case-001-foo-bar" in s for s in srcs) and any("case-002-other-thing" in s for s in srcs), srcs
+    row = receipt_row(b, "docs")
+    assert row["stores_searched"] == 3 and sorted(row["stores_hit"]) == ["case-001-foo-bar", "case-002-other-thing"]
+    assert receipt_row(b, "canonical")["stores_searched"] == 3
+
+
+def test_target_file_stem_fires_alone_but_a_finding_stem_does_not(tmp_path):
+    root, q = make_instance(tmp_path)
+    s = add_store(q, "case-003-x-case", "scope", "finding")
+    (s / "investigation" / "targets" / "acme-corp.md").write_text("# acme-corp\n\nacme-corp runs the fake exchange.\n")
+    (s / "investigation" / "findings" / "weird-note.md").write_text("# weird-note\n\nweird-note is a finding file.\n")
+    b = run(root, "pull everything on acme-corp")
+    assert b is not None and any(e["kind"] == "target" and e["name"] == "acme corp" for e in b["entities"])
+    assert any(i["text"] == "acme-corp runs the fake exchange." for i in items_of(b, kind="doc"))
+    b2 = run(root, "pull everything on weird-note")
+    assert b2 is None or not any(e["name"] == "weird note" for e in b2["entities"])
+
+
+def test_proper_nouns_file_indexes_curated_names_only(tmp_path):
+    root, q = make_instance(tmp_path)
+    (q / "canonical" / "proper-nouns.txt").write_text("# names kept OUT of common words\n\nMarilyn\nBlue Peak\n")
+    (q / "output" / "call-2026-09-01.md").write_text("# Call\n\nMarilyn asked for the pay sheet by Friday.\n")
+    b = run(root, "what did Marilyn ask for")
+    assert b is not None and any(e["kind"] == "noun" and e["name"] == "Marilyn" for e in b["entities"])
+    docs = items_of(b, kind="doc", entity="Marilyn")
+    assert docs and docs[0]["text"] == "Marilyn asked for the pay sheet by Friday."
+    assert docs[0]["src"].endswith("output/call-2026-09-01.md:3")
+    manifest, _ = ks.load_manifest(q, root)
+    assert ks.load_stores(q, root, manifest)[0]["noun_names"] == ["Marilyn", "Blue Peak"], "comment and blank lines never index"
+
+
+def test_docs_class_returns_verbatim_line_after_graph_and_canonical(tmp_path):
+    root, q = make_instance(tmp_path)
+    (q / "output" / "notes-2026-09-01.md").write_text("# Notes\n\nDana Okafor asked for the runbook in writing.\n")
+    b = run(root, "what do we know about Dana Okafor")
+    docs = items_of(b, kind="doc", entity="Dana Okafor")
+    assert docs and docs[0]["text"] == "Dana Okafor asked for the runbook in writing."
+    assert docs[0]["src"].endswith("output/notes-2026-09-01.md:3")
+    kinds = [i["kind"] for i in b["items"] if i["entity"] == "Dana Okafor"]
+    assert kinds.index("doc") > kinds.index("graph") and kinds.index("doc") > kinds.index("canonical")
+    row = receipt_row(b, "docs")
+    assert row["engine"] == "grep" and row["files"] >= 1 and row["present"] is True
+
+
+def test_docs_python_fallback_matches_grep(tmp_path, monkeypatch):
+    root, q = make_instance(tmp_path)
+    (q / "output" / "notes.md").write_text("Dana Okafor asked for the runbook in writing.\n")
+    a = run(root, "what do we know about Dana Okafor")
+    monkeypatch.setattr(ks.shutil, "which", lambda name: None)
+    b = run(root, "what do we know about Dana Okafor")
+    assert [i["src"] for i in items_of(a, kind="doc")] == [i["src"] for i in items_of(b, kind="doc")]
+    assert receipt_row(a, "docs")["engine"] == "grep" and receipt_row(b, "docs")["engine"] == "python"
+
+
+def test_prompt_proper_noun_with_doc_hits_becomes_entity(tmp_path):
+    root, q = make_bare_instance(tmp_path)
+    b = run(root, "what did Bluepeak ask for")
+    assert b is not None, "an index of 0 must not mean the reader never wakes up"
+    e = b["entities"][0]
+    assert e["name"] == "Bluepeak" and e["resolved_from"] == "docs" and e["kind"] == "docs_hit"
+    assert any(i["text"] == "Bluepeak asked for a name column on the intake form." for i in items_of(b, kind="doc"))
+    assert b["coverage"]["verdict"] in ("FULL", "PARTIAL")
+
+
+def test_prompt_proper_noun_without_hits_lowercase_or_initial_never_fires(tmp_path):
+    root, q = make_bare_instance(tmp_path)
+    assert run(root, "what did Nobody ask for") is None
+    assert run(root, "what did bluepeak ask for") is None
+    assert run(root, "Bluepeak asked for what") is None
+    assert run(root, "- Bluepeak asked for what") is None
+
+
+def test_headings_never_become_entities(tmp_path):
+    root, q = make_bare_instance(tmp_path)
+    assert run(root, "what are the next steps") is None
+    assert run(root, "what are the Next Steps here") is None
+
+
+def test_docs_skip_big_hidden_and_node_modules(tmp_path):
+    root, q = make_instance(tmp_path)
+    (q / "output" / "big.md").write_text("Dana Okafor big\n" + "x" * 600_000)
+    (q / "output" / ".hidden").mkdir()
+    (q / "output" / ".hidden" / "h.md").write_text("Dana Okafor hidden\n")
+    (q / "output" / "node_modules").mkdir()
+    (q / "output" / "node_modules" / "n.md").write_text("Dana Okafor node\n")
+    (q / "output" / "ok.md").write_text("Dana Okafor ok\n")
+    b = run(root, "what do we know about Dana Okafor")
+    texts = [i["text"] for i in items_of(b, kind="doc")]
+    assert "Dana Okafor ok" in texts
+    assert not any(t in texts for t in ("Dana Okafor big", "Dana Okafor hidden", "Dana Okafor node"))
+    assert receipt_row(b, "docs")["files"] == 1
+
+
+def test_docs_items_are_verbatim_and_dated_by_file(tmp_path):
+    root, q = make_instance(tmp_path)
+    add_store(q, "case-001-foo-bar", "scope", "Dana Okafor briefed the Foo Bar victim list.")
+    b = run(root, "what do we know about Dana Okafor")
+    for it in items_of(b, kind="doc"):
+        text = Path(it["abs_src"]).read_text()
+        for piece in ks.verbatim_pieces(it):
+            assert piece in text
+        assert it["t"] is not None
+
+
+def test_shipped_manifests_declare_project_folders():
+    m = json.loads(MANIFEST.read_text())
+    assert m["_version"] >= 2
+    assert any(s["glob"] == "investigations/case-*" for s in m["stores"])
+    assert {"output", "investigation", "research"} <= set(m["folders"])
+    assert {"targets", "clients"} <= set(m["entity_dirs"])
+    assert {"store", "target", "noun"} <= set(m["entity_kinds_that_fire_alone"])
+    for cls, spec in m["classes"].items():
+        assert "docs" in spec["sources"], cls
+    inv = json.loads(INVESTIGATION_MANIFEST.read_text())
+    lookup = inv["classes"]["entity_lookup"]["sources"]
+    assert lookup["graph"]["required"] and lookup["canonical"]["required"] and lookup["docs"]["required"]
+    for cls, spec in inv["classes"].items():
+        for name in ("commitments", "meetings", "relationships"):
+            assert not spec["sources"].get(name, {}).get("required"), (cls, name)
+
+
+def test_investigation_manifest_loads_as_instance_override(tmp_path):
+    root, q = make_instance(tmp_path)
+    (q / ".q-system" / "data").mkdir()
+    shutil.copy(INVESTIGATION_MANIFEST, q / ".q-system" / "data" / "knowledge-sources.json")
+    for p in ("my-project/commitments.jsonl", "output/granola-cache.json", "my-project/relationships.md"):
+        (q / p).unlink()
+    add_store(q, "case-001-foo-bar", "scope", "Dana Okafor briefed the Foo Bar victim list.")
+    b = run(root, "what is still outstanding on Dana Okafor")
+    assert b is not None and b["task_class"] == "commitment"
+    assert b["coverage"]["verdict"] == "FULL", b["coverage"]
+    assert b["receipt"]["manifest"].endswith(".q-system/data/knowledge-sources.json")
+
+
+def test_corpus_common_word_is_dropped_unless_a_store_is_named(tmp_path):
+    root, q = make_instance(tmp_path)
+    for i in range(1, 7):
+        add_store(q, f"case-00{i}-thing-{i}", "scope", f"Facebook profile checked in case {i}.")
+    assert run(root, "update on the Facebook profiles", record=True) is None, "a word in 6 of 6 cases is not a subject"
+    rows = [json.loads(l) for l in (q / "memory" / ".knowledge-supply-misses.jsonl").read_text().splitlines()]
+    assert any(r["candidate"] == "Facebook" and r["shape"] == "corpus_common" and r["stores"] == 6 for r in rows), rows
+    b = run(root, "in thing 2, what did the Facebook profiles show")
+    names = {e["name"]: e for e in b["entities"]}
+    assert "Facebook" in names and names["Facebook"]["resolved_from"] == "docs"
+    srcs = [i["src"] for i in items_of(b, entity="Facebook")]
+    assert srcs and all("case-002-thing-2" in s for s in srcs), srcs
+
+
+def test_dropped_candidates_are_named_in_the_receipt(tmp_path):
+    root, q = make_instance(tmp_path)
+    for i in range(1, 7):
+        add_store(q, f"case-00{i}-thing-{i}", "scope", f"Facebook profile checked in case {i}.")
+    b = run(root, "what do we know about Dana Okafor and the Facebook profiles")
+    assert b is not None and not any(e["name"] == "Facebook" for e in b["entities"])
+    assert b["receipt"]["candidates_dropped"] == [{"candidate": "Facebook", "stores": 6}]
+
+
 # ---------------------------------------------------------------- the hook
 
 def run_hook(root: Path, prompt: str, extra_env: dict | None = None) -> subprocess.CompletedProcess:

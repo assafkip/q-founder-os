@@ -44,6 +44,19 @@ WHY STATUS LABELS COME FROM provenance-vocabulary.json: that file is the ONE
 vocabulary, loaded at runtime by two lints already. A second table here would
 drift the way the first two did on 2026-07-28 (the scar recorded in that file).
 
+WHY STORES, DOCS AND PROMPT-DRIVEN CANDIDATES (founder-directed 2026-09-05, plan
+knowledge-supply-project-folders-2026-09-05): "every project reads its own folder,
+and each 4_points investigation is its own knowledge base." Measured before this:
+4_points had 45 investigation folders and 1,475 markdown files that no source
+class covered (index: 40 graph entities); a consulting instance had 83 files and an index of 0, so the reader never woke up there. Three additions, all declared as data in
+the manifest: `stores` (a glob of sub-directories, each a knowledge base with the
+qroot layout; naming one in the prompt scopes the search to it), a `docs` class
+(the project's own markdown folders, one grep pass per prompt, Python fallback),
+and prompt-driven candidates (a capitalized word the index cannot resolve is
+searched case-sensitively in the docs; a hit makes it an entity, a miss stays a
+miss). Headings never index: the heading census across every case file was
+section labels (Notes, Summary, Integrity), not names.
+
 Contract: pure functions over paths. supply() writes only the receipt and misses
 ledgers under <qroot>/memory/, both untracked jsonl like graph.jsonl, through
 one append function. record=False writes nothing (replay and tests). Any store
@@ -58,6 +71,8 @@ import importlib.util
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -87,7 +102,27 @@ DROP_STATES = ("voided", "misattributed")
 # Render order inside one entity. Canonical and decisions first (the founder's
 # curated truth), then the graph newest-first, then event stores by recency.
 TIER = {"canonical": 0, "decision": 0, "capability": 0, "relationship": 1, "graph": 2,
-        "commitment": 3, "meeting": 4, "loop": 5, "handoff": 6}
+        "commitment": 3, "meeting": 4, "loop": 5, "handoff": 6, "doc": 7}
+
+# The project-level store's name in receipts and items; sub-stores carry their
+# directory name (case-023-shinyhunters), which the src path shows anyway.
+PROJECT_STORE = "project"
+# A store directory's entity name drops a `case-023-` style prefix: the founder
+# says "shinyhunters", never "case-023-shinyhunters".
+STORE_PREFIX_RE = re.compile(r"^[a-z]+-\d+-", re.IGNORECASE)
+DOC_SKIP_DIRS = {"node_modules", "exports", "screenshots", "__pycache__", "raw-collections"}
+DOC_MAX_BYTES_DEFAULT = 512 * 1024
+# Python fallback budget when grep is unavailable: past this many bytes the
+# scan stops and the receipt engine says "python (budget)".
+DOC_SCAN_BUDGET_BYTES = 3 * 1024 * 1024
+GREP_CHUNK = 400
+MAX_DOC_CANDIDATES = 6
+# A prompt word that hits in more than this many stores is a word this corpus
+# uses everywhere (Facebook, Miami across 27 of 43 cases, measured 2026-09-05),
+# not a subject. It is dropped and named in the receipt; naming a case first
+# scopes the count to that case, so the same word works inside one.
+MAX_CANDIDATE_STORES = 4
+ENTITY_DIR_MAX_DEPTH = 4
 
 STOPWORDS = {
     "that", "this", "with", "from", "have", "will", "would", "should", "could", "there",
@@ -267,16 +302,17 @@ def status_for_line(line: str) -> str:
 # ------------------------------------------------------------------ entity index
 
 class Entity:
-    __slots__ = ("name", "kind", "aliases", "orgs")
+    __slots__ = ("name", "kind", "aliases", "orgs", "store")
 
     def __init__(self, name: str, kind: str):
         self.name = name
-        self.kind = kind          # graph | contact | slug | client | capability
+        self.kind = kind          # graph | contact | slug | client | store | target | noun | capability
         self.aliases: set[str] = set()
         self.orgs: dict[str, str | None] = {}   # org -> project, from works_at rows
+        self.store: str | None = None            # the sub-store directory a `store` entity names
 
     def as_dict(self) -> dict:
-        return {"name": self.name, "kind": self.kind, "aliases": sorted(self.aliases)}
+        return {"name": self.name, "kind": self.kind, "aliases": sorted(self.aliases), "store": self.store}
 
 
 def _add(index: dict[str, Entity], name: str, kind: str) -> Entity | None:
@@ -288,14 +324,17 @@ def _add(index: dict[str, Entity], name: str, kind: str) -> Entity | None:
     if ent is None:
         ent = Entity(name, kind)
         index[key] = ent
-    elif kind in ("contact", "client", "slug") and ent.kind == "graph":
+    elif kind in ("contact", "client", "slug", "store", "target", "noun") and ent.kind == "graph":
         ent.kind = kind   # a curated source outranks a graph mention for the fire rule
     return ent
 
 
-def build_index(stores: dict) -> dict[str, Entity]:
+def build_index(stores: dict, substores: list[dict] | None = None) -> dict[str, Entity]:
+    """One index over the project store and every sub-store. Curated kinds (a
+    store's own name, a target file, a proper noun) outrank a graph mention."""
     index: dict[str, Entity] = {}
-    graph_rows = stores.get("graph_rows") or []
+    all_stores = [stores] + list(substores or [])
+    graph_rows = [r for st in all_stores for r in (st.get("graph_rows") or [])]
     for row in graph_rows:
         s, p, o = row.get("s"), row.get("p"), row.get("o")
         if not isinstance(s, str) or not isinstance(o, str):
@@ -314,13 +353,27 @@ def build_index(stores: dict) -> dict[str, Entity]:
                 index.pop(norm(o), None)
         if p in ORG_PREDICATES and es is not None:
             es.orgs[normalize_ws(o)] = row.get("project")
-    for name in stores.get("contact_names") or []:
-        _add(index, name, "contact")
-    for slug in stores.get("slugs") or []:
-        _add(index, slug, "slug")
-    for key in stores.get("client_keys") or []:
-        _add(index, key, "client")
+    for st in all_stores:
+        for name in st.get("contact_names") or []:
+            _add(index, name, "contact")
+        for slug in st.get("slugs") or []:
+            _add(index, slug, "slug")
+        for key in st.get("client_keys") or []:
+            _add(index, key, "client")
+        for name in st.get("target_names") or []:
+            _add(index, name, "target")
+        for name in st.get("noun_names") or []:
+            _add(index, name, "noun")
+        if st.get("name") and st["name"] != PROJECT_STORE:
+            ent = _add(index, store_entity_name(st["name"]), "store")
+            if ent is not None:
+                ent.kind = "store"
+                ent.store = st["name"]
     return index
+
+
+def store_entity_name(dirname: str) -> str:
+    return normalize_ws(STORE_PREFIX_RE.sub("", dirname).replace("-", " ").replace("_", " "))
 
 
 def prompt_tokens(pn: str) -> set[str]:
@@ -431,7 +484,7 @@ def resolve_entities(prompt: str, index: dict[str, Entity], fire_alone: set[str]
         found[key] = {"name": ent.name, "kind": ent.kind,
                       "resolved_from": "alias" if hit_via == "alias" else ent.kind,
                       "ambiguous": ambiguous, "project": scoped_project,
-                      "orgs": sorted(ent.orgs), "aliases": sorted(ent.aliases)}
+                      "orgs": sorted(ent.orgs), "aliases": sorted(ent.aliases), "store": ent.store}
     # First-name expansion, measured not guessed. Replay of 2,131 real prompts
     # (2026-09-04) showed the founder names people by bare first name; the top
     # misses were exactly those. A capitalized token that is NOT sentence-initial
@@ -458,7 +511,7 @@ def resolve_entities(prompt: str, index: dict[str, Entity], fire_alone: set[str]
                 ent = index[keys[0]]
                 found[keys[0]] = {"name": ent.name, "kind": ent.kind, "resolved_from": "first_name",
                                   "ambiguous": len(ent.orgs) >= 2, "project": None,
-                                  "orgs": sorted(ent.orgs), "aliases": sorted(ent.aliases)}
+                                  "orgs": sorted(ent.orgs), "aliases": sorted(ent.aliases), "store": ent.store}
     # Longest name wins when one resolved name contains another ("Dana Okafor" vs "Okafor Co").
     out = list(found.values())
     out.sort(key=lambda e: -len(e["name"]))
@@ -558,11 +611,16 @@ def in_window(t: str | None, window: dict | None) -> bool:
 
 # ------------------------------------------------------------------ store loading
 
-def load_stores(qroot: Path, root: Path) -> tuple[dict, dict]:
+def load_stores(qroot: Path, root: Path, manifest: dict | None = None,
+                name: str = PROJECT_STORE) -> tuple[dict, dict]:
     """Read every store once. Returns (stores, problems). A store that fails to
-    parse lands in problems and counts as present-but-unreadable in the receipt."""
-    stores: dict = {"paths": {}}
+    parse lands in problems and counts as present-but-unreadable in the receipt.
+    The same loader reads the project qroot and every sub-store directory (a
+    4_points case folder has the same layout), so a case's own graph, canonical,
+    handoff and documents are read the way the project's are."""
+    stores: dict = {"paths": {}, "name": name, "dir": qroot}
     problems: dict = {}
+    stores["problems"] = problems
     paths = {
         "graph": qroot / "memory" / "graph.jsonl",
         "relationships": qroot / "my-project" / "relationships.md",
@@ -670,7 +728,109 @@ def load_stores(qroot: Path, root: Path) -> tuple[dict, dict]:
         except (OSError, ValueError) as exc:
             problems["loops"] = str(exc)
     stores["loops"] = [l for l in loops if isinstance(l, dict)]
+
+    folders = list((manifest or {}).get("folders") or [])
+    max_bytes = int((manifest or {}).get("doc_max_bytes") or DOC_MAX_BYTES_DEFAULT)
+    # The project walk never enters a sub-store root: each case is loaded by
+    # its own call, and the project's rglob("*") over 4_points was 57,081
+    # entries and 318 ms per prompt (measured 2026-09-05).
+    exclude = {path for _, path in discover_stores(qroot, manifest or {})} if name == PROJECT_STORE else set()
+    stores["doc_files"] = enumerate_docs(qroot, folders, max_bytes, exclude) if folders else []
+    # A markdown file directly under a `targets`-style directory names a subject
+    # of the work (4_points: investigation/targets/<subject>.md). Its stem is an
+    # entity that fires alone; a finding or note file's stem never does.
+    target_names = []
+    entity_dirs = set((manifest or {}).get("entity_dirs") or [])
+    if entity_dirs:
+        for d in walk_dirs(qroot, exclude, ENTITY_DIR_MAX_DEPTH):
+            if d.name not in entity_dirs:
+                continue
+            for f in sorted(d.glob("*.md")):
+                if not f.name.startswith("_") and not f.name.startswith("."):
+                    target_names.append(normalize_ws(f.stem.replace("-", " ").replace("_", " ")))
+    stores["target_names"] = target_names
+    # canonical/proper-nouns.txt is the voice lint's curated name list (its own
+    # header says to keep common words out), which makes it a safe fire-alone
+    # index source for a project with no graph yet (a consulting instance with no graph, 2026-09-05).
+    nouns = []
+    pn = qroot / "canonical" / "proper-nouns.txt"
+    if pn.is_file():
+        try:
+            for line in read_lines(pn):
+                s = line.strip()
+                if s and not s.startswith("#"):
+                    nouns.append(s)
+        except OSError as exc:
+            problems["nouns"] = str(exc)
+    stores["noun_names"] = nouns
     return stores, problems
+
+
+def walk_dirs(base: Path, exclude: set[Path], max_depth: int):
+    """Pruned directory walk: dot dirs, DOC_SKIP_DIRS and `exclude` (sub-store
+    roots) are never entered, and nothing below max_depth is."""
+    base_depth = len(base.parts)
+    for dirpath, dirnames, _ in os.walk(base):
+        cur = Path(dirpath)
+        if len(cur.parts) - base_depth >= max_depth:
+            dirnames[:] = []
+        else:
+            dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and d not in DOC_SKIP_DIRS
+                                 and (cur / d) not in exclude)
+        yield cur
+
+
+def enumerate_docs(store_dir: Path, folders: list[str], max_bytes: int,
+                   exclude: set[Path] | None = None) -> list[Path]:
+    """The markdown files of a store's declared folders, in a stable order. Dot
+    dirs, DOC_SKIP_DIRS, sub-store roots, dot files, files over max_bytes and
+    last-handoff.md (the handoff class owns it) are skipped; the receipt's
+    `files` is this count."""
+    out: list[Path] = []
+    exclude = exclude or set()
+    for folder in folders:
+        base = store_dir / folder
+        if not base.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(base):
+            cur = Path(dirpath)
+            dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and d not in DOC_SKIP_DIRS
+                                 and (cur / d) not in exclude)
+            for fn in sorted(filenames):
+                if not fn.endswith(".md") or fn.startswith(".") or fn == "last-handoff.md":
+                    continue
+                f = Path(dirpath) / fn
+                try:
+                    if f.stat().st_size > max_bytes:
+                        continue
+                except OSError:
+                    continue
+                out.append(f)
+    return out
+
+
+def discover_stores(qroot: Path, manifest: dict) -> list[tuple[str, Path]]:
+    """(dirname, path) for every directory a manifest `stores` glob matches.
+    A glob that matches nothing costs nothing, so the default ships it fleet-wide."""
+    out: list[tuple[str, Path]] = []
+    seen: set[Path] = set()
+    for spec in manifest.get("stores") or []:
+        glob = spec.get("glob") if isinstance(spec, dict) else None
+        if not glob or ".." in glob:
+            continue
+        for d in sorted(qroot.glob(glob)):
+            if d.is_dir() and d not in seen and not d.name.startswith("."):
+                seen.add(d)
+                out.append((d.name, d))
+    return out
+
+
+def load_all_stores(qroot: Path, root: Path, manifest: dict) -> tuple[dict, list[dict], dict]:
+    """The project store plus every sub-store. Problems of the project store come
+    back as before; a sub-store's live on that store dict under `problems`."""
+    project, problems = load_stores(qroot, root, manifest, PROJECT_STORE)
+    subs = [load_stores(path, root, manifest, name)[0] for name, path in discover_stores(qroot, manifest)]
+    return project, subs, problems
 
 
 # ------------------------------------------------------------------ resolvers
@@ -887,6 +1047,202 @@ def resolve_handoff(entity: dict, stores: dict, root: Path, window: dict | None)
     return [i for i in items if in_window(i["t"], window)]
 
 
+def pattern_variants(name: str) -> list[str]:
+    """The spellings a name takes on disk: the name, and its `-` and `_` joins
+    (the phrase rule folds those to spaces on the prompt side; grep -F does not)."""
+    n = normalize_ws(name)
+    if len(n) < 4:
+        return []   # a short initialism over a corpus is noise (alias "DO", PR #302 round 1)
+    out = [n]
+    if " " in n:
+        out += [n.replace(" ", "-"), n.replace(" ", "_")]
+    return out
+
+
+def grep_binary() -> str | None:
+    return shutil.which("grep")
+
+
+HIT_RE = re.compile(r"^(?P<path>.+?):(?P<n>\d+):(?P<text>.*)$")
+
+
+def _grep(files: list[Path], patterns: list[str], *, ignore_case: bool, word: bool,
+          deadline: float) -> tuple[list[tuple[Path, int, str]], str] | None:
+    """One fixed-string grep over the files, chunked. None when grep is not on
+    PATH (the caller falls back to the Python scan). BSD grep 2.6 and GNU grep
+    share every flag used here. The timeout is the remaining deadline, so a
+    killed hook still returns what it gathered plus a receipt naming the stop."""
+    binary = grep_binary()
+    if binary is None or not files or not patterns:
+        return None if binary is None else ([], "grep")
+    args = [binary, "-n", "-H", "-I", "-F"] + (["-i"] if ignore_case else []) + (["-w"] if word else [])
+    for pat in patterns:
+        args += ["-e", pat]
+    args.append("--")
+    hits: list[tuple[Path, int, str]] = []
+    engine = "grep"
+    for i in range(0, len(files), GREP_CHUNK):
+        remaining = deadline - time.time()
+        if remaining <= 0.05:
+            return hits, "grep (deadline)"
+        chunk = [str(f) for f in files[i:i + GREP_CHUNK]]
+        try:
+            cp = subprocess.run(args + chunk, capture_output=True, text=True, errors="replace",
+                                timeout=max(0.2, remaining))
+        except subprocess.TimeoutExpired:
+            return hits, "grep (timeout)"
+        except OSError:
+            return None
+        for line in cp.stdout.splitlines():
+            m = HIT_RE.match(line)
+            if m:
+                hits.append((Path(m.group("path")), int(m.group("n")), m.group("text")))
+    return hits, engine
+
+
+def _pyscan(files: list[Path], patterns: list[str], *, ignore_case: bool, word: bool,
+            deadline: float, budget_bytes: int = DOC_SCAN_BUDGET_BYTES) -> tuple[list[tuple[Path, int, str]], str]:
+    """The grep-less path: same substring / whole-word semantics, bounded by a
+    byte budget and the deadline, both reported in the engine string."""
+    alts = "|".join(re.escape(p) for p in patterns)
+    body = f"(?<!\\w)(?:{alts})(?!\\w)" if word else f"(?:{alts})"
+    pat = re.compile(body, re.IGNORECASE if ignore_case else 0)
+    hits: list[tuple[Path, int, str]] = []
+    used, engine = 0, "python"
+    for f in files:
+        if time.time() > deadline:
+            return hits, "python (deadline)"
+        try:
+            data = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        used += len(data)
+        for n, line in enumerate(data.splitlines(), start=1):
+            if pat.search(line):
+                hits.append((f, n, line))
+        if used > budget_bytes:
+            return hits, "python (budget)"
+    return hits, engine
+
+
+def search_docs(files: list[Path], patterns: list[str], *, ignore_case: bool, word: bool,
+                deadline: float) -> tuple[list[tuple[Path, int, str]], str]:
+    if not files or not patterns:
+        return [], "none"
+    r = _grep(files, patterns, ignore_case=ignore_case, word=word, deadline=deadline)
+    if r is None:
+        return _pyscan(files, patterns, ignore_case=ignore_case, word=word, deadline=deadline)
+    return r
+
+
+def doc_candidates(scan: str, entities: list[dict], index: dict[str, Entity]) -> list[str]:
+    """What the prompt names that the index cannot resolve, in proper-noun shape:
+    capitalized bigrams (the misses ledger's rule) and capitalized single words
+    of 4+ letters that are not sentence-, line- or bullet-initial (through
+    single_token_hit, the one chokepoint). A word that is the first token of an
+    index entity is left to the first-name rule, which owns that ambiguity."""
+    resolved = [norm(e["name"]) for e in entities] + [norm(a) for e in entities for a in e.get("aliases", [])]
+    first_tokens = {ent.name.split()[0].casefold() for ent in index.values() if ent.name.split()}
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in CAP_BIGRAM_RE.finditer(scan):
+        a, b = m.group(1), m.group(2)
+        if a.casefold() in STOPWORDS or b.casefold() in STOPWORDS or a.casefold() in MISS_OPENERS:
+            continue
+        cand = f"{a} {b}"
+        cn = norm(cand)
+        if cn in seen or any(cn in r or r in cn for r in resolved):
+            continue
+        seen.add(cn)
+        out.append(cand)
+    for m in re.finditer(r"\b([A-Z][a-z]{3,})\b", scan):
+        tok = m.group(1)
+        tn = tok.casefold()
+        if tn in seen or tn in STOPWORDS or tn in MISS_OPENERS or tn in first_tokens:
+            continue
+        if any(tn in r.split() for r in resolved) or any(tn in s.split() for s in seen):
+            continue
+        if not single_token_hit(tok, scan, "contact"):
+            continue
+        seen.add(tn)
+        out.append(tok)
+    return out[:MAX_DOC_CANDIDATES]
+
+
+def search_docs_for_candidates(cands: list[str], search_stores: list[dict], root: Path,
+                               deadline: float) -> tuple[dict[str, list[tuple[Path, int, str, str]]], str]:
+    """Case-sensitive, whole-word, headings excluded: a heading is a section label
+    (the 2026-09-05 census over every 4_points case: Notes, Summary, Integrity),
+    so "Next Steps" in a prompt never resolves to the heading that says so.
+    Each hit carries its store so the caller can apply MAX_CANDIDATE_STORES."""
+    file_store: dict[str, str] = {}
+    for st in search_stores:
+        for f in st.get("doc_files") or []:
+            file_store[str(f)] = st["name"]
+    files = [Path(f) for f in file_store]
+    hits, engine = search_docs(files, cands, ignore_case=False, word=True, deadline=deadline)
+    out: dict[str, list[tuple[Path, int, str, str]]] = {}
+    for f, n, text in hits:
+        s = text.strip()
+        if not s or s.startswith("#"):
+            continue
+        for c in cands:
+            if word_in_exact(c, text):
+                out.setdefault(c, []).append((f, n, text, file_store.get(str(f), PROJECT_STORE)))
+    return out, engine
+
+
+def resolve_docs(entities: list[dict], search_stores: list[dict], root: Path,
+                 candidate_hits: dict[str, list[tuple[Path, int, str, str]]],
+                 deadline: float, candidate_engine: str = "none") -> tuple[dict[str, dict[str, list[dict]]], dict]:
+    """entity key -> store name -> items, newest file first. One grep over every
+    document of the stores in scope for the index entities; the candidates'
+    hits were gathered before classification and are folded in here."""
+    file_store: dict[str, str] = {}
+    for st in search_stores:
+        for f in st.get("doc_files") or []:
+            file_store[str(f)] = st["name"]
+    files = [Path(f) for f in file_store]
+    index_ents = [e for e in entities if e.get("kind") != "docs_hit"]
+    patterns: list[str] = []
+    for e in index_ents:
+        for nm in [e["name"], *e.get("aliases", [])]:
+            for v in pattern_variants(nm):
+                if v not in patterns:
+                    patterns.append(v)
+    hits, engine = search_docs(files, patterns, ignore_case=True, word=False, deadline=deadline)
+    mtimes: dict[str, str | None] = {}
+
+    def t_of(f: Path) -> str | None:
+        k = str(f)
+        if k not in mtimes:
+            mtimes[k] = mtime_date(f)
+        return mtimes[k]
+
+    out: dict[str, dict[str, list[dict]]] = {}
+    for f, n, text in hits:
+        s = text.strip()
+        if not s:
+            continue
+        store = file_store.get(str(f), PROJECT_STORE)
+        for e in index_ents:
+            if entity_matches(e, text):
+                out.setdefault(norm(e["name"]), {}).setdefault(store, []).append(
+                    _item(e["name"], "doc", s, f, n, t_of(f), root, status=status_for_line(text)))
+    for e in entities:
+        if e.get("kind") != "docs_hit":
+            continue
+        for f, n, text, store in candidate_hits.get(e["name"], []):
+            out.setdefault(norm(e["name"]), {}).setdefault(store, []).append(
+                _item(e["name"], "doc", text.strip(), f, n, t_of(f), root, status=status_for_line(text)))
+    for by_store in out.values():
+        for lst in by_store.values():
+            lst.sort(key=lambda i: (i["t"] or "", i["src"]), reverse=True)
+    if engine == "none" and candidate_hits:
+        engine = candidate_engine   # only the candidate pass ran (an index of 0)
+    return out, {"files": len(files), "engine": engine}
+
+
 def capability_index(root: Path) -> dict[str, list[tuple[Path, int, str]]]:
     """name -> [(path, line, description)] over the repo's own commands, skills,
     rules and scripts. Built only when the prompt has capability phrasing."""
@@ -1023,8 +1379,13 @@ def render_header(bundle: dict) -> str:
     else:
         miss = "; ".join(f"{m} ({bundle['coverage']['missing_paths'].get(m, 'absent')})" for m in cov["missing"])
         line = f"[knowledge-supply] COVERAGE: {cov['verdict']}. missing: {miss}."
-    ents = ", ".join(e["name"] + (" (ambiguous: " + " | ".join(e["orgs"]) + ")" if e["ambiguous"] else "")
-                     for e in bundle["entities"]) or "none"
+    def suffix(e: dict) -> str:
+        if e.get("kind") == "store" and e.get("store"):
+            return f" [{e['store']}]"
+        if e.get("kind") == "docs_hit":
+            return " [docs]"
+        return " (ambiguous: " + " | ".join(e["orgs"]) + ")" if e["ambiguous"] else ""
+    ents = ", ".join(e["name"] + suffix(e) for e in bundle["entities"]) or "none"
     win = bundle.get("window")
     win_s = f" window={win['from']}..{win['to']}" if win else ""
     win_s += deadline_note(bundle)
@@ -1141,10 +1502,13 @@ SUPPLY_DEADLINE_S = float(os.environ.get("KNOWLEDGE_SUPPLY_DEADLINE_S", "3.5"))
 
 
 def _record_misses(qroot: Path, prompt: str, scan: str, truncated: bool,
-                   entities: list[dict], ts: str, session_id: str) -> None:
+                   entities: list[dict], ts: str, session_id: str,
+                   candidates_dropped: list[dict] | None = None) -> None:
     """One bounded write per prompt. A truncated prompt (a paste) gets ONE row
     saying so instead of its candidates: the founder did not name those things,
-    the pasted text did."""
+    the pasted text did. A candidate dropped as corpus-common is a row too: it
+    was named, searched, found everywhere, and is the data for a per-instance
+    stopword list if that ever earns its cost."""
     path = qroot / "memory" / MISSES_NAME
     h = _hash(prompt)
     if truncated:
@@ -1153,6 +1517,9 @@ def _record_misses(qroot: Path, prompt: str, scan: str, truncated: bool,
         return
     for miss in miss_candidates(scan, entities):
         append_bounded(path, {"ts": ts, "session_id": session_id, "prompt_hash": h, **miss})
+    for d in candidates_dropped or []:
+        append_bounded(path, {"ts": ts, "session_id": session_id, "prompt_hash": h,
+                              "candidate": d["candidate"], "shape": "corpus_common", "stores": d["stores"]})
 
 
 # ------------------------------------------------------------------ entry point
@@ -1177,8 +1544,9 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
                                          "looked_at": str(manifest_path) if manifest_path else None})
         return None
 
-    stores, problems = load_stores(qroot, root)
-    index = build_index(stores)
+    project, substores, problems = load_all_stores(qroot, root, manifest)
+    stores = project
+    index = build_index(project, substores)
     # Absent key: the shipped default. Present but empty: a deliberate quiet.
     fire_alone = set(manifest["entity_kinds_that_fire_alone"]
                      if "entity_kinds_that_fire_alone" in manifest else ["slug", "client"])
@@ -1187,13 +1555,38 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
     scan = prompt[:PROMPT_SCAN_CHARS]
     truncated = len(prompt) > PROMPT_SCAN_CHARS
     entities = resolve_entities(scan, index, fire_alone)
+    # Naming a sub-store (a 4_points case) scopes every other entity's search to
+    # it plus the project level; naming none searches every store.
+    named_stores = {e["store"] for e in entities if e.get("kind") == "store" and e.get("store")}
+    search_stores = [project] + [s for s in substores if not named_stores or s["name"] in named_stores]
+    # Prompt-driven candidates against the project's own documents: what makes a
+    # project with no graph and no relationships.md answer from its folder.
+    candidate_hits: dict[str, list] = {}
+    candidate_engine = "none"
+    candidates_dropped: list[dict] = []
+    docs_declared = any("docs" in (c.get("sources") or {}) for c in (manifest.get("classes") or {}).values())
+    if docs_declared and not truncated:
+        cands = doc_candidates(scan, entities, index)
+        if cands:
+            candidate_hits, candidate_engine = search_docs_for_candidates(cands, search_stores, root, deadline=t_deadline)
+            for cand in cands:
+                hits = candidate_hits.get(cand) or []
+                if not hits:
+                    continue
+                n_stores = len({h[3] for h in hits})
+                if n_stores > MAX_CANDIDATE_STORES:
+                    candidates_dropped.append({"candidate": cand, "stores": n_stores})
+                    candidate_hits.pop(cand, None)
+                    continue
+                entities.append({"name": cand, "kind": "docs_hit", "resolved_from": "docs",
+                                 "ambiguous": False, "project": None, "orgs": [], "aliases": [], "store": None})
     entities_dropped = [e["name"] for e in entities[MAX_ENTITIES:]]
     entities = entities[:MAX_ENTITIES]
     cap_hits = capability_hits(scan, capability_index(root)) if (CAPABILITY_RE.search(scan) and not entities) else []
     task_class, window = classify(scan, entities, cap_hits, now)
     if task_class == "none":
         if record:
-            _record_misses(qroot, prompt, scan, truncated, entities, ts, session_id)
+            _record_misses(qroot, prompt, scan, truncated, entities, ts, session_id, candidates_dropped)
         return None
 
     declared = (manifest.get("classes") or {}).get(task_class, {}).get("sources") or {}
@@ -1204,19 +1597,27 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
     missing_paths: dict[str, str] = {}
     paths = stores["paths"]
 
+    folders = list(manifest.get("folders") or [])
+
     def present_of(cls: str) -> tuple[bool, str | None]:
         if cls == "canonical":
-            return bool(stores["canonical_files"]), rel(qroot / "canonical", root)
+            return any(s["canonical_files"] for s in search_stores), rel(qroot / "canonical", root)
+        if cls == "docs":
+            return any(s.get("doc_files") for s in search_stores), f"{rel(qroot, root)}/{{{','.join(folders)}}}"
         if cls == "capability":
             return bool(cap_hits), "repo capability index"
-        p = paths.get(cls if cls != "relationship" else "relationships")
+        key = cls if cls != "relationship" else "relationships"
+        p = paths.get(key)
         if p is None:
             return False, None
-        return (p.is_file() and cls not in problems), rel(p, root)
+        ok = any(s["paths"][key].is_file() and key not in s["problems"] for s in search_stores)
+        return ok, rel(p, root)
 
     for cls, spec in declared.items():
         present, path_s = present_of(cls)
         cls_items: list[dict] = []
+        stores_hit: set[str] = set()
+        docs_meta: dict = {}
         if deadline_hit is not None:
             # Past the deadline: this class was never searched, and the receipt
             # and the coverage line both say so. Never "present, 0 hits".
@@ -1225,7 +1626,8 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
                 missing_paths[cls] = f"{path_s or cls} not searched (deadline)"
             source_rows.append({"class": cls, "path": path_s, "present": present, "required": bool(spec.get("required")),
                                 "searched": False, "mtime": None, "fresh_days": spec.get("fresh_days"),
-                                "hits": 0, "cut": 0, "bytes": 0, "bad_lines": 0, "problem": "not searched (deadline)"})
+                                "hits": 0, "cut": 0, "bytes": 0, "bad_lines": 0, "problem": "not searched (deadline)",
+                                "stores_searched": 0, "stores_hit": []})
             continue
         # The cap is N per class PER ENTITY, applied to each resolver result
         # before the lists are joined. Codex round 1 on PR #302: a cap applied
@@ -1233,36 +1635,64 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
         # header named three people and the body carried facts about one.
         cap = spec.get("cap")
         cut_here = 0
-        if present:
+        if present and cls == "docs":
+            if time.time() > t_deadline:
+                deadline_hit = {"at_class": cls, "at_entity": entities[0]["name"] if entities else "",
+                                "elapsed_ms": int((time.time() - t0) * 1000)}
+            else:
+                by_ent, docs_meta = resolve_docs(entities, search_stores, root, candidate_hits,
+                                                 deadline=t_deadline, candidate_engine=candidate_engine)
+                for ent in entities:
+                    for store_name, got in (by_ent.get(norm(ent["name"])) or {}).items():
+                        if cap is not None and len(got) > cap:
+                            cut_here += len(got) - cap
+                            got = got[:cap]
+                        if got:
+                            stores_hit.add(store_name)
+                        for it in got:
+                            it["store"] = store_name
+                        cls_items += got
+        elif present:
             for ent in entities:
-                if time.time() > t_deadline:
-                    deadline_hit = {"at_class": cls, "at_entity": ent["name"],
-                                    "elapsed_ms": int((time.time() - t0) * 1000)}
+                if deadline_hit is not None:
                     break
-                if cls == "graph":
-                    got, c = resolve_graph(ent, stores, root, window,
-                                           set(manifest.get("state_predicates") or []))
-                    conflicts += c
-                elif cls == "canonical":
-                    got = resolve_canonical(ent, stores, root, errors=problems, cls=cls)
-                elif cls == "relationships":
-                    got = resolve_blocks(ent, paths["relationships"], root, "relationship", 12, errors=problems, cls=cls, stores=stores)
-                elif cls == "decisions":
-                    got = resolve_blocks(ent, paths["decisions"], root, "decision", 8, errors=problems, cls=cls, stores=stores)
-                elif cls == "commitments":
-                    got = resolve_commitments(ent, stores, root, window)
-                elif cls == "meetings":
-                    got = resolve_meetings(ent, stores, root, window)
-                elif cls == "loops":
-                    got = resolve_loops(ent, stores, root, window)
-                elif cls == "handoff":
-                    got = resolve_handoff(ent, stores, root, window)
-                else:
-                    got = []
-                if cap is not None and len(got) > cap:
-                    cut_here += len(got) - cap
-                    got = got[:cap]
-                cls_items += got
+                for st in search_stores:
+                    if time.time() > t_deadline:
+                        deadline_hit = {"at_class": cls, "at_entity": ent["name"],
+                                        "elapsed_ms": int((time.time() - t0) * 1000)}
+                        break
+                    st_paths = st["paths"]
+                    st_problems = st["problems"]
+                    if cls == "graph":
+                        got, c = resolve_graph(ent, st, root, window,
+                                               set(manifest.get("state_predicates") or []))
+                        conflicts += c
+                    elif cls == "canonical":
+                        got = resolve_canonical(ent, st, root, errors=st_problems, cls=cls)
+                    elif cls == "relationships":
+                        got = resolve_blocks(ent, st_paths["relationships"], root, "relationship", 12, errors=st_problems, cls=cls, stores=st)
+                    elif cls == "decisions":
+                        got = resolve_blocks(ent, st_paths["decisions"], root, "decision", 8, errors=st_problems, cls=cls, stores=st)
+                    elif cls == "commitments":
+                        got = resolve_commitments(ent, st, root, window)
+                    elif cls == "meetings":
+                        got = resolve_meetings(ent, st, root, window)
+                    elif cls == "loops":
+                        got = resolve_loops(ent, st, root, window)
+                    elif cls == "handoff":
+                        got = resolve_handoff(ent, st, root, window)
+                    else:
+                        got = []
+                    # The cap is N per class PER ENTITY PER STORE (a case is its
+                    # own knowledge base and keeps its own budget).
+                    if cap is not None and len(got) > cap:
+                        cut_here += len(got) - cap
+                        got = got[:cap]
+                    if got:
+                        stores_hit.add(st["name"])
+                    for it in got:
+                        it["store"] = st["name"]
+                    cls_items += got
             if cls == "capability":
                 for name, entries in cap_hits:
                     got = [_item(name, "capability", desc or path.name, path, line,
@@ -1279,22 +1709,29 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
                 if it["status"] == KNOWN and (d is None or (now - d).days > fresh_days):
                     it["status"] = STALE
         items += cls_items
-        rs = stores.get("read_stats", {}).get(cls)
-        if present and rs and rs["failed"] and rs["failed"] >= rs["files"]:
+        read = [s.get("read_stats", {}).get(cls) for s in search_stores]
+        read = [r for r in read if r and r["files"]]
+        if present and read and all(r["failed"] and r["failed"] >= r["files"] for r in read):
             present = False   # EVERY file of the class failed to read: unreadable, not empty (sp-ca1769db)
         if not present and spec.get("required"):
             missing.append(cls)
             missing_paths[cls] = f"{path_s or cls} {'unreadable' if cls in problems else 'absent'}"
-        src_path = Path(root) / path_s if path_s and cls not in ("canonical", "capability") else None
-        source_rows.append({
+        src_path = Path(root) / path_s if path_s and cls not in ("canonical", "capability", "docs") else None
+        store_problems = "; ".join(f"{s['name']}: {s['problems'][cls]}" for s in search_stores if cls in s["problems"]) or None
+        row = {
             "class": cls, "path": path_s, "present": present, "required": bool(spec.get("required")),
             "mtime": mtime_date(src_path) if src_path and src_path.exists() else None,
             "fresh_days": fresh_days, "hits": len(cls_items) + cut_here, "cut": cut_here,
             "bytes": sum(len(i["text"]) for i in cls_items),
-            "bad_lines": stores["bad_lines"].get(cls, 0),
-            "problem": problems.get(cls),
+            "bad_lines": sum(s["bad_lines"].get(cls, 0) for s in search_stores),
+            "problem": store_problems,
             "searched": "partial" if (deadline_hit and deadline_hit["at_class"] == cls) else True,
-        })
+            "stores_searched": len(search_stores), "stores_hit": sorted(stores_hit),
+        }
+        if cls == "docs":
+            row["files"] = docs_meta.get("files", sum(len(s.get("doc_files") or []) for s in search_stores))
+            row["engine"] = docs_meta.get("engine")
+        source_rows.append(row)
 
     verdict = "FULL" if not missing else ("NONE" if all(not r["present"] for r in source_rows) else "PARTIAL")
     ceiling = int(manifest.get("ceiling_chars") or 8000)
@@ -1320,13 +1757,14 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
         "conflicts": conflicts, "ceiling_hit": ceiling_hit, "overflow": overflow,
         "prompt_chars": len(prompt), "prompt_truncated": truncated,
         "deadline_hit": deadline_hit, "entities_dropped": entities_dropped,
+        "candidates_dropped": candidates_dropped,
         "items": len(kept), "bytes": bundle["budget"]["used"], "elapsed_ms": int((time.time() - t0) * 1000),
         "manifest": rel(manifest_path, root) if manifest_path else None,
     }
     bundle["receipt"] = receipt
     if record:
         append_jsonl(receipts_path, receipt)
-        _record_misses(qroot, prompt, scan, truncated, entities, ts, session_id)
+        _record_misses(qroot, prompt, scan, truncated, entities, ts, session_id, candidates_dropped)
         _record_recall(bundle, session_id, recall_path)
     return bundle
 
@@ -1405,7 +1843,9 @@ if __name__ == "__main__":  # manual probe: python3 knowledge_supply.py "<prompt
             if m is None:
                 print(f"(no supply) reason=manifest_missing qroot={q} looked_at={mp}")
             else:
-                st, pr = load_stores(q, root)
-                ents = resolve_entities(prompt, build_index(st), set(m.get("entity_kinds_that_fire_alone") or []))
-                print(f"(no supply) reason=no_entities_or_class qroot={q} index_size={len(build_index(st))} "
+                st, subs, pr = load_all_stores(q, root, m)
+                idx = build_index(st, subs)
+                ents = resolve_entities(prompt, idx, set(m.get("entity_kinds_that_fire_alone") or []))
+                print(f"(no supply) reason=no_entities_or_class qroot={q} index_size={len(idx)} "
+                      f"stores={[s['name'] for s in subs]} docs={sum(len(s['doc_files']) for s in [st] + subs)} "
                       f"entities={[e['name'] for e in ents]} problems={pr}")
