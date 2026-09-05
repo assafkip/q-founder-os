@@ -40,20 +40,28 @@ flowchart LR
         D["verbatim lines, each with<br/>file, line, date and status"]
     end
     subgraph prove ["Prove"]
-        P["a receipt per source: read, empty,<br/>unreadable or skipped.<br/>First line: FULL or PARTIAL"]
+        P["a receipt per source: read, empty,<br/>unreadable or skipped.<br/>First line: FULL, PARTIAL or NONE"]
     end
     C1 --> O1
     C1 --> O2
     C2 --> O3
     C3 --> O4
+    C4["the project's own documents,<br/>one knowledge base per case"] --> O5[("docs and sub-stores")]
     O1 --> R
     O2 --> R
     O3 --> R
     O4 --> R
+    O5 --> R
     R --> D --> P
 ```
 
 Ask about a person, and Kipi pulls their relationship history, the decisions that involved them, the commitments made to them, recent meetings, and the open follow-ups. Ask about a project, and a different set of sources becomes relevant. Ask it to build something, and the lessons from previous failures are placed in front of it before it starts.
+
+The reader reads the project's own folder, never a template. Three things make that true:
+
+- Sub-stores. A project can hold many knowledge bases, one per case or engagement, each with the same layout. Name one in a question and the search scopes to it. Name none and it searches all of them. A name that appears in several cases comes back as one block per case, never collapsed into the last one.
+- The project's own documents. Every markdown folder the project keeps is a source, one search pass per question, every excerpt with its file and line.
+- Candidates from the question itself. A capitalized word the index does not know is looked up in those documents. A hit makes it an entity. A word found in more than four knowledge bases is treated as common vocabulary, dropped, and the receipt says so.
 
 The model never has to remember to go looking.
 
@@ -63,7 +71,7 @@ The model never has to remember to go looking.
 
 An empty search result is not proof that nothing exists. Most retrieval treats it that way.
 
-Kipi's supply step writes a receipt. Every source the question needed is recorded as read, empty, unreadable, or not searched because time ran out. The first line of what the model receives says `COVERAGE: FULL` or `COVERAGE: PARTIAL` and names what is missing.
+Kipi's supply step writes a receipt. Every source the question needed is recorded as read, empty, unreadable, or not searched because a deadline or a budget cut the pass short. The first line of what the model receives says `COVERAGE: FULL`, or `COVERAGE: PARTIAL` with the missing sources named, or `COVERAGE: NONE` when not one declared source could be read. FULL means fully searched. Any pass that stopped early reads as partial, never as full.
 
 ```mermaid
 flowchart TB
@@ -71,11 +79,12 @@ flowchart TB
     S -->|"read, has lines"| A["supplied verbatim, with file and line"]
     S -->|"read, nothing there"| B["recorded: searched, empty"]
     S -->|"file missing or corrupt"| C["recorded: could not read"]
-    S -->|"time ran out"| D["recorded: not searched"]
+    S -->|"deadline or budget cut the pass short"| D["recorded: partially searched"]
     A --> F["COVERAGE: FULL"]
     B --> F
     C --> P["COVERAGE: PARTIAL, missing sources named"]
     D --> P
+    C -. "every declared source unreadable" .-> N["COVERAGE: NONE"]
 ```
 
 So there is a difference between these two sentences, and the system says which one is true.
@@ -247,7 +256,7 @@ agent's queue, not yours.
 flowchart LR
     SK[("kipi-system: the template")] -->|"kipi update"| U{"the updater"}
     REG["a registry of every copy"] --> U
-    U -->|"preview first, approve once"| I1["Copy A: your chief of staff"]
+    U -->|"dry run first, then apply"| I1["Copy A: your chief of staff"]
     U --> I2["Copy B: a client engagement"]
     U --> I3["Copy C: an investigation"]
     U -. "never touches" .-> OWN["each copy's own facts, contacts, memory"]
@@ -256,11 +265,13 @@ flowchart LR
     I3 --> RB
 ```
 
-Every project is a full copy with its own facts and the same machinery. The updater
-previews exactly what would be copied and removed per copy, waits for one approval, then
-fans the machinery out and leaves each copy's facts untouched. It commits before and after
-so any sync can be reverted alone. A copy with uncommitted work refuses the sync rather
-than committing someone else's changes.
+Every project is a full copy with its own facts and the same machinery. The updater has a
+dry run that prints exactly what would be copied and removed per copy, and an apply that
+fans the machinery out and leaves each copy's facts untouched. The apply has no prompt of
+its own. It is a destructive operation, so an agent cannot run it: the hook that guards
+destructive commands refuses it, and a person runs it after reading the dry run. It
+commits before and after so any sync can be reverted alone. A copy with uncommitted work
+refuses the sync rather than committing someone else's changes.
 
 ---
 
@@ -347,7 +358,7 @@ If you don't, you still get an AI that doesn't make you decide who to contact, w
 - `.env`, credentials, and key files blocked from read/write
 - PreToolUse hooks intercept dangerous operations
 - No secrets in committed files
-- `rm -rf`, `sudo`, `git push --force` denied by default; the fleet-wide sync needs an out-of-band approval
+- `sudo` and `git push --force` denied by default, and the recursive remove denied at the filesystem root and on dot directories. The wider destructive-command guard (recursive removes anywhere, hard resets, branch deletion, the fleet-wide sync) is a shipped hook script that a person wires per machine. It refuses, prints a one-time approval token, and only a human shell can supply it.
 
 ---
 
