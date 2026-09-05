@@ -949,7 +949,7 @@ def test_store_named_in_prompt_scopes_to_that_store(tmp_path):
     b = run(root, "what do we know about foo bar")
     assert b is not None
     ents = {e["name"]: e for e in b["entities"]}
-    assert "foo bar" in ents and ents["foo bar"]["kind"] == "store" and ents["foo bar"]["store"] == "case-001-foo-bar"
+    assert "foo bar" in ents and ents["foo bar"]["kind"] == "store" and ents["foo bar"]["stores"] == ["case-001-foo-bar"]
     srcs = [i["src"] for i in b["items"]]
     assert any("investigations/case-001-foo-bar/canonical/scope.md:5" in s for s in srcs), srcs
     assert any("investigations/case-001-foo-bar/investigation/findings/finding-001.md:5" in s for s in srcs), srcs
@@ -1128,6 +1128,85 @@ def test_dropped_candidates_are_named_in_the_receipt(tmp_path):
     b = run(root, "what do we know about Dana Okafor and the Facebook profiles")
     assert b is not None and not any(e["name"] == "Facebook" for e in b["entities"])
     assert b["receipt"]["candidates_dropped"] == [{"candidate": "Facebook", "stores": 6}]
+
+
+# PR #308 review round 1: the reviewer's executed reproducers, kept as tests.
+
+def test_same_subject_in_two_cases_searches_both(tmp_path):
+    root, q = make_instance(tmp_path)
+    add_store(q, "case-010-lapsus", "scope", "LAPSUS first engagement: server in Rio.")
+    add_store(q, "case-041-lapsus", "scope", "LAPSUS second engagement: server in Oslo.")
+    b = run(root, "what do we know about lapsus")
+    ent = next(e for e in b["entities"] if e["kind"] == "store")
+    assert ent["stores"] == ["case-010-lapsus", "case-041-lapsus"]
+    srcs = [i["src"] for i in b["items"]]
+    assert any("case-010-lapsus" in s for s in srcs) and any("case-041-lapsus" in s for s in srcs), srcs
+    assert receipt_row(b, "docs")["stores_searched"] == 3
+    assert "case-010-lapsus, case-041-lapsus" in ks.render(b).splitlines()[0]
+
+
+def _graph(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+
+
+def test_alias_asserted_in_one_case_never_rewrites_another(tmp_path):
+    root, q = make_instance(tmp_path)
+    a = add_store(q, "case-010-alpha", "scope", "alpha finding")
+    b_ = add_store(q, "case-020-bravo", "scope", "bravo finding")
+    _graph(a / "memory" / "graph.jsonl", [
+        {"s": "Widget Corp", "p": "alias_of", "o": "Zeta Holdings", "t": "2026-09-01"},
+        {"s": "Zeta Holdings", "p": "status", "o": "under sanctions", "t": "2026-09-02"},
+    ])
+    _graph(b_ / "memory" / "graph.jsonl", [
+        {"s": "Widget Corp", "p": "status", "o": "clean, no findings", "t": "2026-09-03"},
+    ])
+    b = run(root, "what do we know about Widget Corp")
+    names = {e["name"]: e for e in b["entities"]}
+    assert "Widget Corp" in names, "a name another case contributed on its own survives the alias edge"
+    assert "Zeta Holdings" in names and names["Zeta Holdings"]["via_alias"] == "Widget Corp"
+    assert names["Zeta Holdings"]["alias_stores"] == {"Widget Corp": ["case-010-alpha"]}
+    widget = items_of(b, entity="Widget Corp")
+    zeta = items_of(b, entity="Zeta Holdings")
+    assert widget and all("case-020-bravo" in i["src"] for i in widget), [i["src"] for i in widget]
+    assert zeta and all("case-010-alpha" in i["src"] for i in zeta), [i["src"] for i in zeta]
+    assert not any("clean, no findings" in i["text"] for i in zeta), "case-020's line never lands under Zeta"
+    assert "(via alias Widget Corp: case-010-alpha)" in ks.render(b).splitlines()[0]
+
+
+def test_project_level_alias_still_applies_everywhere(tmp_path):
+    root, q = make_instance(tmp_path)   # the fixture graph has "DO alias_of Dana Okafor" at the project level
+    add_store(q, "case-001-foo-bar", "DO briefed the Foo Bar victim list.", "finding")
+    b = run(root, "what do we know about Dana Okafor")
+    hits = [i for i in items_of(b, kind="canonical", entity="Dana Okafor") if "case-001-foo-bar" in i["src"]]
+    assert hits and hits[0]["text"] == "DO briefed the Foo Bar victim list.", "a project-level alias reaches every case"
+
+
+def test_deadline_on_the_first_required_class_is_not_full(tmp_path):
+    root, q = make_instance(tmp_path)
+    (q / ".q-system" / "data").mkdir()
+    shutil.copy(INVESTIGATION_MANIFEST, q / ".q-system" / "data" / "knowledge-sources.json")
+    add_store(q, "case-001-foo-bar", "scope", "Dana Okafor briefed the Foo Bar victim list yesterday.")
+    b = run(root, "what happened yesterday with Dana Okafor", deadline_s=0)
+    assert b is not None and b["task_class"] == "temporal_event"
+    assert b["coverage"]["verdict"] != "FULL", b["coverage"]
+    assert "docs" in b["coverage"]["missing"]
+    row = receipt_row(b, "docs")
+    assert row["searched"] is False and row["stores_searched"] == 0 and row["problem"] == "not searched (deadline)"
+
+
+def test_receipt_says_when_the_corpus_common_rule_cannot_run(tmp_path):
+    root, q = make_bare_instance(tmp_path)
+    for i in range(8):
+        (q / "output" / f"r{i}.md").write_text("Bluepeak again.\n")
+    b = run(root, "what did Bluepeak ask for")
+    assert b["receipt"]["candidate_rule"] == {"max_stores": 4, "applicable": False, "note": "single store: rule cannot run"}
+    root2, q2 = make_instance(tmp_path)
+    add_store(q2, "case-001-foo-bar", "scope", "x")
+    b2 = run(root2, "what do we know about Dana Okafor")
+    assert b2["receipt"]["candidate_rule"]["applicable"] is True
 
 
 # ---------------------------------------------------------------- the hook

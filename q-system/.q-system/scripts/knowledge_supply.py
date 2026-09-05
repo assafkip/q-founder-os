@@ -302,17 +302,29 @@ def status_for_line(line: str) -> str:
 # ------------------------------------------------------------------ entity index
 
 class Entity:
-    __slots__ = ("name", "kind", "aliases", "orgs", "store")
+    __slots__ = ("name", "kind", "aliases", "orgs", "stores", "alias_stores")
 
     def __init__(self, name: str, kind: str):
         self.name = name
         self.kind = kind          # graph | contact | slug | client | store | target | noun | capability
         self.aliases: set[str] = set()
         self.orgs: dict[str, str | None] = {}   # org -> project, from works_at rows
-        self.store: str | None = None            # the sub-store directory a `store` entity names
+        # Every sub-store directory a `store` entity names. A SET, not one value:
+        # PR #308 review round 1 found case-010-lapsus and case-041-lapsus collapsing
+        # to one entity whose last writer won, so the other case vanished from the
+        # search with no receipt. A recurring subject across cases is the normal
+        # shape of investigation work, not an edge.
+        self.stores: set[str] = set()
+        # alias -> the stores whose graph asserted it. An alias_of edge is one
+        # case's knowledge; applied to another case's content it rewrote identity
+        # there (PR #308 review round 1, major 2). The project store's aliases
+        # apply instance-wide.
+        self.alias_stores: dict[str, set[str]] = {}
 
     def as_dict(self) -> dict:
-        return {"name": self.name, "kind": self.kind, "aliases": sorted(self.aliases), "store": self.store}
+        return {"name": self.name, "kind": self.kind, "aliases": sorted(self.aliases),
+                "stores": sorted(self.stores),
+                "alias_stores": {a: sorted(s) for a, s in self.alias_stores.items()}}
 
 
 def _add(index: dict[str, Entity], name: str, kind: str) -> Entity | None:
@@ -335,24 +347,40 @@ def build_index(stores: dict, substores: list[dict] | None = None) -> dict[str, 
     index: dict[str, Entity] = {}
     all_stores = [stores] + list(substores or [])
     graph_rows = [r for st in all_stores for r in (st.get("graph_rows") or [])]
+    # Which stores contributed each name on their own (as a subject or object).
+    # An alias edge may only remove a name from the index when no OTHER store
+    # contributed it: case-020's "Widget Corp" is case-020's entity even when
+    # case-010 says Widget Corp is an alias of Zeta Holdings.
+    contributors: dict[str, set[str]] = {}
+    alias_rows: list[dict] = []
     for row in graph_rows:
         s, p, o = row.get("s"), row.get("p"), row.get("o")
         if not isinstance(s, str) or not isinstance(o, str):
             continue
+        st_name = row.get("_store") or PROJECT_STORE
         es = _add(index, s, "graph")
+        if es is not None:
+            contributors.setdefault(norm(s), set()).add(st_name)
         if len(o.split()) <= 4:
-            _add(index, o, "graph")
+            if _add(index, o, "graph") is not None:
+                contributors.setdefault(norm(o), set()).add(st_name)
         if p in ALIAS_PREDICATES and es is not None:
-            if ALIAS_PREDICATES[p] == "s_is_alias":
-                canonical = _add(index, o, "graph")
-                if canonical is not None:
-                    canonical.aliases.add(normalize_ws(s))
-                    index.pop(norm(s), None)
-            else:
-                es.aliases.add(normalize_ws(o))
-                index.pop(norm(o), None)
+            alias_rows.append(row)
         if p in ORG_PREDICATES and es is not None:
             es.orgs[normalize_ws(o)] = row.get("project")
+    for row in alias_rows:
+        s, p, o = row["s"], row["p"], row["o"]
+        st_name = row.get("_store") or PROJECT_STORE
+        if ALIAS_PREDICATES[p] == "s_is_alias":
+            canonical, alias = _add(index, o, "graph"), normalize_ws(s)
+        else:
+            canonical, alias = index.get(norm(s)), normalize_ws(o)
+        if canonical is None or norm(alias) == norm(canonical.name):
+            continue
+        canonical.aliases.add(alias)
+        canonical.alias_stores.setdefault(alias, set()).add(st_name)
+        if contributors.get(norm(alias), set()) <= {st_name}:
+            index.pop(norm(alias), None)
     for st in all_stores:
         for name in st.get("contact_names") or []:
             _add(index, name, "contact")
@@ -368,7 +396,7 @@ def build_index(stores: dict, substores: list[dict] | None = None) -> dict[str, 
             ent = _add(index, store_entity_name(st["name"]), "store")
             if ent is not None:
                 ent.kind = "store"
-                ent.store = st["name"]
+                ent.stores.add(st["name"])
     return index
 
 
@@ -447,7 +475,7 @@ def resolve_entities(prompt: str, index: dict[str, Entity], fire_alone: set[str]
     found: dict[str, dict] = {}
     for key in candidate_keys(index, ptoks):
         ent = index[key]
-        hit_via = None
+        hit_via, hit_name = None, None
         names = [(ent.name, "self")] + [(a, "alias") for a in ent.aliases]
         for name, via in names:
             toks = name.split()
@@ -470,6 +498,7 @@ def resolve_entities(prompt: str, index: dict[str, Entity], fire_alone: set[str]
                     if single_token_hit(tok, prompt, "contact"):
                         hit_via = via
             if hit_via:
+                hit_name = name
                 break
         if not hit_via:
             continue
@@ -484,7 +513,9 @@ def resolve_entities(prompt: str, index: dict[str, Entity], fire_alone: set[str]
         found[key] = {"name": ent.name, "kind": ent.kind,
                       "resolved_from": "alias" if hit_via == "alias" else ent.kind,
                       "ambiguous": ambiguous, "project": scoped_project,
-                      "orgs": sorted(ent.orgs), "aliases": sorted(ent.aliases), "store": ent.store}
+                      "orgs": sorted(ent.orgs), "aliases": sorted(ent.aliases),
+                      "stores": sorted(ent.stores), "via_alias": hit_name if hit_via == "alias" else None,
+                      "alias_stores": {a: sorted(s) for a, s in ent.alias_stores.items()}}
     # First-name expansion, measured not guessed. Replay of 2,131 real prompts
     # (2026-09-04) showed the founder names people by bare first name; the top
     # misses were exactly those. A capitalized token that is NOT sentence-initial
@@ -511,7 +542,9 @@ def resolve_entities(prompt: str, index: dict[str, Entity], fire_alone: set[str]
                 ent = index[keys[0]]
                 found[keys[0]] = {"name": ent.name, "kind": ent.kind, "resolved_from": "first_name",
                                   "ambiguous": len(ent.orgs) >= 2, "project": None,
-                                  "orgs": sorted(ent.orgs), "aliases": sorted(ent.aliases), "store": ent.store}
+                                  "orgs": sorted(ent.orgs), "aliases": sorted(ent.aliases),
+                                  "stores": sorted(ent.stores), "via_alias": None,
+                                  "alias_stores": {a: sorted(s) for a, s in ent.alias_stores.items()}}
     # Longest name wins when one resolved name contains another ("Dana Okafor" vs "Okafor Co").
     out = list(found.values())
     out.sort(key=lambda e: -len(e["name"]))
@@ -555,10 +588,20 @@ def is_initial_position(text: str, pos: int) -> bool:
     return not before or before[-1] in ".!?:;"
 
 
-def entity_matches(entity: dict, text: str) -> bool:
+def entity_matches(entity: dict, text: str, store: str | None = None) -> bool:
+    """Content-side match. The name matches anywhere; an alias matches only
+    content in a store that asserted it (or anywhere, when the project store
+    asserted it, or when the caller has no store to name)."""
     if phrase_in(entity["name"], norm(text)):
         return True
-    return any(alias_in_text(a, text) for a in entity.get("aliases", []))
+    scopes = entity.get("alias_stores") or {}
+    for a in entity.get("aliases", []):
+        allowed = scopes.get(a)
+        if store is not None and allowed and store not in allowed and PROJECT_STORE not in allowed:
+            continue
+        if alias_in_text(a, text):
+            return True
+    return False
 
 
 # ------------------------------------------------------------------ router
@@ -648,6 +691,7 @@ def load_stores(qroot: Path, root: Path, manifest: dict | None = None,
                     row = json.loads(line)
                     if isinstance(row, dict):
                         row["_line"] = n
+                        row["_store"] = name
                         rows.append(row)
                     else:
                         bad += 1
@@ -853,9 +897,10 @@ def resolve_graph(entity: dict, stores: dict, root: Path, window: dict | None,
     manifest (state_predicates), never a table here."""
     path = stores["paths"]["graph"]
     state_predicates = {norm(p) for p in (state_predicates or ())}
+    st_name = stores.get("name")
     rows = [r for r in stores["graph_rows"]
             if isinstance(r.get("s"), str) and isinstance(r.get("o"), str)
-            and (entity_matches(entity, r["s"]) or entity_matches(entity, r["o"]))
+            and (entity_matches(entity, r["s"], st_name) or entity_matches(entity, r["o"], st_name))
             and r.get("p") not in ALIAS_PREDICATES]
     if entity.get("project"):
         rows = [r for r in rows if r.get("project") in (entity["project"], None, "all")]
@@ -919,7 +964,7 @@ def resolve_canonical(entity: dict, stores: dict, root: Path, kind: str = "canon
                 continue
             if in_fence or not line.strip():
                 continue
-            if entity_matches(entity, line):
+            if entity_matches(entity, line, stores.get("name")):
                 items.append(_item(entity["name"], kind, line.strip(), path, n, t, root,
                                    status=status_for_line(line)))
     items.sort(key=lambda i: (i["t"] or ""), reverse=True)
@@ -961,7 +1006,8 @@ def resolve_blocks(entity: dict, path: Path, root: Path, kind: str, max_lines: i
         body = [l for l in block if l.strip()]
         joined = "\n".join(body)
         target = body[0] if kind == "relationship" else joined
-        if not entity_matches(entity, target if kind == "relationship" else joined):
+        if not entity_matches(entity, target if kind == "relationship" else joined,
+                              (stores or {}).get("name")):
             continue
         if kind == "decision":
             decision = next((l for l in body if "**Decision:**" in l), "")
@@ -986,7 +1032,7 @@ def resolve_commitments(entity: dict, stores: dict, root: Path, window: dict | N
         promise, slug, state = str(r.get("promise") or ""), str(r.get("slug") or ""), str(r.get("state") or "")
         if state in DROP_STATES:
             continue
-        if not (entity_matches(entity, slug) or entity_matches(entity, promise)):
+        if not (entity_matches(entity, slug, stores.get("name")) or entity_matches(entity, promise, stores.get("name"))):
             continue
         t = (r.get("extracted_at") or "")[:10] or None
         if not in_window(t, window):
@@ -1003,13 +1049,14 @@ def resolve_commitments(entity: dict, stores: dict, root: Path, window: dict | N
 def resolve_meetings(entity: dict, stores: dict, root: Path, window: dict | None) -> list[dict]:
     path = stores["paths"]["meetings"]
     items = []
+    st_name = stores.get("name")
     for key, rows in stores["meetings"].items():
-        key_hit = entity_matches(entity, key)
+        key_hit = entity_matches(entity, key, st_name)
         for r in rows:
             if not isinstance(r, dict):
                 continue
             title, summary = str(r.get("title") or ""), str(r.get("summary") or "")
-            if not (key_hit or entity_matches(entity, title) or entity_matches(entity, summary)):
+            if not (key_hit or entity_matches(entity, title, st_name) or entity_matches(entity, summary, st_name)):
                 continue
             t = (r.get("date") or "")[:10] or None
             if not in_window(t, window):
@@ -1028,7 +1075,7 @@ def resolve_loops(entity: dict, stores: dict, root: Path, window: dict | None) -
         if l.get("status") != "open":
             continue
         title, nxt = str(l.get("title") or ""), str(l.get("next_action") or "")
-        if not (entity_matches(entity, title) or entity_matches(entity, nxt)):
+        if not (entity_matches(entity, title, stores.get("name")) or entity_matches(entity, nxt, stores.get("name"))):
             continue
         t = (l.get("added") or "")[:10] or None
         if not in_window(t, window):
@@ -1226,7 +1273,7 @@ def resolve_docs(entities: list[dict], search_stores: list[dict], root: Path,
             continue
         store = file_store.get(str(f), PROJECT_STORE)
         for e in index_ents:
-            if entity_matches(e, text):
+            if entity_matches(e, text, store):
                 out.setdefault(norm(e["name"]), {}).setdefault(store, []).append(
                     _item(e["name"], "doc", s, f, n, t_of(f), root, status=status_for_line(text)))
     for e in entities:
@@ -1380,11 +1427,18 @@ def render_header(bundle: dict) -> str:
         miss = "; ".join(f"{m} ({bundle['coverage']['missing_paths'].get(m, 'absent')})" for m in cov["missing"])
         line = f"[knowledge-supply] COVERAGE: {cov['verdict']}. missing: {miss}."
     def suffix(e: dict) -> str:
-        if e.get("kind") == "store" and e.get("store"):
-            return f" [{e['store']}]"
+        if e.get("kind") == "store" and e.get("stores"):
+            return f" [{', '.join(e['stores'])}]"
         if e.get("kind") == "docs_hit":
             return " [docs]"
-        return " (ambiguous: " + " | ".join(e["orgs"]) + ")" if e["ambiguous"] else ""
+        out = ""
+        via = e.get("via_alias")
+        if via:
+            asserted = (e.get("alias_stores") or {}).get(via) or []
+            out += f" (via alias {via}" + (f": {', '.join(asserted)}" if asserted else "") + ")"
+        if e["ambiguous"]:
+            out += " (ambiguous: " + " | ".join(e["orgs"]) + ")"
+        return out
     ents = ", ".join(e["name"] + suffix(e) for e in bundle["entities"]) or "none"
     win = bundle.get("window")
     win_s = f" window={win['from']}..{win['to']}" if win else ""
@@ -1557,7 +1611,7 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
     entities = resolve_entities(scan, index, fire_alone)
     # Naming a sub-store (a 4_points case) scopes every other entity's search to
     # it plus the project level; naming none searches every store.
-    named_stores = {e["store"] for e in entities if e.get("kind") == "store" and e.get("store")}
+    named_stores = {s for e in entities if e.get("kind") == "store" for s in (e.get("stores") or [])}
     search_stores = [project] + [s for s in substores if not named_stores or s["name"] in named_stores]
     # Prompt-driven candidates against the project's own documents: what makes a
     # project with no graph and no relationships.md answer from its folder.
@@ -1579,7 +1633,8 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
                     candidate_hits.pop(cand, None)
                     continue
                 entities.append({"name": cand, "kind": "docs_hit", "resolved_from": "docs",
-                                 "ambiguous": False, "project": None, "orgs": [], "aliases": [], "store": None})
+                                 "ambiguous": False, "project": None, "orgs": [], "aliases": [],
+                                 "stores": [], "via_alias": None, "alias_stores": {}})
     entities_dropped = [e["name"] for e in entities[MAX_ENTITIES:]]
     entities = entities[:MAX_ENTITIES]
     cap_hits = capability_hits(scan, capability_index(root)) if (CAPABILITY_RE.search(scan) and not entities) else []
@@ -1635,11 +1690,13 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
         # header named three people and the body carried facts about one.
         cap = spec.get("cap")
         cut_here = 0
+        searched_any = False
         if present and cls == "docs":
             if time.time() > t_deadline:
                 deadline_hit = {"at_class": cls, "at_entity": entities[0]["name"] if entities else "",
                                 "elapsed_ms": int((time.time() - t0) * 1000)}
             else:
+                searched_any = True
                 by_ent, docs_meta = resolve_docs(entities, search_stores, root, candidate_hits,
                                                  deadline=t_deadline, candidate_engine=candidate_engine)
                 for ent in entities:
@@ -1661,6 +1718,7 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
                         deadline_hit = {"at_class": cls, "at_entity": ent["name"],
                                         "elapsed_ms": int((time.time() - t0) * 1000)}
                         break
+                    searched_any = True
                     st_paths = st["paths"]
                     st_problems = st["problems"]
                     if cls == "graph":
@@ -1716,6 +1774,14 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
         if not present and spec.get("required"):
             missing.append(cls)
             missing_paths[cls] = f"{path_s or cls} {'unreadable' if cls in problems else 'absent'}"
+        # The deadline landed on this class before ANY store was read: that is
+        # "not searched", never "partial", and a required class goes to missing.
+        # PR #308 review round 1 minor 3: the investigation manifest lists docs
+        # first and alone under temporal_event, so this one row decided FULL.
+        stopped_cold = bool(deadline_hit and deadline_hit["at_class"] == cls and present and not searched_any)
+        if stopped_cold and spec.get("required") and cls not in missing:
+            missing.append(cls)
+            missing_paths[cls] = f"{path_s or cls} not searched (deadline)"
         src_path = Path(root) / path_s if path_s and cls not in ("canonical", "capability", "docs") else None
         store_problems = "; ".join(f"{s['name']}: {s['problems'][cls]}" for s in search_stores if cls in s["problems"]) or None
         row = {
@@ -1725,9 +1791,11 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
             "bytes": sum(len(i["text"]) for i in cls_items),
             "bad_lines": sum(s["bad_lines"].get(cls, 0) for s in search_stores),
             "problem": store_problems,
-            "searched": "partial" if (deadline_hit and deadline_hit["at_class"] == cls) else True,
-            "stores_searched": len(search_stores), "stores_hit": sorted(stores_hit),
+            "searched": False if stopped_cold else ("partial" if (deadline_hit and deadline_hit["at_class"] == cls) else True),
+            "stores_searched": 0 if stopped_cold else len(search_stores), "stores_hit": sorted(stores_hit),
         }
+        if stopped_cold:
+            row["problem"] = "not searched (deadline)"
         if cls == "docs":
             row["files"] = docs_meta.get("files", sum(len(s.get("doc_files") or []) for s in search_stores))
             row["engine"] = docs_meta.get("engine")
@@ -1758,6 +1826,15 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
         "prompt_chars": len(prompt), "prompt_truncated": truncated,
         "deadline_hit": deadline_hit, "entities_dropped": entities_dropped,
         "candidates_dropped": candidates_dropped,
+        # The corpus-common rule counts STORES, so on a project with no sub-stores
+        # it cannot fire and an empty candidates_dropped would read as "nothing
+        # was common" (PR #308 review round 1 minor 4). Say so. A file-count rule
+        # is not the fix: on a single-store project the main client's name is in
+        # most files by design (measured 2026-09-05: one instance's client hit
+        # 97 lines across its research and output), and dropping it would be
+        # dropping the subject.
+        "candidate_rule": {"max_stores": MAX_CANDIDATE_STORES, "applicable": bool(substores),
+                           "note": None if substores else "single store: rule cannot run"},
         "items": len(kept), "bytes": bundle["budget"]["used"], "elapsed_ms": int((time.time() - t0) * 1000),
         "manifest": rel(manifest_path, root) if manifest_path else None,
     }
