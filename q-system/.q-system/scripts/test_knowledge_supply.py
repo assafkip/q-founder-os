@@ -1027,6 +1027,27 @@ def test_docs_python_fallback_matches_grep(tmp_path, monkeypatch):
     assert receipt_row(a, "docs")["engine"] == "grep" and receipt_row(b, "docs")["engine"] == "python"
 
 
+def test_docs_engines_agree_on_the_per_file_cap_and_both_report_it(tmp_path, monkeypatch):
+    """PR #308 review round 4: grep -m capped a file at 200 silently while the
+    Python scan returned 300, under searched=True. The one way the engines could
+    differ is the one this fixture exercises."""
+    root, q = make_instance(tmp_path)
+    (q / "output" / "flood.md").write_text("".join(f"Dana Okafor line {i}\n" for i in range(300)))
+    manifest, _ = ks.load_manifest(q, root)
+    project, subs, _ = ks.load_all_stores(q, root, manifest)
+    files = project["doc_files"]
+    g_hits, g_engine = ks.search_docs(files, ["Dana Okafor"], ignore_case=True, word=False, deadline=dt.datetime.now().timestamp() + 5)
+    monkeypatch.setattr(ks.shutil, "which", lambda name: None)
+    p_hits, p_engine = ks.search_docs(files, ["Dana Okafor"], ignore_case=True, word=False, deadline=dt.datetime.now().timestamp() + 5)
+    assert len(g_hits) == len(p_hits) == ks.GREP_MAX_PER_FILE
+    assert [h[1] for h in g_hits] == [h[1] for h in p_hits]
+    assert g_engine == "grep (file cap)" and p_engine == "python (file cap)"
+    monkeypatch.undo()
+    b = run(root, "what do we know about Dana Okafor")
+    row = receipt_row(b, "docs")
+    assert row["searched"] == "partial" and "file cap" in row["problem"], row
+
+
 def test_prompt_proper_noun_with_doc_hits_becomes_entity(tmp_path):
     root, q = make_bare_instance(tmp_path)
     b = run(root, "what did Bluepeak ask for")
@@ -1292,6 +1313,30 @@ def test_project_store_never_indexes_a_substore_target(tmp_path):
     assert project["name"] == "project" and "acme corp" not in project["target_names"], project["target_names"]
     assert subs[0]["target_names"] == ["acme corp"]
     assert not any("case-003-x-case" in str(f) for f in project["doc_files"])
+
+
+# PR #308 review round 4: order inside a store is by file time, then mentions, never by name.
+
+def test_docs_order_is_file_time_then_mentions_never_path(tmp_path):
+    import os as _os
+    root, q = make_instance(tmp_path)
+    same = 1_700_000_000
+    for i in range(1, 10):
+        f = q / "output" / f"z-noise-{i}.md"
+        f.write_text("Dana Okafor filler.\n")
+        _os.utime(f, ns=(same * 10**9, same * 10**9))
+    ans = q / "output" / "a-the-answer.md"
+    ans.write_text("Dana Okafor ANSWER one.\nDana Okafor ANSWER two.\nDana Okafor ANSWER three.\n")
+    _os.utime(ans, ns=(same * 10**9, same * 10**9))
+    b = run(root, "what do we know about Dana Okafor")
+    docs = items_of(b, kind="doc")
+    assert docs and "a-the-answer.md" in docs[0]["src"], [i["src"] for i in docs]
+    assert [i["src"].rsplit(":", 1)[-1] for i in docs[:3]] == ["1", "2", "3"], "lines of one file stay in file order"
+    newer = q / "output" / "b-newer.md"
+    newer.write_text("Dana Okafor newer.\n")
+    _os.utime(newer, ns=((same + 60) * 10**9, (same + 60) * 10**9))
+    b2 = run(root, "what do we know about Dana Okafor")
+    assert "b-newer.md" in items_of(b2, kind="doc")[0]["src"], "a file one minute newer on the same date wins"
 
 
 # ---------------------------------------------------------------- the hook

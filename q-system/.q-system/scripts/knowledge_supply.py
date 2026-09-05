@@ -129,7 +129,7 @@ MAX_DOC_HITS = 20000
 # and, for a required class, a missing entry; PR #308 review rounds 1 and 2
 # found the same defect on two paths (deadline before the class, then grep
 # timeout / byte budget inside it), which is the signal for one rule, not two.
-TRUNCATION_MARKERS = ("(deadline)", "(timeout)", "(budget)", "(hit cap)")
+TRUNCATION_MARKERS = ("(deadline)", "(timeout)", "(budget)", "(hit cap)", "(file cap)")
 # A prompt word that hits in more than this many stores is a word this corpus
 # uses everywhere (Facebook, Miami across 27 of 43 cases, measured 2026-09-05),
 # not a subject. It is dropped and named in the receipt; naming a case first
@@ -1145,6 +1145,7 @@ def _grep(files: list[Path], patterns: list[str], *, ignore_case: bool, word: bo
     args.append("--")
     hits: list[tuple[Path, int, str]] = []
     engine = "grep"
+    per_file: dict[str, int] = {}
     for i in range(0, len(files), GREP_CHUNK):
         remaining = deadline - time.time()
         if remaining <= 0.05:
@@ -1161,6 +1162,12 @@ def _grep(files: list[Path], patterns: list[str], *, ignore_case: bool, word: bo
             m = HIT_RE.match(line)
             if m:
                 hits.append((Path(m.group("path")), int(m.group("n")), m.group("text")))
+                per_file[m.group("path")] = per_file.get(m.group("path"), 0) + 1
+                if per_file[m.group("path")] >= GREP_MAX_PER_FILE:
+                    # -m stopped reading that file: lines past the cap were never
+                    # looked at, which is a truncation like any other (PR #308
+                    # review round 4: the cap was silent and the receipt said FULL).
+                    engine = "grep (file cap)"
                 if len(hits) >= MAX_DOC_HITS:
                     return hits, "grep (hit cap)"
     return hits, engine
@@ -1183,11 +1190,16 @@ def _pyscan(files: list[Path], patterns: list[str], *, ignore_case: bool, word: 
         except OSError:
             continue
         used += len(data)
+        in_file = 0
         for n, line in enumerate(data.splitlines(), start=1):
             if pat.search(line):
                 hits.append((f, n, line))
+                in_file += 1
                 if len(hits) >= MAX_DOC_HITS:
                     return hits, "python (hit cap)"
+                if in_file >= GREP_MAX_PER_FILE:
+                    engine = "python (file cap)"   # parity with grep -m, and the same receipt
+                    break
         if used > budget_bytes:
             return hits, "python (budget)"
     return hits, engine
@@ -1305,11 +1317,16 @@ def resolve_docs(entities: list[dict], search_stores: list[dict], root: Path,
                     patterns.append(v)
     hits, engine = search_docs(files, patterns, ignore_case=True, word=False, deadline=deadline)
     mtimes: dict[str, str | None] = {}
+    mtimes_ns: dict[str, int] = {}
 
     def t_of(f: Path) -> str | None:
         k = str(f)
         if k not in mtimes:
             mtimes[k] = mtime_date(f)
+            try:
+                mtimes_ns[k] = f.stat().st_mtime_ns
+            except OSError:
+                mtimes_ns[k] = 0
         return mtimes[k]
 
     out: dict[str, dict[str, list[dict]]] = {}
@@ -1336,9 +1353,18 @@ def resolve_docs(entities: list[dict], search_stores: list[dict], root: Path,
         for f, n, text, store in candidate_hits.get(e["name"], []):
             out.setdefault(norm(e["name"]), {}).setdefault(store, []).append(
                 _item(e["name"], "doc", text.strip(), f, n, t_of(f), root, status=status_for_line(text)))
+    # Order inside one entity and store: newest FILE first by full mtime (the
+    # displayed t is a date, and every file of a fresh checkout shares one), then
+    # the file that mentions the entity most, then path and line ascending. PR #308
+    # review round 4: a plain reverse sort on "date, src" kept the alphabetically
+    # last filler files and dropped the one answer file under a "newest first" header.
     for by_store in out.values():
         for lst in by_store.values():
-            lst.sort(key=lambda i: (i["t"] or "", i["src"]), reverse=True)
+            per_file: dict[str, int] = {}
+            for it in lst:
+                per_file[it["abs_src"]] = per_file.get(it["abs_src"], 0) + 1
+            lst.sort(key=lambda i: (-mtimes_ns.get(i["abs_src"], 0), -per_file[i["abs_src"]],
+                                    i["abs_src"], int(i["src"].rsplit(":", 1)[-1] or 0)))
     if engine == "none" and candidate_hits:
         engine = candidate_engine   # only the candidate pass ran (an index of 0)
     elif truncation_of(candidate_engine) and not truncation_of(engine):
