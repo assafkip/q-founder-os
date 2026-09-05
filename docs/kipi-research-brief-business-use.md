@@ -134,7 +134,7 @@ Kipi currently goes further on:
 - Memory outcomes and earned trust.
 - Cross-instance lesson publication with client-data gates.
 
-Source: `projects/Alice/q-system/output/plans/claudesidian-canonical-brief-2026-06-19.md`.
+This brief was written from one instance's own canonical brief. That file's path is instance-specific and is withheld from the skeleton on purpose (semantic containment, Gate 1.3b).
 
 ## Current Repo Corrections
 
