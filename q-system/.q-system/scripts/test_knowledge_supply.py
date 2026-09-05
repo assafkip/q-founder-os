@@ -1209,6 +1209,58 @@ def test_receipt_says_when_the_corpus_common_rule_cannot_run(tmp_path):
     assert b2["receipt"]["candidate_rule"]["applicable"] is True
 
 
+# PR #308 review round 2: truncation is one rule, the docs fold is bounded, one block per case.
+
+def test_truncated_docs_search_is_partial_never_full(tmp_path, monkeypatch):
+    root, q = make_instance(tmp_path)
+    (q / ".q-system" / "data").mkdir()
+    shutil.copy(INVESTIGATION_MANIFEST, q / ".q-system" / "data" / "knowledge-sources.json")
+    add_store(q, "case-001-foo-bar", "scope", "Dana Okafor briefed the Foo Bar victim list.")
+    for reason in ("grep (timeout)", "grep (deadline)", "python (budget)", "grep (hit cap)"):
+        monkeypatch.setattr(ks, "search_docs", lambda files, patterns, **kw: ([], reason))
+        b = run(root, "what do we know about Dana Okafor")
+        row = receipt_row(b, "docs")
+        assert row["searched"] == "partial" and row["problem"].startswith("partially searched ("), (reason, row)
+        assert b["coverage"]["verdict"] != "FULL" and "docs" in b["coverage"]["missing"], (reason, b["coverage"])
+        assert "partially searched" in b["coverage"]["missing_paths"]["docs"]
+
+
+def test_docs_hit_cap_bounds_the_fold(tmp_path, monkeypatch):
+    root, q = make_instance(tmp_path)
+    (q / "output" / "flood.md").write_text("".join(f"Dana Okafor line {i}\n" for i in range(3000)))
+    monkeypatch.setattr(ks, "MAX_DOC_HITS", 40)
+    b = run(root, "what do we know about Dana Okafor")
+    row = receipt_row(b, "docs")
+    assert "(hit cap)" in row["engine"] and row["searched"] == "partial", row
+    assert len(items_of(b, kind="doc")) <= 40
+    monkeypatch.setattr(ks.shutil, "which", lambda name: None)
+    b2 = run(root, "what do we know about Dana Okafor")
+    assert "(hit cap)" in receipt_row(b2, "docs")["engine"]
+
+
+def test_same_name_in_two_cases_renders_one_block_per_case(tmp_path):
+    root, q = make_instance(tmp_path)
+    a = add_store(q, "case-010-alpha", "scope", "alpha")
+    b_ = add_store(q, "case-020-bravo", "scope", "bravo")
+    _graph(a / "memory" / "graph.jsonl", [{"s": "John Smith", "p": "role", "o": "the victim in alpha", "t": "2026-09-01"}])
+    _graph(b_ / "memory" / "graph.jsonl", [{"s": "John Smith", "p": "role", "o": "the suspect in bravo", "t": "2026-09-02"}])
+    b = run(root, "what do we know about John Smith")
+    out = ks.render(b)
+    assert "== John Smith [case-010-alpha] ==" in out and "== John Smith [case-020-bravo] ==" in out
+    assert "\n== John Smith ==\n" not in out, "no project-level block when the project has nothing"
+    alpha = out.index("[case-010-alpha] ==")
+    bravo = out.index("[case-020-bravo] ==")
+    assert out.index("the victim in alpha") > alpha and out.index("the victim in alpha") < bravo
+    assert all(i["status"] == "KNOWN" for i in items_of(b, kind="graph")), "a case never supersedes another case"
+
+
+def test_project_block_comes_before_case_blocks(tmp_path):
+    root, q = make_instance(tmp_path)
+    add_store(q, "case-001-foo-bar", "scope", "Dana Okafor briefed the Foo Bar victim list.")
+    out = ks.render(run(root, "what do we know about Dana Okafor"))
+    assert out.index("== Dana Okafor ==") < out.index("== Dana Okafor [case-001-foo-bar] ==")
+
+
 # ---------------------------------------------------------------- the hook
 
 def run_hook(root: Path, prompt: str, extra_env: dict | None = None) -> subprocess.CompletedProcess:

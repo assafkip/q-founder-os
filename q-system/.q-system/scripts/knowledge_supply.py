@@ -117,6 +117,19 @@ DOC_MAX_BYTES_DEFAULT = 512 * 1024
 DOC_SCAN_BUDGET_BYTES = 3 * 1024 * 1024
 GREP_CHUNK = 400
 MAX_DOC_CANDIDATES = 6
+# Bounds on the docs pass. grep -m caps matches PER FILE; MAX_DOC_HITS caps the
+# lines the fold will look at at all. PR #308 review round 2: an entity with a
+# hit on most lines of a large corpus ran the fold for 8.46 s and 1.1 GB, past
+# both the 3.5 s deadline and the 5 s hook timeout, because every bound sat
+# BEFORE the fold and none inside it.
+GREP_MAX_PER_FILE = 200
+MAX_DOC_HITS = 20000
+# Every way a search can stop early, as the suffix the engine string carries.
+# ONE chokepoint (class_search_state) turns any of them into searched=partial
+# and, for a required class, a missing entry; PR #308 review rounds 1 and 2
+# found the same defect on two paths (deadline before the class, then grep
+# timeout / byte budget inside it), which is the signal for one rule, not two.
+TRUNCATION_MARKERS = ("(deadline)", "(timeout)", "(budget)", "(hit cap)")
 # A prompt word that hits in more than this many stores is a word this corpus
 # uses everywhere (Facebook, Miami across 27 of 43 cases, measured 2026-09-05),
 # not a subject. It is dropped and named in the receipt; naming a case first
@@ -1122,7 +1135,7 @@ def _grep(files: list[Path], patterns: list[str], *, ignore_case: bool, word: bo
     binary = grep_binary()
     if binary is None or not files or not patterns:
         return None if binary is None else ([], "grep")
-    args = [binary, "-n", "-H", "-I", "-F"] + (["-i"] if ignore_case else []) + (["-w"] if word else [])
+    args = [binary, "-n", "-H", "-I", "-F", "-m", str(GREP_MAX_PER_FILE)] + (["-i"] if ignore_case else []) + (["-w"] if word else [])
     for pat in patterns:
         args += ["-e", pat]
     args.append("--")
@@ -1144,6 +1157,8 @@ def _grep(files: list[Path], patterns: list[str], *, ignore_case: bool, word: bo
             m = HIT_RE.match(line)
             if m:
                 hits.append((Path(m.group("path")), int(m.group("n")), m.group("text")))
+                if len(hits) >= MAX_DOC_HITS:
+                    return hits, "grep (hit cap)"
     return hits, engine
 
 
@@ -1167,9 +1182,28 @@ def _pyscan(files: list[Path], patterns: list[str], *, ignore_case: bool, word: 
         for n, line in enumerate(data.splitlines(), start=1):
             if pat.search(line):
                 hits.append((f, n, line))
+                if len(hits) >= MAX_DOC_HITS:
+                    return hits, "python (hit cap)"
         if used > budget_bytes:
             return hits, "python (budget)"
     return hits, engine
+
+
+def truncation_of(engine: str | None) -> str | None:
+    """The reason a docs pass stopped early, or None when it ran to the end."""
+    for marker in TRUNCATION_MARKERS:
+        if marker in (engine or ""):
+            return marker.strip("()")
+    return None
+
+
+def class_search_state(stopped_cold: bool, truncated: str | None) -> bool | str:
+    """THE one place that says how far a class was searched: False (never
+    started), "partial" (started and cut short, for any reason), True. A class
+    that is not True never counts toward FULL."""
+    if stopped_cold:
+        return False
+    return "partial" if truncated else True
 
 
 def search_docs(files: list[Path], patterns: list[str], *, ignore_case: bool, word: bool,
@@ -1229,7 +1263,10 @@ def search_docs_for_candidates(cands: list[str], search_stores: list[dict], root
     files = [Path(f) for f in file_store]
     hits, engine = search_docs(files, cands, ignore_case=False, word=True, deadline=deadline)
     out: dict[str, list[tuple[Path, int, str, str]]] = {}
-    for f, n, text in hits:
+    for i, (f, n, text) in enumerate(hits):
+        if i % 500 == 0 and time.time() > deadline and not truncation_of(engine):
+            engine += " (deadline)"
+            break
         s = text.strip()
         if not s or s.startswith("#"):
             continue
@@ -1267,7 +1304,10 @@ def resolve_docs(entities: list[dict], search_stores: list[dict], root: Path,
         return mtimes[k]
 
     out: dict[str, dict[str, list[dict]]] = {}
-    for f, n, text in hits:
+    for i, (f, n, text) in enumerate(hits):
+        if i % 500 == 0 and time.time() > deadline and not truncation_of(engine):
+            engine += " (deadline)"
+            break
         s = text.strip()
         if not s:
             continue
@@ -1287,6 +1327,8 @@ def resolve_docs(entities: list[dict], search_stores: list[dict], root: Path,
             lst.sort(key=lambda i: (i["t"] or "", i["src"]), reverse=True)
     if engine == "none" and candidate_hits:
         engine = candidate_engine   # only the candidate pass ran (an index of 0)
+    elif truncation_of(candidate_engine) and not truncation_of(engine):
+        engine += f" (candidates {truncation_of(candidate_engine)})"
     return out, {"files": len(files), "engine": engine}
 
 
@@ -1358,7 +1400,7 @@ def assemble(items: list[dict], entities: list[dict], ceiling: int, header_len: 
             continue
         seen.add(key)
         deduped.append(it)
-    deduped.sort(key=lambda i: (order.get(norm(i["entity"]), 99), TIER.get(i["kind"], 9)))  # stable: resolver order survives inside a tier (open commitments first, newest first)
+    deduped.sort(key=item_order(order))  # stable: resolver order survives inside a tier (open commitments first, newest first)
     pinned: set[int] = set()
     seen_ent: set[str] = set()
     for idx, it in enumerate(deduped):
@@ -1392,8 +1434,24 @@ def assemble(items: list[dict], entities: list[dict], ceiling: int, header_len: 
         else:
             cut += 1
             ceiling_hit = True
-    kept.sort(key=lambda i: (order.get(norm(i["entity"]), 99), TIER.get(i["kind"], 9)))  # stable: resolver order survives inside a tier (open commitments first, newest first)
+    kept.sort(key=item_order(order))  # stable: resolver order survives inside a tier (open commitments first, newest first)
     return kept, cut, ceiling_hit
+
+
+def item_order(order: dict[str, int]):
+    """Entity, then the project block before each case block, then tier. A name
+    carried by two cases is two blocks, never one identity: PR #308 review
+    round 2 showed two different people called the same thing in two cases
+    rendering as one heading with contradictory KNOWN facts."""
+    def key(i: dict):
+        store = i.get("store") or PROJECT_STORE
+        return (order.get(norm(i["entity"]), 99), 0 if store == PROJECT_STORE else 1, store, TIER.get(i["kind"], 9))
+    return key
+
+
+def block_label(it: dict) -> str:
+    store = it.get("store") or PROJECT_STORE
+    return it["entity"] if store == PROJECT_STORE else f"{it['entity']} [{store}]"
 
 
 def render_item(it: dict) -> str:
@@ -1463,8 +1521,9 @@ def render(bundle: dict) -> str:
     parts = [render_header(bundle)]
     current = None
     for it in bundle["items"]:
-        if it["entity"] != current:
-            current = it["entity"]
+        label = block_label(it)
+        if label != current:
+            current = label
             parts.append(f"== {current} ==")
         parts.append(render_item(it))
     d = bundle["delegated"]
@@ -1779,9 +1838,20 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
         # PR #308 review round 1 minor 3: the investigation manifest lists docs
         # first and alone under temporal_event, so this one row decided FULL.
         stopped_cold = bool(deadline_hit and deadline_hit["at_class"] == cls and present and not searched_any)
-        if stopped_cold and spec.get("required") and cls not in missing:
+        # `cut_reason`, never `truncated`: that name is the PROMPT truncation
+        # flag in this scope, and shadowing it blanked the receipt's prompt
+        # fields (caught by test_large_paste_against_big_index_is_fast_and_truncated).
+        cut_reason = None
+        if present and not stopped_cold:
+            if cls == "docs":
+                cut_reason = truncation_of(docs_meta.get("engine"))
+            elif deadline_hit and deadline_hit["at_class"] == cls:
+                cut_reason = "deadline"
+        searched_state = class_search_state(stopped_cold, cut_reason)
+        if searched_state is not True and present and spec.get("required") and cls not in missing:
             missing.append(cls)
-            missing_paths[cls] = f"{path_s or cls} not searched (deadline)"
+            missing_paths[cls] = (f"{path_s or cls} not searched (deadline)" if stopped_cold
+                                  else f"{path_s or cls} partially searched ({cut_reason})")
         src_path = Path(root) / path_s if path_s and cls not in ("canonical", "capability", "docs") else None
         store_problems = "; ".join(f"{s['name']}: {s['problems'][cls]}" for s in search_stores if cls in s["problems"]) or None
         row = {
@@ -1791,11 +1861,13 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
             "bytes": sum(len(i["text"]) for i in cls_items),
             "bad_lines": sum(s["bad_lines"].get(cls, 0) for s in search_stores),
             "problem": store_problems,
-            "searched": False if stopped_cold else ("partial" if (deadline_hit and deadline_hit["at_class"] == cls) else True),
+            "searched": searched_state,
             "stores_searched": 0 if stopped_cold else len(search_stores), "stores_hit": sorted(stores_hit),
         }
         if stopped_cold:
             row["problem"] = "not searched (deadline)"
+        elif cut_reason:
+            row["problem"] = f"partially searched ({cut_reason})"
         if cls == "docs":
             row["files"] = docs_meta.get("files", sum(len(s.get("doc_files") or []) for s in search_stores))
             row["engine"] = docs_meta.get("engine")
