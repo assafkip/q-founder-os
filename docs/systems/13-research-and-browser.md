@@ -14,7 +14,7 @@ research.
 flowchart TB
     subgraph lanes [Read lanes]
         BS[browser_session.py: the ONLY file that opens a research browser; login, probe, fetch, record]
-        RR[reddit_read.py: plain HTTP, no browser, no account; .rss feeds because .json is blocked fleet-wide]
+        RR[reddit_read.py: no browser, no account; every read goes through the Arctic Shift transport]
         FC[firecrawl-scrape.py: scrape-to-file of a page's full markdown]
         PDF[pdf-extract.py: token-aware extraction of a large PDF]
     end
@@ -79,7 +79,7 @@ profile.
 ## Every piece
 
 - `browser_session.py`: `login`, `probe`, `fetch`, `record`; `assert_fetchable`; `codegen_argv`. The record lane exists so a click path can be taught by walking it once. A wrapping MCP tool that accepted an agent-supplied output path was built and reverted (an arbitrary file write); the founder's decision in commit cebff6d1 keeps the MCP surface read-only.
-- `reddit_read.py`: `.rss` threads and listings; the reference implementation for the reddit-build-radar instance; blocked-JSON lesson recorded in memory.
+- `reddit_read.py`: threads and listings, the reference implementation for the reddit-build-radar instance. Since PR #307 it loads the `reddit_arctic` transport from the kipi-core plugin and refuses to run without it: Arctic Shift is the only way this fleet reads Reddit (founder-directed 2026-09-04). `reddit-transport-audit.py` is that rule as a check, walking the corpus for any other Reddit fetch and exiting 1, wired into pre-commit; `test_reddit_transport_audit.py` proves it flags a reintroduced violation before it proves the clean shape passes, and `test_competitive_intel_reddit_failures.py` pins the failure semantics the competitive-intel tool gained in the same PR, placed under q-system because the plugin's own suite skips itself when its dependencies are absent (sp-97ce589b).
 - `firecrawl-scrape.py`: fails closed on an empty result; CJK-safe filenames; key from the environment only.
 - `pdf-extract.py`: deterministic extraction sized to a token budget; used by the AI Index comparison.
 - `web_read.py` and the four tools `kipi_browser_fetch`, `kipi_browser_probe`, `kipi_reddit_thread`, `kipi_reddit_listing` (page 11).

@@ -4,7 +4,7 @@
 
 Every test file, so a reader can find the proof behind a script. A script with no test here has no proof beyond its own run.
 
-Count: 272
+Count: 274
 
 | Name | Path | Purpose |
 |---|---|---|
@@ -225,6 +225,7 @@ Count: 272
 | `test_capability_gate_inert_closure.py` | `q-system/.q-system/tests/test_capability_gate_inert_closure.py` | The inert-engine check's wired-closure must cross the plugin boundary. |
 | `test_capmap_scratch_and_mention.py` | `q-system/.q-system/tests/test_capmap_scratch_and_mention.py` | A committed scratch tree is not a capability, and a mention is not a test. |
 | `test_claude_path_write_guard.py` | `q-system/.q-system/tests/test_claude_path_write_guard.py` | claude-path-write-guard must block writes and nothing else. |
+| `test_competitive_intel_reddit_failures.py` | `q-system/.q-system/tests/test_competitive_intel_reddit_failures.py` | The failure semantics competitive_intel gained in PR 307, tested where CI runs. |
 | `test_consulting_board.py` | `q-system/.q-system/tests/test_consulting_board.py` | The consulting morning board: mirror, never a second derivation (2026-09-03). |
 | `test_decision_corpus_cost.py` | `q-system/.q-system/tests/test_decision_corpus_cost.py` | RED FIRST. Issue mbl-two-measurements (plan 2h, Codex finding-16). The cost |
 | `test_draft_vs_sent.py` | `q-system/.q-system/tests/test_draft_vs_sent.py` | RED FIRST. Issue mbl-draft-sent-pairing (prd-morning-brief-learns, Codex |
@@ -250,6 +251,7 @@ Count: 272
 | `test_permission_ask_counter.py` | `q-system/.q-system/tests/test_permission_ask_counter.py` | RED FIRST. Issue mbl-two-measurements (plan 2i). The counter is advisory and |
 | `test_promotion_receipt.py` | `q-system/.q-system/tests/test_promotion_receipt.py` | RED FIRST. The promotion path (prd-lessons-rail-and-up-rail, Phase 4), one |
 | `test_reddit_read.py` | `q-system/.q-system/tests/test_reddit_read.py` | The Reddit read lane: an HTTP client with an honest User-Agent. |
+| `test_reddit_transport_audit.py` | `q-system/.q-system/tests/test_reddit_transport_audit.py` | The audit has to FAIL on a reintroduced violation, or its zero means nothing. |
 | `test_roadmap_scope.py` | `q-system/.q-system/tests/test_roadmap_scope.py` | RED FIRST. Issue mbl-roadmap-scope-classifier (prd-morning-brief-learns, |
 | `test_roadmap_scope_suite.py` | `q-system/.q-system/tests/test_roadmap_scope_suite.py` | RED FIRST. Issue mbl-roadmap-scope-paraphrase-suite (Codex finding-12 on |
 | `test_route_overrides_to_learn.py` | `q-system/.q-system/tests/test_route_overrides_to_learn.py` | RED FIRST. Issue mbl-weekly-improve-runner (prd-morning-brief-learns, Codex |

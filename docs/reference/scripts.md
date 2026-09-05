@@ -4,7 +4,7 @@
 
 Every executable script in the live tree (q-system/.q-system, q-system/hooks, scripts/, and the repo root), with the first line of its own docstring or header comment.
 
-Count: 229
+Count: 230
 
 | Name | Path | Purpose |
 |---|---|---|
@@ -175,6 +175,7 @@ Count: 229
 | `publish-reconciliation.py` | `q-system/.q-system/scripts/publish-reconciliation.py` | Deterministic publish reconciliation. |
 | `read-first-gate.py` | `q-system/.q-system/scripts/read-first-gate.py` | read-first-gate: the first write of a session waits until the required reading |
 | `receipts-ledger-check.py` | `q-system/.q-system/scripts/receipts-ledger-check.py` | Gate the ONE .jsonl file allowed past blocked-paths, on content not on trust. |
+| `reddit-transport-audit.py` | `q-system/.q-system/scripts/reddit-transport-audit.py` | Arctic Shift is the only way this fleet scrapes Reddit. This is the check. |
 | `reddit_read.py` | `q-system/.q-system/scripts/reddit_read.py` | Read Reddit threads over plain HTTP. No browser, no profile, no session. |
 | `repo-preflight.sh` | `q-system/.q-system/scripts/repo-preflight.sh` | Decide whether an autonomous dispatcher may ENTER a repo. Exit 0 = may enter. |
 | `repo-slug-lib.sh` | `q-system/.q-system/scripts/repo-slug-lib.sh` | THE ONE PLACE a GitHub owner/repo slug is derived, and the one place a review |

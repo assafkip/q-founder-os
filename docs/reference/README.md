@@ -4,8 +4,8 @@
 
 Generated from the code. Each page lists every surface of one class; the coverage gate regenerates and diffs them.
 
-- [Every script](scripts.md) (229)
-- [Every test](tests.md) (272)
+- [Every script](scripts.md) (230)
+- [Every test](tests.md) (274)
 - [Every MCP tool](mcp-tools.md) (73)
 - [Every MCP resource](mcp-resources.md) (6)
 - [Every slash command](commands.md) (21)
