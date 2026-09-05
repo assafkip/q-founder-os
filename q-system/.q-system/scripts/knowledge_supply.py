@@ -730,9 +730,13 @@ def load_stores(qroot: Path, root: Path, manifest: dict | None = None,
             for line in read_lines(paths["relationships"]):
                 if line.startswith("### "):
                     head = line[4:].split("<!--")[0]
-                    name = re.split(r"\s+[—–-]\s+", head, maxsplit=1)[0].strip()
-                    if name and not name.startswith("["):
-                        contact_names.append(name)
+                    # `contact`, never `name`: that is this function's store-name
+                    # parameter, and rebinding it here made the sub-store exclusion
+                    # below compare against the last contact heading instead
+                    # (PR #308 review round 3).
+                    contact = re.split(r"\s+[—–-]\s+", head, maxsplit=1)[0].strip()
+                    if contact and not contact.startswith("["):
+                        contact_names.append(contact)
         except OSError as exc:
             problems["relationships"] = str(exc)
     stores["contact_names"] = contact_names
@@ -1264,8 +1268,13 @@ def search_docs_for_candidates(cands: list[str], search_stores: list[dict], root
     hits, engine = search_docs(files, cands, ignore_case=False, word=True, deadline=deadline)
     out: dict[str, list[tuple[Path, int, str, str]]] = {}
     for i, (f, n, text) in enumerate(hits):
-        if i % 500 == 0 and time.time() > deadline and not truncation_of(engine):
-            engine += " (deadline)"
+        # The deadline ALWAYS ends the fold; the suffix is only added when the
+        # engine string does not already carry a stop reason. PR #308 review
+        # round 3: with the guard on the whole condition, a search that had
+        # already hit the cap ran the fold unbounded past the hook timeout.
+        if i % 500 == 0 and time.time() > deadline:
+            if not truncation_of(engine):
+                engine += " (deadline)"
             break
         s = text.strip()
         if not s or s.startswith("#"):
@@ -1305,8 +1314,13 @@ def resolve_docs(entities: list[dict], search_stores: list[dict], root: Path,
 
     out: dict[str, dict[str, list[dict]]] = {}
     for i, (f, n, text) in enumerate(hits):
-        if i % 500 == 0 and time.time() > deadline and not truncation_of(engine):
-            engine += " (deadline)"
+        # The deadline ALWAYS ends the fold; the suffix is only added when the
+        # engine string does not already carry a stop reason. PR #308 review
+        # round 3: with the guard on the whole condition, a search that had
+        # already hit the cap ran the fold unbounded past the hook timeout.
+        if i % 500 == 0 and time.time() > deadline:
+            if not truncation_of(engine):
+                engine += " (deadline)"
             break
         s = text.strip()
         if not s:

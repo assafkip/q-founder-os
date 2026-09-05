@@ -1261,6 +1261,39 @@ def test_project_block_comes_before_case_blocks(tmp_path):
     assert out.index("== Dana Okafor ==") < out.index("== Dana Okafor [case-001-foo-bar] ==")
 
 
+# PR #308 review round 3: the fold's deadline always ends it; the project walk never enters a case.
+
+def test_docs_fold_stops_at_the_deadline_even_after_a_hit_cap(tmp_path, monkeypatch):
+    import time as _time
+    root, q = make_instance(tmp_path)
+    (q / "output" / "one.md").write_text("Dana Okafor line\n")
+    manifest, _ = ks.load_manifest(q, root)
+    project, subs, _ = ks.load_all_stores(q, root, manifest)
+    ent = {"name": "Dana Okafor", "kind": "contact", "aliases": [], "alias_stores": {}, "stores": []}
+    f = q / "output" / "one.md"
+    flood = [(f, 1, "Dana Okafor line")] * 200_000
+    for engine_in in ("grep (hit cap)", "grep"):
+        monkeypatch.setattr(ks, "search_docs", lambda files, patterns, **kw: (flood, engine_in))
+        t0 = _time.time()
+        out, meta = ks.resolve_docs([ent], [project] + subs, root, {}, deadline=_time.time() - 1)
+        assert _time.time() - t0 < 1.0, "the fold must end at the deadline, not after 200,000 hits"
+        assert sum(len(v) for by in out.values() for v in by.values()) <= 500
+        assert "(deadline)" in meta["engine"] or "(hit cap)" in meta["engine"]
+        if engine_in == "grep (hit cap)":
+            assert meta["engine"] == "grep (hit cap)", "an existing stop reason is kept, not doubled"
+
+
+def test_project_store_never_indexes_a_substore_target(tmp_path):
+    root, q = make_instance(tmp_path)   # relationships.md present: the loop that used to rebind `name`
+    s = add_store(q, "case-003-x-case", "scope", "finding")
+    (s / "investigation" / "targets" / "acme-corp.md").write_text("# acme-corp\n")
+    manifest, _ = ks.load_manifest(q, root)
+    project, subs, _ = ks.load_all_stores(q, root, manifest)
+    assert project["name"] == "project" and "acme corp" not in project["target_names"], project["target_names"]
+    assert subs[0]["target_names"] == ["acme corp"]
+    assert not any("case-003-x-case" in str(f) for f in project["doc_files"])
+
+
 # ---------------------------------------------------------------- the hook
 
 def run_hook(root: Path, prompt: str, extra_env: dict | None = None) -> subprocess.CompletedProcess:
