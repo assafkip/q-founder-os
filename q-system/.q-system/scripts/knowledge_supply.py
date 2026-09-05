@@ -604,7 +604,12 @@ def is_initial_position(text: str, pos: int) -> bool:
 def entity_matches(entity: dict, text: str, store: str | None = None) -> bool:
     """Content-side match. The name matches anywhere; an alias matches only
     content in a store that asserted it (or anywhere, when the project store
-    asserted it, or when the caller has no store to name)."""
+    asserted it, or when the caller has no store to name). A prompt-driven
+    candidate was admitted case-sensitively and whole-word; it is matched the
+    same way by EVERY resolver, or a capitalized common word pulls unrelated
+    lowercase lines labelled KNOWN (PR #308 review round 5)."""
+    if entity.get("case_sensitive"):
+        return word_in_exact(entity["name"], text)
     if phrase_in(entity["name"], norm(text)):
         return True
     scopes = entity.get("alias_stores") or {}
@@ -1733,7 +1738,7 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
                     continue
                 entities.append({"name": cand, "kind": "docs_hit", "resolved_from": "docs",
                                  "ambiguous": False, "project": None, "orgs": [], "aliases": [],
-                                 "stores": [], "via_alias": None, "alias_stores": {}})
+                                 "stores": [], "via_alias": None, "alias_stores": {}, "case_sensitive": True})
     entities_dropped = [e["name"] for e in entities[MAX_ENTITIES:]]
     entities = entities[:MAX_ENTITIES]
     cap_hits = capability_hits(scan, capability_index(root)) if (CAPABILITY_RE.search(scan) and not entities) else []
@@ -1894,6 +1899,35 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
                                   else f"{path_s or cls} partially searched ({cut_reason})")
         src_path = Path(root) / path_s if path_s and cls not in ("canonical", "capability", "docs") else None
         store_problems = "; ".join(f"{s['name']}: {s['problems'][cls]}" for s in search_stores if cls in s["problems"]) or None
+        # present_of() asks "does ANY store in scope carry this class", which is
+        # the right question for ABSENT (a case with no graph.jsonl must not hide
+        # the project's). UNREADABLE is a different fact: a copy that exists and
+        # failed to parse was never searched, so the class is degraded no matter
+        # how many other copies read cleanly. PR #308 review round 5: a truncated
+        # graph in the one case that held the answer reported FULL because the
+        # project's graph parsed. The receipt carried the problem; the header,
+        # the only channel the model reads, did not.
+        # "Unreadable" means a store's WHOLE copy of the class: a parse failure on
+        # its ledger, or every file of the class in that store failing to read.
+        # One unreadable file among readable ones in a store stays a problem in
+        # the receipt and never a PARTIAL (PR #304 review, sp-ca1769db, pinned by
+        # test_unreadable_is_every_file_not_zero_hits).
+        # For a file-per-class store (canonical, handoff, relationships, decisions)
+        # the resolver records a per-FILE read error under the same problems key,
+        # so the ledger rule (a key in problems) applies only to the ledger
+        # classes; the file classes use read_stats and the all-failed test.
+        ledger_classes = ("graph", "commitments", "meetings", "loops")
+        unreadable_in = [s["name"] for s in search_stores if cls in ledger_classes and cls in s["problems"]]
+        for s in search_stores:
+            rs_s = s.get("read_stats", {}).get(cls)
+            if rs_s and rs_s["files"] and rs_s["failed"] >= rs_s["files"] and s["name"] not in unreadable_in:
+                unreadable_in.append(s["name"])
+        if present and unreadable_in:
+            if searched_state is True:
+                searched_state = "partial"
+            if spec.get("required") and cls not in missing:
+                missing.append(cls)
+                missing_paths[cls] = f"{path_s or cls} unreadable in {', '.join(unreadable_in)}"
         row = {
             "class": cls, "path": path_s, "present": present, "required": bool(spec.get("required")),
             "mtime": mtime_date(src_path) if src_path and src_path.exists() else None,

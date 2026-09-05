@@ -1339,6 +1339,39 @@ def test_docs_order_is_file_time_then_mentions_never_path(tmp_path):
     assert "b-newer.md" in items_of(b2, kind="doc")[0]["src"], "a file one minute newer on the same date wins"
 
 
+# PR #308 review round 5: unreadable anywhere in scope is never FULL; a candidate stays case-sensitive.
+
+def test_unreadable_copy_in_one_store_is_never_full(tmp_path):
+    root, q = make_instance(tmp_path)
+    s = add_store(q, "case-045-zeta", "scope", "finding")
+    _graph(s / "memory" / "graph.jsonl", [{"s": "Dana Okafor", "p": "status", "o": "sanctioned in zeta", "t": "2026-09-05"}])
+    ok = run(root, "what do we know about Dana Okafor")
+    assert ok["coverage"]["verdict"] == "FULL", "control: a readable case graph is FULL"
+    (s / "memory" / "graph.jsonl").write_text('{"s": "Dana Okafor", "p": "status", "o": "sanct\n')   # a killed writer
+    b = run(root, "what do we know about Dana Okafor")
+    assert b["coverage"]["verdict"] != "FULL", b["coverage"]
+    assert b["coverage"]["missing_paths"]["graph"].endswith("unreadable in case-045-zeta")
+    row = receipt_row(b, "graph")
+    assert row["present"] is True and row["searched"] == "partial" and "case-045-zeta: unreadable" in row["problem"]
+    assert "unreadable in case-045-zeta" in ks.render(b).splitlines()[0], "the header, not only the receipt, says it"
+    # the mirror image: the PROJECT graph corrupt, one healthy case, still never FULL
+    (s / "memory" / "graph.jsonl").write_text(json.dumps({"s": "Dana Okafor", "p": "owns", "o": "zeta", "t": "2026-09-05"}) + "\n")
+    (q / "memory" / "graph.jsonl").write_text("{not json\n{still not\n")
+    b2 = run(root, "what do we know about Dana Okafor")
+    assert b2["coverage"]["verdict"] != "FULL" and "unreadable in project" in b2["coverage"]["missing_paths"]["graph"]
+
+
+def test_docs_candidate_stays_case_sensitive_in_every_resolver(tmp_path):
+    root, q = make_bare_instance(tmp_path)
+    (q / "canonical" / "client-profile.md").write_text("# Client\n\nthe bluepeak channel is closed for now.\n")
+    b = run(root, "what did Bluepeak ask for")
+    ent = next(e for e in b["entities"] if e["name"] == "Bluepeak")
+    assert ent["case_sensitive"] is True
+    texts = [i["text"] for i in b["items"]]
+    assert "Bluepeak asked for a name column on the intake form." in texts
+    assert not any("bluepeak channel" in t for t in texts), texts
+
+
 # ---------------------------------------------------------------- the hook
 
 def run_hook(root: Path, prompt: str, extra_env: dict | None = None) -> subprocess.CompletedProcess:
