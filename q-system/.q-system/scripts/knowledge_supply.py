@@ -1146,8 +1146,11 @@ def grep_binary() -> str | None:
 HIT_RE = re.compile(r"^(?P<path>.+?):(?P<n>\d+):(?P<text>.*)$")
 
 
+GREP_ERR_RE = re.compile(r"^grep: (?P<path>.+?): (?P<err>.+)$")
+
+
 def _grep(files: list[Path], patterns: list[str], *, ignore_case: bool, word: bool,
-          deadline: float) -> tuple[list[tuple[Path, int, str]], str] | None:
+          deadline: float, failed: list[Path] | None = None) -> tuple[list[tuple[Path, int, str]], str] | None:
     """One fixed-string grep over the files, chunked. None when grep is not on
     PATH (the caller falls back to the Python scan). BSD grep 2.6 and GNU grep
     share every flag used here. The timeout is the remaining deadline, so a
@@ -1155,7 +1158,10 @@ def _grep(files: list[Path], patterns: list[str], *, ignore_case: bool, word: bo
     binary = grep_binary()
     if binary is None or not files or not patterns:
         return None if binary is None else ([], "grep")
-    args = [binary, "-n", "-H", "-I", "-F", "-m", str(GREP_MAX_PER_FILE)] + (["-i"] if ignore_case else []) + (["-w"] if word else [])
+    # -m is the cap PLUS ONE: a file that yields cap+1 lines was truncated, a file
+    # that yields exactly cap was read to its end (PR #308 review round 7: the
+    # cap fired at exactly 200 matches and reported PARTIAL for nothing unread).
+    args = [binary, "-n", "-H", "-I", "-F", "-m", str(GREP_MAX_PER_FILE + 1)] + (["-i"] if ignore_case else []) + (["-w"] if word else [])
     for pat in patterns:
         args += ["-e", pat]
     args.append("--")
@@ -1174,23 +1180,36 @@ def _grep(files: list[Path], patterns: list[str], *, ignore_case: bool, word: bo
             return hits, "grep (timeout)"
         except OSError:
             return None
+        # grep reports a file it could not open on stderr ("grep: <path>: No such
+        # file or directory") and exits 2. Those files were enumerated and never
+        # read; they go to the caller's `failed` list, the same read accounting
+        # every other class has (PR #308 review round 7: the docs class was the
+        # one required class with no read-failure path, and a file deleted
+        # between enumeration and the grep reported "searched, 0 hits").
+        if failed is not None and cp.returncode == 2 and cp.stderr:
+            for eline in cp.stderr.splitlines():
+                em = GREP_ERR_RE.match(eline.strip())
+                if em:
+                    failed.append(Path(em.group("path")))
         for line in cp.stdout.splitlines():
             m = HIT_RE.match(line)
             if m:
-                hits.append((Path(m.group("path")), int(m.group("n")), m.group("text")))
                 per_file[m.group("path")] = per_file.get(m.group("path"), 0) + 1
-                if per_file[m.group("path")] >= GREP_MAX_PER_FILE:
-                    # -m stopped reading that file: lines past the cap were never
-                    # looked at, which is a truncation like any other (PR #308
-                    # review round 4: the cap was silent and the receipt said FULL).
+                if per_file[m.group("path")] > GREP_MAX_PER_FILE:
+                    # the cap+1-th line: -m stopped reading that file, lines past
+                    # the cap were never looked at (PR #308 review round 4). The
+                    # extra line is not kept, so both engines return exactly cap.
                     engine = "grep (file cap)"
+                    continue
+                hits.append((Path(m.group("path")), int(m.group("n")), m.group("text")))
                 if len(hits) >= MAX_DOC_HITS:
                     return hits, "grep (hit cap)"
     return hits, engine
 
 
 def _pyscan(files: list[Path], patterns: list[str], *, ignore_case: bool, word: bool,
-            deadline: float, budget_bytes: int = DOC_SCAN_BUDGET_BYTES) -> tuple[list[tuple[Path, int, str]], str]:
+            deadline: float, budget_bytes: int = DOC_SCAN_BUDGET_BYTES,
+            failed: list[Path] | None = None) -> tuple[list[tuple[Path, int, str]], str]:
     """The grep-less path: same substring / whole-word semantics, bounded by a
     byte budget and the deadline, both reported in the engine string."""
     alts = "|".join(re.escape(p) for p in patterns)
@@ -1204,18 +1223,20 @@ def _pyscan(files: list[Path], patterns: list[str], *, ignore_case: bool, word: 
         try:
             data = f.read_text(encoding="utf-8", errors="replace")
         except OSError:
+            if failed is not None:
+                failed.append(f)   # counted, never swallowed (PR #308 review round 7)
             continue
         used += len(data)
         in_file = 0
         for n, line in enumerate(data.splitlines(), start=1):
             if pat.search(line):
-                hits.append((f, n, line))
                 in_file += 1
+                if in_file > GREP_MAX_PER_FILE:
+                    engine = "python (file cap)"   # parity with grep -m cap+1, and the same receipt
+                    break
+                hits.append((f, n, line))
                 if len(hits) >= MAX_DOC_HITS:
                     return hits, "python (hit cap)"
-                if in_file >= GREP_MAX_PER_FILE:
-                    engine = "python (file cap)"   # parity with grep -m, and the same receipt
-                    break
         if used > budget_bytes:
             return hits, "python (budget)"
     return hits, engine
@@ -1239,12 +1260,13 @@ def class_search_state(stopped_cold: bool, truncated: str | None) -> bool | str:
 
 
 def search_docs(files: list[Path], patterns: list[str], *, ignore_case: bool, word: bool,
-                deadline: float) -> tuple[list[tuple[Path, int, str]], str]:
+                deadline: float, failed: list[Path] | None = None) -> tuple[list[tuple[Path, int, str]], str]:
+    """`failed` collects the enumerated files the engine could not read."""
     if not files or not patterns:
         return [], "none"
-    r = _grep(files, patterns, ignore_case=ignore_case, word=word, deadline=deadline)
+    r = _grep(files, patterns, ignore_case=ignore_case, word=word, deadline=deadline, failed=failed)
     if r is None:
-        return _pyscan(files, patterns, ignore_case=ignore_case, word=word, deadline=deadline)
+        return _pyscan(files, patterns, ignore_case=ignore_case, word=word, deadline=deadline, failed=failed)
     return r
 
 
@@ -1331,7 +1353,25 @@ def resolve_docs(entities: list[dict], search_stores: list[dict], root: Path,
             for v in pattern_variants(nm):
                 if v not in patterns:
                     patterns.append(v)
-    hits, engine = search_docs(files, patterns, ignore_case=True, word=False, deadline=deadline)
+    failed: list[Path] = []
+    hits, engine = search_docs(files, patterns, ignore_case=True, word=False, deadline=deadline, failed=failed)
+    # The same read accounting every file class has: per store, the files the
+    # engine was asked to read and the ones it could not. A store whose every
+    # doc failed is unreadable (degrades the class); one failed among readable
+    # ones is a recorded problem (PR #304, sp-ca1769db). Counted whether or not
+    # the entity had a hit there: the engine was asked to read them all.
+    by_store_files: dict[str, set[str]] = {}
+    for f_s, st_name in file_store.items():
+        by_store_files.setdefault(st_name, set()).add(f_s)
+    for st in search_stores:
+        st_files = by_store_files.get(st["name"], set())
+        if not st_files:
+            continue
+        rs = st.setdefault("read_stats", {}).setdefault("docs", {"files": set(), "failed": set()})
+        rs["files"] |= st_files
+        rs["failed"] |= {str(f) for f in failed if str(f) in st_files}
+        if rs["failed"]:
+            st["problems"]["docs"] = f"{len(rs['failed'])} of {len(rs['files'])} doc file(s) unreadable"
     mtimes: dict[str, str | None] = {}
     mtimes_ns: dict[str, int] = {}
 
@@ -1550,6 +1590,7 @@ def render_header(bundle: dict) -> str:
     else:
         miss = "; ".join(f"{m} ({bundle['coverage']['missing_paths'].get(m, 'absent')})" for m in cov["missing"])
         line = f"[knowledge-supply] COVERAGE: {cov['verdict']}. missing: {miss}."
+    line += scope_note(cov)
     def suffix(e: dict) -> str:
         if e.get("kind") == "store" and e.get("stores"):
             return f" [{', '.join(e['stores'])}]"
@@ -1573,7 +1614,17 @@ def render_header(bundle: dict) -> str:
             "This layer never infers; anything you add beyond these lines is INFERRED and yours to label.")
 
 
+def scope_note(cov: dict) -> str:
+    """One clause naming what a named case left out of the search."""
+    if cov.get("scope"):
+        n = len(cov.get("stores_excluded") or [])
+        return f" scope: {', '.join(cov['scope'])} + project ({n} other store{'s' if n != 1 else ''} not searched)."
+    return ""
+
+
 def render(bundle: dict) -> str:
+    if bundle.get("note") and not bundle["items"]:
+        return bundle["note"]
     if not bundle["items"]:
         # An entity resolved and every declared store was searched and held
         # nothing: one line, not an 800-char header. Codex round 3 on PR #302.
@@ -1582,7 +1633,7 @@ def render(bundle: dict) -> str:
         cov = bundle["coverage"]
         ents = ", ".join(e["name"] for e in bundle["entities"]) or "none"
         miss = f" missing: {', '.join(cov['missing'])}." if cov["missing"] else ""
-        return (f"[knowledge-supply] COVERAGE: {cov['verdict']}. task={bundle['task_class']} entities={ents}. "
+        return (f"[knowledge-supply] COVERAGE: {cov['verdict']}.{scope_note(cov)} task={bundle['task_class']} entities={ents}. "
                 f"Searched, nothing recorded.{miss}{deadline_note(bundle)} receipt={bundle['receipt_path']}")
     parts = [render_header(bundle)]
     current = None
@@ -1738,22 +1789,32 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
     # it plus the project level; naming none searches every store.
     named_stores = {s for e in entities if e.get("kind") == "store" for s in (e.get("stores") or [])}
     search_stores = [project] + [s for s in substores if not named_stores or s["name"] in named_stores]
+    # What the scope left out is a fact on the wire, not only in the receipt:
+    # "payment fraud" in a prompt matched case-031-payment-fraud and silently
+    # dropped three cases that held the answer, under FULL (PR #308 review
+    # round 7). FULL now reads "FULL within case-031-...; N stores not searched".
+    stores_excluded = sorted(s["name"] for s in substores if named_stores and s["name"] not in named_stores)
     # Prompt-driven candidates against the project's own documents: what makes a
     # project with no graph and no relationships.md answer from its folder.
     candidate_hits: dict[str, list] = {}
     candidate_engine = "none"
+    candidate_pass_cut: str | None = None
     candidates_dropped: list[dict] = []
     docs_declared = any("docs" in (c.get("sources") or {}) for c in (manifest.get("classes") or {}).values())
     if docs_declared and not truncated:
         cands = doc_candidates(scan, entities, index)
         if cands:
             candidate_hits, candidate_engine = search_docs_for_candidates(cands, search_stores, root, deadline=t_deadline)
+            candidate_pass_cut = truncation_of(candidate_engine)
             for cand in cands:
                 hits = candidate_hits.get(cand) or []
                 if not hits:
                     continue
                 n_stores = len({h[3] for h in hits})
-                if n_stores > MAX_CANDIDATE_STORES:
+                # A store count over a hit set the engine cut short is not a
+                # count (PR #308 review round 7): the rule is then not applied,
+                # the candidate is admitted, and candidate_rule says why.
+                if n_stores > MAX_CANDIDATE_STORES and not candidate_pass_cut:
                     candidates_dropped.append({"candidate": cand, "stores": n_stores})
                     candidate_hits.pop(cand, None)
                     continue
@@ -1767,6 +1828,20 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
     if task_class == "none":
         if record:
             _record_misses(qroot, prompt, scan, truncated, entities, ts, session_id, candidates_dropped)
+        if candidates_dropped:
+            # Searched, found everywhere, not injected: still a line, never zero
+            # bytes (PR #308 review round 7). "I did not find it" and "I found it
+            # in 6 of 45 cases and held it back" are different sentences.
+            names = ", ".join(f"{d['candidate']} ({d['stores']} stores)" for d in candidates_dropped)
+            return {"task_class": "none", "window": None, "entities": [], "items": [],
+                    "coverage": {"verdict": "NONE", "missing": [], "missing_paths": {}},
+                    "conflicts": 0, "budget": {"ceiling": 0, "used": 0, "cut": 0},
+                    "delegated": {"lessons": "lessons-inject", "voice": "voice-dna-loader"},
+                    "receipt_path": rel(receipts_path, root), "deadline_hit": None, "entities_dropped": [],
+                    "note": (f"[knowledge-supply] searched the docs for {names}: corpus-common (more than "
+                             f"{MAX_CANDIDATE_STORES} stores), not injected; name a case to scope it. "
+                             f"receipt={rel(qroot / 'memory' / MISSES_NAME, root)}"),
+                    "receipt": {"task_class": "none", "candidates_dropped": candidates_dropped}}
         return None
 
     declared = (manifest.get("classes") or {}).get(task_class, {}).get("sources") or {}
@@ -1974,7 +2049,8 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
     bundle = {
         "task_class": task_class, "window": window,
         "entities": [{k: v for k, v in e.items() if k != "project"} | {"project": e.get("project")} for e in entities],
-        "coverage": {"verdict": verdict, "missing": missing, "missing_paths": missing_paths},
+        "coverage": {"verdict": verdict, "missing": missing, "missing_paths": missing_paths,
+                     "scope": sorted(named_stores), "stores_excluded": stores_excluded},
         "items": [], "conflicts": conflicts,
         "budget": {"ceiling": ceiling, "used": 0, "cut": 0},
         "delegated": {"lessons": "lessons-inject", "voice": "voice-dna-loader"},
@@ -1990,6 +2066,7 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
         "ts": ts, "session_id": session_id, "task_class": task_class, "prompt_hash": _hash(prompt),
         "entities": [e["name"] for e in entities], "window": window,
         "sources": source_rows, "declared_missing": missing, "coverage": verdict,
+        "scope": sorted(named_stores), "stores_excluded": stores_excluded,
         "conflicts": conflicts, "ceiling_hit": ceiling_hit, "overflow": overflow,
         "prompt_chars": len(prompt), "prompt_truncated": truncated,
         "deadline_hit": deadline_hit, "entities_dropped": entities_dropped,
@@ -2001,8 +2078,11 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
         # most files by design (measured 2026-09-05: one instance's client hit
         # 97 lines across its research and output), and dropping it would be
         # dropping the subject.
-        "candidate_rule": {"max_stores": MAX_CANDIDATE_STORES, "applicable": bool(substores),
-                           "note": None if substores else "single store: rule cannot run"},
+        "candidate_rule": {"max_stores": MAX_CANDIDATE_STORES,
+                           "applicable": bool(substores) and not candidate_pass_cut,
+                           "note": (None if (substores and not candidate_pass_cut)
+                                    else f"candidate pass truncated ({candidate_pass_cut}): rule not applied"
+                                    if substores else "single store: rule cannot run")},
         "items": len(kept), "bytes": bundle["budget"]["used"], "elapsed_ms": int((time.time() - t0) * 1000),
         "manifest": rel(manifest_path, root) if manifest_path else None,
     }

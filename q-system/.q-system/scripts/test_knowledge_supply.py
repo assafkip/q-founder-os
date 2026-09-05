@@ -1046,6 +1046,17 @@ def test_docs_engines_agree_on_the_per_file_cap_and_both_report_it(tmp_path, mon
     b = run(root, "what do we know about Dana Okafor")
     row = receipt_row(b, "docs")
     assert row["searched"] == "partial" and "file cap" in row["problem"], row
+    # exactly the cap is NOT a truncation (PR #308 review round 7 minor 4)
+    (q / "output" / "flood.md").write_text("".join(f"Dana Okafor line {i}\n" for i in range(ks.GREP_MAX_PER_FILE)))
+    project2, subs2, _ = ks.load_all_stores(q, root, manifest)
+    g2, e2 = ks.search_docs(project2["doc_files"], ["Dana Okafor"], ignore_case=True, word=False, deadline=dt.datetime.now().timestamp() + 5)
+    assert len(g2) == ks.GREP_MAX_PER_FILE and e2 == "grep", (len(g2), e2)
+    monkeypatch.setattr(ks.shutil, "which", lambda name: None)
+    p2, pe2 = ks.search_docs(project2["doc_files"], ["Dana Okafor"], ignore_case=True, word=False, deadline=dt.datetime.now().timestamp() + 5)
+    assert len(p2) == ks.GREP_MAX_PER_FILE and pe2 == "python", (len(p2), pe2)
+    monkeypatch.undo()
+    b2 = run(root, "what do we know about Dana Okafor")
+    assert receipt_row(b2, "docs")["searched"] is True
 
 
 def test_prompt_proper_noun_with_doc_hits_becomes_entity(tmp_path):
@@ -1133,7 +1144,9 @@ def test_corpus_common_word_is_dropped_unless_a_store_is_named(tmp_path):
     root, q = make_instance(tmp_path)
     for i in range(1, 7):
         add_store(q, f"case-00{i}-thing-{i}", "scope", f"Facebook profile checked in case {i}.")
-    assert run(root, "update on the Facebook profiles", record=True) is None, "a word in 6 of 6 cases is not a subject"
+    b0 = run(root, "update on the Facebook profiles", record=True)
+    assert b0 is not None and b0["items"] == [] and "corpus-common" in ks.render(b0) and "Facebook (6 stores)" in ks.render(b0), \
+        "a word in 6 of 6 cases is not a subject, and the hook still says it searched (round 7 minor 5)"
     rows = [json.loads(l) for l in (q / "memory" / ".knowledge-supply-misses.jsonl").read_text().splitlines()]
     assert any(r["candidate"] == "Facebook" and r["shape"] == "corpus_common" and r["stores"] == 6 for r in rows), rows
     b = run(root, "in thing 2, what did the Facebook profiles show")
@@ -1413,6 +1426,68 @@ def test_named_store_survives_the_longest_name_rule(tmp_path):
     assert any(e["kind"] == "store" and e["stores"] == ["case-010-zeta"] for e in b["entities"]), b["entities"]
     srcs = [i["src"] for i in b["items"]]
     assert srcs and not any("case-020-other" in s for s in srcs), srcs
+
+
+# PR #308 review round 7: docs read failures are counted; a scoped search says so; the rule declares itself.
+
+def test_unreadable_doc_files_are_counted_and_an_all_failed_store_degrades(tmp_path, monkeypatch):
+    root, q = make_instance(tmp_path)
+    (q / ".q-system" / "data").mkdir()
+    shutil.copy(INVESTIGATION_MANIFEST, q / ".q-system" / "data" / "knowledge-sources.json")
+    s = add_store(q, "case-001-foo-bar", "scope", "Dana Okafor briefed the Foo Bar victim list.")
+    (q / "output" / "ok.md").write_text("Dana Okafor ok\n")
+    only = s / "investigation" / "findings" / "finding-001.md"
+    for engine_off in (False, True):
+        if engine_off:
+            monkeypatch.setattr(ks.shutil, "which", lambda name: None)
+        only.chmod(0)
+        try:
+            b = run(root, "what do we know about Dana Okafor")
+        finally:
+            only.chmod(0o644)
+        row = receipt_row(b, "docs")
+        assert row["problem"] and "1 of 1 doc file(s) unreadable" in row["problem"], row
+        assert row["searched"] == "partial" and "case-001-foo-bar" in b["coverage"]["missing_paths"].get("docs", ""), b["coverage"]
+        assert b["coverage"]["verdict"] != "FULL"
+    # one unreadable among readable ones in the SAME store: recorded, never PARTIAL
+    (q / "output" / "bad.md").write_text("Dana Okafor bad\n")
+    (q / "output" / "bad.md").chmod(0)
+    only.chmod(0o644)
+    try:
+        b2 = run(root, "what do we know about Dana Okafor")
+    finally:
+        (q / "output" / "bad.md").chmod(0o644)
+    row2 = receipt_row(b2, "docs")
+    assert "1 of 2 doc file(s) unreadable" in (row2["problem"] or "") and row2["searched"] is True, row2
+
+
+def test_scoped_search_names_what_it_left_out(tmp_path):
+    root, q = make_instance(tmp_path)
+    for i in (1, 2, 3):
+        add_store(q, f"case-00{i}-thing-{i}", "scope", f"Dana Okafor fact {i}.")
+    add_store(q, "case-031-payment-fraud", "scope", "nothing here")
+    b = run(root, "for the payment fraud workstream, what do we know about Dana Okafor")
+    assert b["coverage"]["scope"] == ["case-031-payment-fraud"]
+    assert b["coverage"]["stores_excluded"] == ["case-001-thing-1", "case-002-thing-2", "case-003-thing-3"]
+    head = ks.render(b).splitlines()[0]
+    assert "scope: case-031-payment-fraud + project (3 other stores not searched)" in head, head
+    assert b["receipt"]["stores_excluded"] == b["coverage"]["stores_excluded"]
+    b2 = run(root, "what do we know about Dana Okafor")
+    assert b2["coverage"]["scope"] == [] and "scope:" not in ks.render(b2).splitlines()[0]
+
+
+def test_corpus_common_rule_declares_itself_inapplicable_when_the_candidate_pass_truncated(tmp_path, monkeypatch):
+    root, q = make_instance(tmp_path)
+    for i in range(1, 7):
+        add_store(q, f"case-00{i}-thing-{i}", "scope", "Wachovia Trust checked here.")
+    # Six stores, one line each, cap five: the cut hit set still spans five stores,
+    # so a rule applied over it WOULD drop the candidate; the correct code does not.
+    monkeypatch.setattr(ks, "MAX_DOC_HITS", 5)
+    b = run(root, "what do we know about Wachovia Trust and Dana Okafor")
+    rule = b["receipt"]["candidate_rule"]
+    assert rule["applicable"] is False and "candidate pass truncated" in rule["note"], rule
+    assert b["receipt"]["candidates_dropped"] == [], "a count over a cut hit set is not a count"
+    assert any(e["name"] == "Wachovia Trust" for e in b["entities"]), "admitted, and the receipt says the rule did not run"
 
 
 # ---------------------------------------------------------------- the hook
