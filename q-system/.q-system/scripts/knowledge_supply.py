@@ -563,7 +563,10 @@ def resolve_entities(prompt: str, index: dict[str, Entity], fire_alone: set[str]
     out.sort(key=lambda e: -len(e["name"]))
     kept: list[dict] = []
     for e in out:
-        if any(norm(e["name"]) != norm(k["name"]) and phrase_in(e["name"], norm(k["name"])) for k in kept):
+        # A store name that is a substring of another resolved name ("zeta" in
+        # "Zeta Holdings") is still the scope the founder named; dropping it
+        # silently widened the search to every case (PR #308 review round 6).
+        if e.get("kind") != "store" and any(norm(e["name"]) != norm(k["name"]) and phrase_in(e["name"], norm(k["name"])) for k in kept):
             continue
         kept.append(e)
     kept.sort(key=lambda e: prompt.casefold().find(e["name"].casefold()) if e["name"].casefold() in prompt.casefold() else 10**6)
@@ -801,7 +804,9 @@ def load_stores(qroot: Path, root: Path, manifest: dict | None = None,
     # its own call, and the project's rglob("*") over 4_points was 57,081
     # entries and 318 ms per prompt (measured 2026-09-05).
     exclude = {path for _, path in discover_stores(qroot, manifest or {})} if name == PROJECT_STORE else set()
-    stores["doc_files"] = enumerate_docs(qroot, folders, max_bytes, exclude) if folders else []
+    skipped: list[Path] = []
+    stores["doc_files"] = enumerate_docs(qroot, folders, max_bytes, exclude, skipped) if folders else []
+    stores["doc_skipped_oversize"] = skipped
     # A markdown file directly under a `targets`-style directory names a subject
     # of the work (4_points: investigation/targets/<subject>.md). Its stem is an
     # entity that fires alone; a finding or note file's stem never does.
@@ -847,7 +852,7 @@ def walk_dirs(base: Path, exclude: set[Path], max_depth: int):
 
 
 def enumerate_docs(store_dir: Path, folders: list[str], max_bytes: int,
-                   exclude: set[Path] | None = None) -> list[Path]:
+                   exclude: set[Path] | None = None, skipped: list[Path] | None = None) -> list[Path]:
     """The markdown files of a store's declared folders, in a stable order. Dot
     dirs, DOC_SKIP_DIRS, sub-store roots, dot files, files over max_bytes and
     last-handoff.md (the handoff class owns it) are skipped; the receipt's
@@ -868,6 +873,12 @@ def enumerate_docs(store_dir: Path, folders: list[str], max_bytes: int,
                 f = Path(dirpath) / fn
                 try:
                     if f.stat().st_size > max_bytes:
+                        # A declared exclusion (manifest doc_max_bytes), not a
+                        # truncation, so coverage stays FULL; the receipt counts
+                        # it so a reader can see what was never opened (PR #308
+                        # review round 6).
+                        if skipped is not None:
+                            skipped.append(f)
                         continue
                 except OSError:
                     continue
@@ -1370,11 +1381,18 @@ def resolve_docs(entities: list[dict], search_stores: list[dict], root: Path,
                 per_file[it["abs_src"]] = per_file.get(it["abs_src"], 0) + 1
             lst.sort(key=lambda i: (-mtimes_ns.get(i["abs_src"], 0), -per_file[i["abs_src"]],
                                     i["abs_src"], int(i["src"].rsplit(":", 1)[-1] or 0)))
+    # `stop` is the truth the class state reads; the engine string is display.
+    # Each pass is inspected on its own, so a composed label can never hide a
+    # stop: PR #308 review round 6 found "grep (candidates file cap)", built
+    # here in round 3, which the marker parser could not read, and a required
+    # docs class went FULL with 100 lines never looked at. Fourth path for the
+    # same class; the fix is a field, not another string format.
+    stop = truncation_of(engine) or truncation_of(candidate_engine)
     if engine == "none" and candidate_hits:
         engine = candidate_engine   # only the candidate pass ran (an index of 0)
     elif truncation_of(candidate_engine) and not truncation_of(engine):
-        engine += f" (candidates {truncation_of(candidate_engine)})"
-    return out, {"files": len(files), "engine": engine}
+        engine += f" (candidates: {candidate_engine})"
+    return out, {"files": len(files), "engine": engine, "stop": stop}
 
 
 def capability_index(root: Path) -> dict[str, list[tuple[Path, int, str]]]:
@@ -1440,7 +1458,10 @@ def assemble(items: list[dict], entities: list[dict], ceiling: int, header_len: 
             # Graph triples only: a relationship block is a 12-line excerpt by
             # design and was being cut at 600 (PR #304 review).
             it["text"] = it["text"][:ITEM_MAX_CHARS] + f" [cut at {ITEM_MAX_CHARS} chars; open src]"
-        key = (norm(it["entity"]), it["kind"], norm(it["text"]))   # sp-1b3ef442: a shared line stays under each named entity
+        # sp-1b3ef442: a shared line stays under each named entity; PR #308 review
+        # round 6: and under each STORE, or an identical line in two cases collapsed
+        # to one while the receipt said both stores hit and the footer said cut=0.
+        key = (norm(it["entity"]), it["kind"], norm(it["text"]), it.get("store"))
         if key in seen:
             continue
         seen.add(key)
@@ -1889,7 +1910,7 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
         cut_reason = None
         if present and not stopped_cold:
             if cls == "docs":
-                cut_reason = truncation_of(docs_meta.get("engine"))
+                cut_reason = docs_meta.get("stop")   # the field, never the display string
             elif deadline_hit and deadline_hit["at_class"] == cls:
                 cut_reason = "deadline"
         searched_state = class_search_state(stopped_cold, cut_reason)
@@ -1945,6 +1966,7 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
         if cls == "docs":
             row["files"] = docs_meta.get("files", sum(len(s.get("doc_files") or []) for s in search_stores))
             row["engine"] = docs_meta.get("engine")
+            row["files_skipped_oversize"] = sum(len(s.get("doc_skipped_oversize") or []) for s in search_stores)
         source_rows.append(row)
 
     verdict = "FULL" if not missing else ("NONE" if all(not r["present"] for r in source_rows) else "PARTIAL")

@@ -1085,6 +1085,7 @@ def test_docs_skip_big_hidden_and_node_modules(tmp_path):
     assert "Dana Okafor ok" in texts
     assert not any(t in texts for t in ("Dana Okafor big", "Dana Okafor hidden", "Dana Okafor node"))
     assert receipt_row(b, "docs")["files"] == 1
+    assert receipt_row(b, "docs")["files_skipped_oversize"] == 1, "a declared skip is counted, never silent"
 
 
 def test_docs_items_are_verbatim_and_dated_by_file(tmp_path):
@@ -1370,6 +1371,48 @@ def test_docs_candidate_stays_case_sensitive_in_every_resolver(tmp_path):
     texts = [i["text"] for i in b["items"]]
     assert "Bluepeak asked for a name column on the intake form." in texts
     assert not any("bluepeak channel" in t for t in texts), texts
+
+
+# PR #308 review round 6: the stop reason is a field; dedupe keeps stores apart; a store name survives.
+
+def test_candidate_pass_truncation_is_partial_without_monkeypatch(tmp_path):
+    """The reviewer's fixture: the index pass (Dana Okafor) finishes clean, the
+    candidate pass (Bluepeak, 300 lines) hits grep -m. No monkeypatch, so a
+    composed engine string cannot hide the stop the way it did in round 6."""
+    root, q = make_instance(tmp_path)
+    (q / ".q-system" / "data").mkdir()
+    shutil.copy(INVESTIGATION_MANIFEST, q / ".q-system" / "data" / "knowledge-sources.json")
+    (q / "output" / "flood.md").write_text("".join(f"Bluepeak asked line {i}\n" for i in range(300)))
+    b = run(root, "what did Bluepeak ask Dana Okafor about")
+    assert any(e["name"] == "Bluepeak" and e["kind"] == "docs_hit" for e in b["entities"])
+    row = receipt_row(b, "docs")
+    assert row["searched"] == "partial", row
+    assert "file cap" in row["problem"] and "candidates" in row["engine"], row
+    assert b["coverage"]["verdict"] != "FULL" and "docs" in b["coverage"]["missing"], b["coverage"]
+
+
+def test_identical_line_in_two_cases_keeps_both(tmp_path):
+    root, q = make_instance(tmp_path)
+    add_store(q, "case-010-alpha", "scope", "Dana Okafor reused the same bulletproof host.")
+    add_store(q, "case-041-beta", "scope", "Dana Okafor reused the same bulletproof host.")
+    b = run(root, "what do we know about Dana Okafor")
+    docs = [i for i in items_of(b, kind="doc") if "bulletproof" in i["text"]]
+    assert sorted(i["store"] for i in docs) == ["case-010-alpha", "case-041-beta"], [i["src"] for i in docs]
+    out = ks.render(b)
+    assert "[case-010-alpha] ==" in out and "[case-041-beta] ==" in out
+    assert b["budget"]["cut"] == 0
+
+
+def test_named_store_survives_the_longest_name_rule(tmp_path):
+    root, q = make_instance(tmp_path)
+    a = add_store(q, "case-010-zeta", "scope", "zeta finding")
+    b_ = add_store(q, "case-020-other", "scope", "other finding")
+    _graph(a / "memory" / "graph.jsonl", [{"s": "Zeta Holdings", "p": "status", "o": "sanctioned", "t": "2026-09-05"}])
+    _graph(b_ / "memory" / "graph.jsonl", [{"s": "Zeta Holdings", "p": "status", "o": "clean", "t": "2026-09-05"}])
+    b = run(root, "in zeta, what do we know about Zeta Holdings")
+    assert any(e["kind"] == "store" and e["stores"] == ["case-010-zeta"] for e in b["entities"]), b["entities"]
+    srcs = [i["src"] for i in b["items"]]
+    assert srcs and not any("case-020-other" in s for s in srcs), srcs
 
 
 # ---------------------------------------------------------------- the hook
