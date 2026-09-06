@@ -150,7 +150,7 @@ def select(rows, channel, counter, slot_index=0, k=DEFAULT_K, slot_kind="post",
 
     `counter` is how many posts this channel has already published (the postbook is
     the durable source); it advances the rotation so the next post sees a different
-    window. One `anchor: true` row is always included when any exists ("most Assaf"
+    window. One `anchor: true` row is always included when any exists ("most like the author"
     pieces stay in every prompt), rotated rather than pinned -- a pinned anchor is
     the same 3-exemplars-forever failure with extra steps.
 
