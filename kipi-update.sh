@@ -21,9 +21,17 @@ SKELETON_BRANCH="main"
 # staged rollout is the only safe way to ship anything with this blast radius.
 DRY_RUN=""
 ONLY=""
+# --refuse-instance-ahead: abandon an instance BEFORE its pre-sync commit when
+# the run would overwrite a file whose instance copy the skeleton never shipped
+# (see instance_ahead_scan). Off by default: fleet-wide the hit is usually
+# hook churn, and a refusal that fires on 24 instances gets switched off. The
+# consulting run script passes it, because there "ahead" has meant real work
+# every time (2026-09-06, three times in one day).
+REFUSE_INSTANCE_AHEAD=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN="--dry-run"; shift ;;
+    --refuse-instance-ahead) REFUSE_INSTANCE_AHEAD=1; shift ;;
     --only)
       ONLY="${2:-}"
       if [ -z "$ONLY" ]; then
@@ -34,7 +42,7 @@ while [ $# -gt 0 ]; do
       ;;
     *)
       echo "ERROR: unknown argument: $1" >&2
-      echo "Usage: kipi-update.sh [--dry-run] [--only <instance-name>]" >&2
+      echo "Usage: kipi-update.sh [--dry-run] [--only <instance-name>] [--refuse-instance-ahead]" >&2
       exit 1
       ;;
   esac
@@ -291,6 +299,101 @@ plugin_copy_rsync_flags() {
   local entry
   for entry in "${PLUGIN_COPY_EXCLUDES[@]}"; do
     printf -- '--exclude=%s\n' "${entry%%::*}"
+  done
+}
+
+# "Instance ahead of the skeleton" (sp-1ad08728): a file this run would
+# OVERWRITE whose instance copy is content the skeleton never shipped for that
+# path. Three times on 2026-09-06 the sync replaced exactly that and the
+# instance's own gates went red only after the rsync had landed: the voiceloop
+# engine (extra modules), voice-stop-gate.py (five extra defs, founder_typed_text
+# among them, port still on an open PR) and voice-lint's BANNED_WORDS (two
+# entries removed after measuring the founder's own corpus). Nothing in the
+# updater said so beforehand; the dry run listed the files as changes like any
+# other and the refusal came from a downstream gate with the damage done.
+#
+# The question is answered by fleet_authored_blob, the shipped-blob check the
+# updater already uses for authorship: bytes equal to ANY skeleton version of
+# the path are never "ahead" (a stale instance is behind, not ahead; a hook
+# that committed the updater's own bytes is neither). Only content the skeleton
+# never shipped counts, which is what makes this language-agnostic: a list, a
+# rule, a script all read the same way. The candidate set comes from the same
+# itemized rsync previews the real run uses, with the same excludes, so it
+# cannot drift from what the run would change.
+#
+# Report by default, one line per file, and again in the run summary next to
+# Updated/Failed, because a 1,100-line dry log hid rewritten=8 for a morning.
+# --refuse-instance-ahead turns a hit into an abandon BEFORE the pre-sync
+# commit: nothing staged, nothing deleted.
+INSTANCE_AHEAD_REPORT=""
+INSTANCE_AHEAD_TOTAL=0
+INSTANCE_AHEAD_HITS=0
+
+# $1 skeleton source dir for one scope, $2 the instance dir it lands in,
+# $3 the scope's skeleton-relative prefix (for fleet_authored_blob),
+# $4 the scope's instance-relative prefix ("" at the instance root),
+# $5 the instance root (for git ls-files), $6 the instance name,
+# $7.. the rsync flags the real run uses for this scope.
+instance_ahead_scan() {
+  local src="$1" dest="$2" skel_rel="$3" inst_rel="$4" root="$5" name="$6"
+  shift 6
+  [ -d "$src" ] && [ -d "$dest" ] || return 0
+  local line rel inst_file skel_file shown detail
+  while IFS= read -r line; do
+    case "$line" in
+      '>f+++++++++'*) continue ;;
+      '>f'*) ;;
+      *) continue ;;
+    esac
+    rel="${line#* }"
+    inst_file="$dest/$rel"
+    skel_file="$src/$rel"
+    [ -f "$inst_file" ] && [ -f "$skel_file" ] || continue
+    shown="$rel"
+    [ -n "$inst_rel" ] && shown="$inst_rel/$rel"
+    # Tracked only: an untracked or unstaged local edit is the dirty guard's
+    # business further down, and it refuses the whole instance.
+    git -C "$root" ls-files --error-unmatch -- "$shown" >/dev/null 2>&1 || continue
+    fleet_authored_blob "$skel_rel/$rel" "$inst_file" && continue
+    detail="$(python3 "$SCRIPT_DIR/kipi-update-instance-ahead.py" "$inst_file" "$skel_file" 2>/dev/null)" \
+      || detail="differs"
+    echo "  instance ahead: $shown ($detail)"
+    INSTANCE_AHEAD_HITS=$((INSTANCE_AHEAD_HITS + 1))
+    INSTANCE_AHEAD_TOTAL=$((INSTANCE_AHEAD_TOTAL + 1))
+    INSTANCE_AHEAD_REPORT="$INSTANCE_AHEAD_REPORT
+    - $name: $shown ($detail)"
+  done < <(rsync -ain "$src/" "$dest/" "$@" 2>/dev/null || true)
+}
+
+# Every scope the run writes, from the same sources: the skeleton's committed
+# q-system/ (git archive HEAD, as the real sync uses), each managed plugin from
+# the working tree (as the plugins rsync uses), and the three .claude/ md dirs
+# (copied per file). $1 instance path, $2 subtree prefix, $3 instance name.
+instance_ahead_preflight() {
+  local path="$1" prefix="$2" name="$3" src_tmp dest kind
+  INSTANCE_AHEAD_HITS=0
+  src_tmp="$(mktemp -d)"
+  if git -C "$SCRIPT_DIR" archive --format=tar HEAD -- q-system/ 2>/dev/null \
+      | tar -x -C "$src_tmp" 2>/dev/null; then
+    dest="$path"
+    [ -n "$prefix" ] && dest="$path/$prefix"
+    # shellcheck disable=SC2046
+    instance_ahead_scan "$src_tmp/q-system" "$dest" "q-system" "$prefix" "$path" "$name" \
+      $(rsync_owned_excludes)
+  else
+    echo "  WARN: instance-ahead scan skipped for q-system (archive export failed)"
+  fi
+  rm -r -- "$src_tmp"
+  if [ -d "$SKELETON_PLUGIN_ROOT" ]; then
+    while IFS= read -r -d '' plugin_name; do
+      # shellcheck disable=SC2046
+      instance_ahead_scan "$SKELETON_PLUGIN_ROOT/$plugin_name" "$path/plugins/$plugin_name" \
+        "plugins/$plugin_name" "plugins/$plugin_name" "$path" "$name" $(plugin_copy_rsync_flags)
+    done < <(managed_plugin_names)
+  fi
+  for kind in agents output-styles rules; do
+    instance_ahead_scan "$SCRIPT_DIR/.claude/$kind" "$path/.claude/$kind" ".claude/$kind" \
+      ".claude/$kind" "$path" "$name" --include='*.md' --exclude='*'
   done
 }
 
@@ -1783,6 +1886,15 @@ The file itself is untouched on disk." 2>/dev/null; then
       fi
     done < <(system_owned_paths_for_run)
 
+    # Before anything is committed or written: which files this run would
+    # overwrite carry content the skeleton never shipped (sp-1ad08728). Runs in
+    # every mode, so the plain dry run, the fleet dry sweep's model run and the
+    # apply all print the same lines.
+    instance_ahead_preflight "$path" "$prefix" "$name"
+    if [ "$REFUSE_INSTANCE_AHEAD" = "1" ] && [ "$INSTANCE_AHEAD_HITS" -gt 0 ]; then
+      abandon_instance "  ERROR: instance is ahead of the skeleton on $INSTANCE_AHEAD_HITS file(s); refusing (--refuse-instance-ahead), nothing staged, nothing written" && continue
+    fi
+
     # ASK-605. The list above is hand-maintained and names 3 paths. auto-commit.py's
     # classifier answers the SAME question -- "is this the system's own exhaust?" --
     # for the whole tree, and the two disagreed. `q-system/memory/open-loops.json`
@@ -2619,6 +2731,11 @@ fi
 echo "  Skipped: $SKIP"
 if [ -n "${GATE_FAIL:-}" ]; then
   echo "  CAPABILITY GATE RED in:$GATE_FAIL"
+fi
+# Repeated here on purpose: the per-instance line sits inside a section a
+# reader scrolls past, and the summary is what gets read.
+if [ "$INSTANCE_AHEAD_TOTAL" -gt 0 ]; then
+  echo "  INSTANCE AHEAD OF SKELETON ($INSTANCE_AHEAD_TOTAL file(s) whose instance content the skeleton never shipped; a sync overwrites them):$INSTANCE_AHEAD_REPORT"
 fi
 # In the summary, not only inline: a real run prints ~40 lines per instance and
 # the summary is what gets read. An ungoverned instance that only appears on
