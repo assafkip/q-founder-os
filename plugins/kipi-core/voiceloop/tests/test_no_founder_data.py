@@ -2,7 +2,7 @@
 """The METHOD/DATA boundary, held by a test and not a comment.
 
 Founder-decided split (voice-architecture PRD, 2026-08-06): the plugin ships the
-machinery fleet-wide; Assaf's corpus stays in his instance (`q-consult/voice/`).
+machinery fleet-wide; the operator's corpus stays in their own instance.
 kipi-system is a PUBLIC repo, so a corpus line leaking into this tree is not just
 architecture drift, it is founder data published to the world.
 
@@ -27,7 +27,22 @@ FORBIDDEN = (
     "pig butchering",            # his corpus subject matter
     "whac-a-mole",               # his coined metric name
     "60 muscles",                # his known post
-    "Kipnis",                    # the founder
+    "Kipnis",                    # the founder's surname
+    # THE GIVEN NAME, added 2026-09-06 (sp-5c0b6406). It was missing, so a module
+    # carrying it passed this suite and was caught only later by
+    # automation/export_voice_loop.py refusing the public transform. That is the wrong
+    # order: this guard is the early check and the exporter is the last one, and until
+    # today the PRIVATE package that syncs to every instance carried the name while only
+    # the PUBLIC mirror was clean.
+    #
+    # Two live cases had to be reworded in the same change or this entry turns the suite
+    # red on arrival: selector.py's "most Assaf" (now the words the exporter already
+    # rendered publicly, so the mirror is byte-identical) and this file's own docstring.
+    #
+    # The exporter's RENAMES entry for that phrase is deliberately left in place. It
+    # matches nothing now, and a dead rename is a second line of defence if the name
+    # ever comes back. The layer that worked does not get weakened.
+    "Assaf",                     # the founder's given name
 )
 
 
@@ -57,6 +72,22 @@ def test_no_founder_data_in_the_plugin_tree():
                 f"{os.path.relpath(path, PKG)} contains {needle!r}: founder data "
                 f"or an instance path is inside the fleet plugin. The corpus "
                 f"lives in the instance's voice/ dir, never here.")
+
+
+def test_the_guard_catches_the_given_name_on_its_own(tmp_path):
+    """The needle that was missing, proven to bite.
+
+    The existing self-test plants "pig butchering", which the old FORBIDDEN already
+    held. It would have stayed green through the entire window in which the given
+    name was invisible. A guard gains a needle and a control for that needle in the
+    same change, or the control only ever proves what already worked.
+    """
+    planted = tmp_path / "leak.py"
+    planted.write_text("# the voice most like Assaf, whatever that means\n")
+    content = planted.read_text().lower()
+    hits = [n for n in FORBIDDEN if n.lower() in content]
+    assert hits == ["Assaf"], (
+        f"the tree guard did not catch a planted given name; matched {hits}")
 
 
 def test_negative_selftest_the_probe_detects_a_planted_leak(tmp_path):
