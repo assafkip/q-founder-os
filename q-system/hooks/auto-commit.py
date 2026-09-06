@@ -4,6 +4,7 @@
 Runs on Stop (async). Creates one commit per area with conventional commit messages.
 Never pushes. Skips if no uncommitted changes.
 """
+import calendar
 import hashlib
 import json
 import subprocess
@@ -398,6 +399,11 @@ def commit_group(commit_type, message, files):
         print(f"  skipped: {header} - {r.stderr.strip()[:80]}")
 
 
+# One instance apply runs minutes, never hours; a marker older than this is a
+# crashed run whatever its pid says (pids get recycled).
+RUN_MARKER_MAX_AGE_S = int(os.environ.get("KIPI_UPDATE_RUN_MARKER_MAX_AGE_S", "7200"))
+
+
 def fleet_update_in_progress():
     """The fleet updater's run marker, or None when no live run owns this checkout.
 
@@ -421,11 +427,23 @@ def fleet_update_in_progress():
     marker = os.path.join(common, "kipi-update.run")
     if not os.path.exists(marker):
         return None
+    # Two facts have to agree before the marker counts as live: the pid is
+    # alive AND the start stamp is younger than RUN_MARKER_MAX_AGE_S. Pid
+    # liveness alone is not enough: a marker that survived SIGKILL or a reboot
+    # can point at a recycled pid that is some unrelated process, and this
+    # hook would then commit nothing on that checkout forever (PR #314
+    # review, round 1). A fleet apply of one instance runs minutes, never
+    # hours, so an old stamp is a crashed run whatever the pid says.
     try:
         with open(marker, encoding="utf-8") as fh:
-            pid = int(fh.read().split()[0])
+            fields = fh.read().split()
+        pid = int(fields[0])
+        started = time.strptime(fields[1], "%Y-%m-%dT%H:%M:%SZ")
+        age_s = time.time() - calendar.timegm(started)
+        if age_s > RUN_MARKER_MAX_AGE_S:
+            raise ProcessLookupError("marker older than the run bound")
         os.kill(pid, 0)
-    except (ValueError, IndexError, ProcessLookupError, FileNotFoundError):
+    except (ValueError, IndexError, ProcessLookupError, FileNotFoundError, OverflowError):
         try:
             os.remove(marker)
         except OSError:

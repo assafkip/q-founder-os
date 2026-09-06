@@ -19,6 +19,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "auto-commit.py")
@@ -79,6 +80,29 @@ class RunMarker(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("fleet updater run in progress", result.stderr)
         self.assertFalse(os.path.exists(self.marker), "a stale marker survived")
+
+    def test_live_pid_with_an_old_stamp_is_stale(self):
+        # A recycled pid after a crash or reboot is alive and unrelated; the
+        # stamp is what says the run is long over (PR #314 review, round 1).
+        with open(self.marker, "w") as fh:
+            fh.write(f"{os.getpid()} 2026-01-01T00:00:00Z\n")
+        before = head_count(self.repo)
+        result = run_hook(self.repo)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("fleet updater run in progress", result.stderr)
+        self.assertFalse(os.path.exists(self.marker), "an old-stamp marker with a live pid survived")
+        self.assertEqual(head_count(self.repo), before + 1, "the hook did not proceed past a stale marker")
+
+    def test_a_fresh_marker_with_a_live_pid_is_live_within_the_bound(self):
+        # The stamp check must not turn every marker stale: a fresh stamp and a
+        # live pid is the real in-flight case and still commits nothing.
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with open(self.marker, "w") as fh:
+            fh.write(f"{os.getpid()} {stamp}\n")
+        before = head_count(self.repo)
+        result = run_hook(self.repo)
+        self.assertIn("fleet updater run in progress", result.stderr)
+        self.assertEqual(head_count(self.repo), before)
 
     def test_malformed_marker_is_treated_as_stale(self):
         with open(self.marker, "w") as fh:

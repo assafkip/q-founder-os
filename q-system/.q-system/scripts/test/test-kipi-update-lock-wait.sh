@@ -80,9 +80,14 @@ hold_lock() {
     [ "$spins" -gt 600 ] && return 0
   done
   : > "$lock"
-  if [ "$release" = "after-wait-line" ]; then
+  local release_on=""
+  case "$release" in
+    after-wait-line) release_on="waiting for index.lock at" ;;
+    after-refusal) release_on="index.lock held past" ;;
+  esac
+  if [ -n "$release_on" ]; then
     spins=0
-    while ! grep -q "waiting for index.lock at" "$log" 2>/dev/null; do
+    while ! grep -q "$release_on" "$log" 2>/dev/null; do
       sleep 0.1
       spins=$((spins + 1))
       [ "$spins" -gt 600 ] && return 0
@@ -116,15 +121,19 @@ assert_a_live_lock_is_waited_out_and_the_sync_lands() {
 }
 
 # ------------------------------------------------------------------ property 2
-assert_a_lock_past_the_bound_refuses_the_instance_by_name() {
+# The refusal path restores the checkpoint with git commands that take the
+# SAME lock. When the writer lets go after the refusal, the restore waits it
+# out and the tree is clean again; when it never lets go, the run says so in
+# one loud line instead of pretending (PR #314 review, round 1: a silent
+# no-op restore left the instance dirty and refused by every later run).
+assert_a_lock_past_the_bound_refuses_the_instance_by_name_and_restores_the_tree() {
   local work sk inst; work="$(mktemp -d)"; sk="$work/skel"; inst="$work/inst"
   build "$work"
   : > "$work/out"
-  hold_lock "$inst" "$work/out" never &
+  hold_lock "$inst" "$work/out" after-refusal &
   local holder=$!
   KIPI_UPDATE_LOCK_WAIT_S=3 bash "$sk/kipi-update.sh" >"$work/out" 2>&1 || true
   wait "$holder" || true
-  rm -f -- "$inst/.git/index.lock"
 
   grep -q "index.lock held past 3s at q-system sync staging" "$work/out" || \
     fail "the refusal does not name the bound and the step: $(tail -n 20 "$work/out")"
@@ -132,8 +141,62 @@ assert_a_lock_past_the_bound_refuses_the_instance_by_name() {
     fail "a lock past the bound did not fail the instance: $(tail -n 20 "$work/out")"
   local subject; subject="$(G -C "$inst" log -1 --format=%s)"
   [ "$subject" = "inst" ] || fail "a refused run left a commit behind: $subject"
+  [ -z "$(G -C "$inst" status --porcelain)" ] || \
+    fail "a refused run left the tree dirty after the lock cleared: $(G -C "$inst" status --porcelain)"
   [ ! -f "$inst/.git/kipi-update.run" ] || fail "the run marker survived a refused run"
-  echo "PASS: a lock past the bound refuses the instance, names the step, commits nothing"
+  [ ! -f "$inst/.git/index.lock" ] || fail "index.lock survived the run"
+  echo "PASS: a lock past the bound refuses the instance, names the step, commits nothing, and restores the tree once the lock clears"
+}
+
+assert_a_lock_that_never_clears_is_reported_not_papered_over() {
+  local work sk inst; work="$(mktemp -d)"; sk="$work/skel"; inst="$work/inst"
+  build "$work"
+  : > "$work/out"
+  hold_lock "$inst" "$work/out" never &
+  local holder=$!
+  KIPI_UPDATE_LOCK_WAIT_S=2 bash "$sk/kipi-update.sh" >"$work/out" 2>&1 || true
+  kill "$holder" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+  rm -f -- "$inst/.git/index.lock"
+
+  grep -q "restore could NOT run: index.lock still held" "$work/out" || \
+    fail "a restore that could not run was silent: $(tail -n 20 "$work/out")"
+  grep -q "Failed:  1" "$work/out" || fail "the instance was not counted as failed"
+  echo "PASS: when the writer never lets go, the restore says so loudly instead of no-op'ing"
+}
+
+# ------------------------------------------------------------------ property 2b
+# The marker is also the one-run-per-instance lock: a live marker from another
+# pid refuses the run and is left in place; only the writer's own marker is
+# ever removed.
+assert_a_live_foreign_marker_refuses_the_run_and_survives_it() {
+  local work sk inst; work="$(mktemp -d)"; sk="$work/skel"; inst="$work/inst"
+  build "$work"
+  sleep 300 &
+  local other=$!
+  printf '%s %s\n' "$other" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$inst/.git/kipi-update.run"
+  bash "$sk/kipi-update.sh" >"$work/out" 2>&1 || true
+  local owner; owner="$(cut -d' ' -f1 "$inst/.git/kipi-update.run" 2>/dev/null || echo gone)"
+  kill "$other" 2>/dev/null || true
+  wait "$other" 2>/dev/null || true
+
+  grep -q "another fleet update is applying this instance right now (pid $other)" "$work/out" || \
+    fail "a live foreign marker did not refuse the run: $(tail -n 15 "$work/out")"
+  grep -q "Failed:  1" "$work/out" || fail "the overlapped instance was not counted as failed"
+  [ "$owner" = "$other" ] || fail "the foreign marker was removed or rewritten (owner now: $owner)"
+  [ "$(G -C "$inst" log -1 --format=%s)" = "inst" ] || fail "an overlapped run committed"
+  echo "PASS: a live foreign marker refuses the run, names its pid, and is left for its owner"
+}
+
+assert_a_stale_foreign_marker_is_replaced_and_the_sync_lands() {
+  local work sk inst; work="$(mktemp -d)"; sk="$work/skel"; inst="$work/inst"
+  build "$work"
+  local dead; dead="$( (sleep 0 &) ; echo $! )"
+  printf '%s %s\n' "${dead:-999999}" "2026-01-01T00:00:00Z" > "$inst/.git/kipi-update.run"
+  bash "$sk/kipi-update.sh" >"$work/out" 2>&1 || true
+  grep -q "Updated: 1" "$work/out" || fail "a stale foreign marker blocked the run: $(tail -n 15 "$work/out")"
+  [ ! -f "$inst/.git/kipi-update.run" ] || fail "the stale marker survived a successful run"
+  echo "PASS: a stale foreign marker (dead pid or old stamp) is replaced and the sync lands"
 }
 
 # ------------------------------------------------------------------ property 3
@@ -223,5 +286,8 @@ SH
 
 assert_a_commit_that_dies_on_the_lock_is_retried_and_other_errors_are_not
 assert_a_live_lock_is_waited_out_and_the_sync_lands
-assert_a_lock_past_the_bound_refuses_the_instance_by_name
+assert_a_lock_past_the_bound_refuses_the_instance_by_name_and_restores_the_tree
+assert_a_lock_that_never_clears_is_reported_not_papered_over
+assert_a_live_foreign_marker_refuses_the_run_and_survives_it
+assert_a_stale_foreign_marker_is_replaced_and_the_sync_lands
 assert_without_the_wait_the_green_case_goes_red

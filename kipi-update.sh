@@ -870,6 +870,18 @@ restore_instance() {
   # passes it legitimately -- and an unscoped checkout here would then delete
   # exactly the work the scoping was meant to stop blocking on. The two must
   # move together; the pathspec below is the same one the guard uses.
+  # The restore itself takes index.lock (reset, checkout). An abandon caused
+  # by a lock held past the bound would otherwise run these two silently into
+  # the same lock, restore nothing, and leave this run's writes uncommitted:
+  # dirty forever, refused by every later run (PR #314 review, round 1).
+  # Wait the same bound again; if the writer is still there, say exactly what
+  # was left behind instead of pretending the checkpoint was restored.
+  if ! wait_for_index_lock "$target" "restore"; then
+    echo "  ERROR: restore could NOT run: index.lock still held after ${LOCK_WAIT_S}s;" \
+      "this instance keeps this run's uncommitted writes under $CHECKPOINT_PREFIX/, .claude/ and plugins/" \
+      "until the lock clears and the tree is restored by hand" >&2
+    return 1
+  fi
   git -C "$target" reset -q HEAD -- "$CHECKPOINT_PREFIX/" .claude/ plugins/ \
     $(pathspec_owned_excludes "$CHECKPOINT_PREFIX") 2>/dev/null || true
   # `git checkout -- A B C` is ALL-OR-NOTHING. If ANY pathspec matches nothing
@@ -1288,16 +1300,49 @@ retry_on_index_lock() {
 # The common dir, not the worktree's git dir, so a linked worktree of the
 # same checkout reads the same marker. Cleared on every exit path.
 RUN_MARKER=""
+RUN_MARKER_MAX_AGE_S="${KIPI_UPDATE_RUN_MARKER_MAX_AGE_S:-7200}"
+
+# The marker is also the one-run-per-instance lock. A marker whose pid is
+# alive and whose stamp is younger than the bound belongs to ANOTHER updater
+# still applying this instance; writing over it would let two runs interleave
+# on one index and let the first run's clear_run_marker strip the second's
+# protection (PR #314 review, round 1). Returns 1 in that case; the caller
+# abandons the instance. A dead pid or an old stamp is a crashed run's
+# leftover and is replaced.
+run_marker_is_live_foreign() {
+  local marker="$1" pid stamp age
+  [ -f "$marker" ] || return 1
+  read -r pid stamp < "$marker" || return 1
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$pid" != "$$" ] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  age="$(python3 -c 'import calendar,sys,time
+try:
+    print(int(time.time() - calendar.timegm(time.strptime(sys.argv[1], "%Y-%m-%dT%H:%M:%SZ"))))
+except Exception:
+    print(-1)' "${stamp:-}" 2>/dev/null)" || age=-1
+  [ "$age" -ge 0 ] && [ "$age" -le "$RUN_MARKER_MAX_AGE_S" ]
+}
 write_run_marker() {
   local target="$1" common
   common="$(git -C "$target" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
     || return 0
+  if run_marker_is_live_foreign "$common/kipi-update.run"; then
+    echo "  ERROR: another fleet update is applying this instance right now (pid $(cut -d' ' -f1 "$common/kipi-update.run")); refusing to run two at once" >&2
+    return 1
+  fi
   RUN_MARKER="$common/kipi-update.run"
   printf '%s %s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUN_MARKER"
 }
+# Only this run's own marker is ever removed: the first field is the pid that
+# wrote it, and a marker carrying any other pid is left for its owner.
 clear_run_marker() {
+  local owner
   if [ -n "${RUN_MARKER:-}" ] && [ -f "$RUN_MARKER" ]; then
-    rm -- "$RUN_MARKER"
+    owner="$(cut -d' ' -f1 "$RUN_MARKER" 2>/dev/null || true)"
+    if [ "$owner" = "$$" ]; then
+      rm -- "$RUN_MARKER"
+    fi
   fi
   RUN_MARKER=""
 }
@@ -1755,7 +1800,9 @@ PY
         rm -f "$lockfile"
       fi
     done
-    write_run_marker "$path"
+    if ! write_run_marker "$path"; then
+      abandon_instance "  ERROR: refusing to overlap another fleet update on this instance" && continue
+    fi
 
     # Abort any zombie rebase/merge/cherry-pick
     if [ -d "$path/.git/rebase-merge" ] || [ -d "$path/.git/rebase-apply" ]; then
