@@ -75,6 +75,92 @@ class EngineTest(unittest.TestCase):
         self.assertFalse(out["moved"])
         self.assertEqual(out["rewritten"], [])
 
+    def _skeleton_and_instance(self, *, package=NEW, instance_carries_shipped=True):
+        """A fake skeleton that ships the engine init with the rename comment
+        plus one q-system script, and an instance carrying the same two files
+        (unless it is still on the old package: then the new package must not
+        exist yet or the move is a `both_present` refusal), an instance-only
+        script INSIDE q-system/, and its own pipeline import."""
+        why = "# why: this package was called `" + OLD + "` here, renamed on export\nVERSION = 2\n"
+        tool = "# " + OLD + " era helper, the skeleton's\n"
+        shipped = [("plugins/kipi-core/" + NEW + "/__init__.py", why),
+                   ("q-system/.q-system/scripts/tool.py", tool)]
+        sk = os.path.join(self.tmp, "skeleton")
+        for rel, body in shipped:
+            p = os.path.join(sk, rel)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            open(p, "w").write(body)
+        carried = shipped if instance_carries_shipped else []
+        r = build_instance(os.path.join(self.tmp, "i"), package=package, extra=carried + [
+            ("q-system/.q-system/scripts/mine.py", "from " + OLD + " import x\n"),
+            ("q-consult/pipeline/voice.py", "from " + OLD + " import x\n"),
+        ])
+        return sk, r
+
+    def test_a_path_the_skeleton_ships_is_the_syncs_not_the_migrations(self):
+        """2026-09-06: the engine's own __init__.py documents the rename in a
+        why-comment that names the old package on purpose. Rewriting it made
+        every sync commit churn on 22 instances and made the one instance whose
+        pre-commit compares the engine to a public mirror refuse the commit, so
+        the rsync never started (sp-b0389e48)."""
+        sk, r = self._skeleton_and_instance()
+        p = mig.plan(r, skeleton=sk)
+        self.assertEqual(p["rewrite"], ["q-consult/pipeline/voice.py",
+                                        "q-system/.q-system/scripts/mine.py"])
+        self.assertEqual(p["shipped_by_skeleton"], ["plugins/kipi-core/" + NEW + "/__init__.py",
+                                                    "q-system/.q-system/scripts/tool.py"])
+        out = mig.apply(r, commit=False, skeleton=sk)
+        self.assertTrue(out["verified"], out["errors"])
+        self.assertEqual(sorted(out["rewritten"]), p["rewrite"])
+        init = open(os.path.join(r, "plugins/kipi-core", NEW, "__init__.py")).read()
+        self.assertIn("called `" + OLD + "` here", init)
+        self.assertIn(OLD, open(os.path.join(r, "q-system/.q-system/scripts/tool.py")).read())
+        self.assertNotIn(OLD, open(os.path.join(r, "q-system/.q-system/scripts/mine.py")).read())
+        self.assertNotIn(OLD, open(os.path.join(r, "q-consult/pipeline/voice.py")).read())
+        self.assertFalse(mig.plan(r, skeleton=sk)["needs_work"])
+
+    def test_without_the_skeleton_the_same_comment_is_rewritten(self):
+        """Negative self-test: an empty skeleton ships nothing, and then the
+        why-comment IS rewritten into nonsense. The exemption is what holds the
+        line, not the shape of the comment."""
+        _, r = self._skeleton_and_instance()
+        empty = os.path.join(self.tmp, "empty-skeleton")
+        os.makedirs(empty)
+        p = mig.plan(r, skeleton=empty)
+        self.assertEqual(p["shipped_by_skeleton"], [])
+        self.assertIn("plugins/kipi-core/" + NEW + "/__init__.py", p["rewrite"])
+        mig.apply(r, commit=False, skeleton=empty)
+        init = open(os.path.join(r, "plugins/kipi-core", NEW, "__init__.py")).read()
+        self.assertNotIn(OLD, init)
+        self.assertIn("called `" + NEW + "` here", init)
+
+    def test_an_instance_is_never_its_own_skeleton(self):
+        """A caller passing the instance as its skeleton would exempt every file
+        and report a clean no-op on an unmigrated tree. Same path resolves to
+        no skeleton at all, and the migration runs in full."""
+        _, r = self._skeleton_and_instance()
+        p = mig.plan(r, skeleton=r)
+        self.assertIsNone(p["skeleton"])
+        self.assertEqual(p["shipped_by_skeleton"], [])
+        self.assertIn("q-consult/pipeline/voice.py", p["rewrite"])
+
+    def test_the_move_still_happens_under_a_skeleton_that_ships_the_package(self):
+        """The old package name never exists in the skeleton, so the move is
+        planned from pre-move paths and proceeds; after it, the init the skeleton
+        ships is left for the rsync and an instance-only module inside the
+        package is still migrated."""
+        sk, r = self._skeleton_and_instance(package=OLD, instance_carries_shipped=False)
+        core = os.path.join(r, "plugins/kipi-core", OLD, "core.py")
+        open(core, "w").write("from " + OLD + " import __init__ as _\n")
+        out = mig.apply(r, commit=False, skeleton=sk)
+        self.assertTrue(out["moved"])
+        self.assertTrue(out["verified"], out["errors"])
+        self.assertFalse(os.path.isdir(os.path.join(r, "plugins/kipi-core", OLD)))
+        moved_core = open(os.path.join(r, "plugins/kipi-core", NEW, "core.py")).read()
+        self.assertNotIn(OLD, moved_core)
+        self.assertIn("plugins/kipi-core/" + NEW + "/core.py", out["rewritten"])
+        self.assertNotIn("plugins/kipi-core/" + NEW + "/__init__.py", out["rewritten"])
+
     def test_both_present_never_deletes_either_package(self):
         """A half-synced instance is reported, not resolved by removal.
 

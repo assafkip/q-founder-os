@@ -51,6 +51,13 @@ counted and reported as `history_left`, never edited.
 than an oversight: .json here is config the engine reads (voice-channels.json
 names `voiceloop/validate.py`, a path that genuinely moved), .jsonl is an
 append-only ledger.
+
+A path the SKELETON ships is never rewritten, whatever its extension: the rsync
+this script runs ahead of delivers the skeleton's copy of it seconds later, so
+the rewrite is churn at best and a refused commit at worst (2026-09-06: the
+engine's own __init__.py documents the rename in a why-comment that names the
+old package on purpose; see SKELETON_ROOT). Instance-only files, including ones
+that live inside q-system/, do not exist in the skeleton and are migrated.
 """
 from __future__ import annotations
 
@@ -119,6 +126,47 @@ SKIP_DIR_PREFIXES = (".wt-",)
 SELF_PATH = os.path.realpath(__file__)
 SKIP_PATH_PARTS = (os.path.join("tests", "fixtures") + os.sep,)
 
+# A FILE THE SKELETON SHIPS IS THE SYNC'S TO DELIVER, NEVER THIS SCRIPT'S TO
+# REWRITE. This script lives at the skeleton root and kipi-update.sh runs it
+# right before the rsync that copies the skeleton's q-system/ .claude/ plugins/
+# over the instance. Any path the skeleton itself carries is therefore
+# overwritten seconds later with the skeleton's bytes, so rewriting it here is
+# at best a churn commit and at worst a refused one:
+#
+#   * The skeleton's own plugins/kipi-core/voiceloop/__init__.py names the old
+#     package in a why-comment ("this package was called `voicekit` here"),
+#     deliberately, as history. Measured 2026-09-06 across the fleet: every sync
+#     rewrote that comment in every instance, committed it, and the rsync put the
+#     skeleton's copy back, forever ("rewritten=1" on all 22 instances, 7 on the
+#     one that also carried six skeleton-shipped q-system scripts and tests).
+#   * On the instance whose pre-commit compares the engine to a public mirror,
+#     that one-line rewrite is a diff against the mirror, the gate refused the
+#     commit, this script reported "migration failed", and the rsync it exists
+#     to prepare never started (sp-b0389e48, sp-2c1bcc3f's neighbour).
+#
+# The test is exact, not a path heuristic: if the same relative path exists in
+# the skeleton tree, it is the skeleton's. An instance-only file INSIDE q-system/
+# (the updater preserves those) does not exist in the skeleton and is still
+# migrated. The package MOVE (step 1 of apply) is untouched by this rule: the
+# old package name never exists in the skeleton, so its files are seen at their
+# pre-move paths and the move proceeds; after the move they sit at paths the
+# skeleton ships and the rsync delivers the real ones.
+SKELETON_ROOT = os.path.dirname(SELF_PATH)
+
+
+def _resolve_skeleton(repo: str, skeleton: str | None) -> str | None:
+    """The tree whose files the sync delivers, or None when there is none to
+    compare against (the script run over the skeleton itself, or a caller that
+    passed the instance as its own skeleton)."""
+    root = SKELETON_ROOT if skeleton is None else os.path.abspath(skeleton)
+    if os.path.realpath(root) == os.path.realpath(repo):
+        return None
+    return root
+
+
+def _shipped_by_skeleton(rel: str, skeleton: str | None) -> bool:
+    return skeleton is not None and os.path.lexists(os.path.join(skeleton, rel))
+
 
 def _exempt(path: str) -> bool:
     if os.path.realpath(path) == SELF_PATH:
@@ -165,9 +213,13 @@ def has_token(text: str) -> bool:
     return any(before in text for before, _ in CASE_FORMS)
 
 
-def plan(repo: str) -> dict:
-    """Read-only. What this instance needs, without touching a byte."""
+def plan(repo: str, skeleton: str | None = None) -> dict:
+    """Read-only. What this instance needs, without touching a byte.
+
+    `skeleton` is the tree the sync delivers (default: the one this script sits
+    in); a path it ships is skipped entirely, see SKELETON_ROOT above."""
     repo = os.path.abspath(repo)
+    delivered = _resolve_skeleton(repo, skeleton)
     old_pkg = os.path.join(repo, PLUGIN_PARENT, OLD)
     new_pkg = os.path.join(repo, PLUGIN_PARENT, NEW)
     has_old = os.path.isdir(old_pkg)
@@ -182,11 +234,14 @@ def plan(repo: str) -> dict:
     else:
         package_action = "absent"
 
-    rewrite, renames, history = [], [], []
+    rewrite, renames, history, shipped = [], [], [], []
     for path in iter_source_files(repo):
         if _exempt(path):
             continue
         rel = os.path.relpath(path, repo)
+        if _shipped_by_skeleton(rel, delivered):
+            shipped.append(rel)
+            continue
         base = os.path.basename(path)
         ext = os.path.splitext(base)[1].lower()
         # A FILENAME follows the same record/source split as file CONTENT, and
@@ -262,9 +317,11 @@ def plan(repo: str) -> dict:
 
     return {
         "repo": repo,
+        "skeleton": delivered,
         "package_action": package_action,
         "rewrite": sorted(rewrite),
         "renames": sorted(renames),
+        "shipped_by_skeleton": sorted(shipped),
         "history_left": sorted(history),
         "staged_migration": staged_migration,
         "staged_rewrites": staged_rewrites,
@@ -317,9 +374,9 @@ def _dirty_tracked(repo: str, rels: list) -> list:
     return sorted(set(out))
 
 
-def apply(repo: str, commit: bool = True) -> dict:
+def apply(repo: str, commit: bool = True, skeleton: str | None = None) -> dict:
     repo = os.path.abspath(repo)
-    p = plan(repo)
+    p = plan(repo, skeleton)
     result = {**p, "moved": False, "rewritten": [], "renamed": [], "committed": False,
               "errors": [], "left_untracked": [], "backed_up": []}
     # Snapshot tracked-ness BEFORE any write, because `git mv` and the rewrites
@@ -372,7 +429,7 @@ def apply(repo: str, commit: bool = True) -> dict:
     # pre-move relative paths are stale. Re-reading is cheap; acting on a stale
     # path list is the "validate the mutant applied" failure -- an edit that
     # silently lands nowhere.
-    p2 = plan(repo)
+    p2 = plan(repo, skeleton)
     for rel in p2["rewrite"]:
         path = os.path.join(repo, rel)
         try:
@@ -430,7 +487,7 @@ def apply(repo: str, commit: bool = True) -> dict:
         result["renamed"].append(f"{rel} -> {dst_rel}")
 
     # --- step 3: prove it, against the tree we just wrote --------------------
-    after = plan(repo)
+    after = plan(repo, skeleton)
     if after["package_action"] == "move":
         result["errors"].append("package still named voicekit after apply")
     if after["rewrite"]:
