@@ -1376,7 +1376,10 @@ def resolve_docs(entities: list[dict], search_stores: list[dict], root: Path,
             for v in pattern_variants(nm):
                 if v not in patterns:
                     patterns.append(v)
-    failed: list[Path] = []
+    # Readability is accounted for EVERY enumerated file before any search, so an
+    # index of 0 (no patterns, early return inside search_docs) cannot leave an
+    # unreadable store invisible under FULL (PR #308 review round 10).
+    failed: list[Path] = [f for f in files if not os.access(f, os.R_OK)]
     hits, engine = search_docs(files, patterns, ignore_case=True, word=False, deadline=deadline, failed=failed)
     # The same read accounting every file class has: per store, the files the
     # engine was asked to read and the ones it could not. A store whose every
@@ -1423,6 +1426,8 @@ def resolve_docs(entities: list[dict], search_stores: list[dict], root: Path,
             continue
         store = file_store.get(str(f), PROJECT_STORE)
         for e in index_ents:
+            if not store_in_scope_of(e, store):
+                continue
             if entity_matches(e, text, store):
                 out.setdefault(norm(e["name"]), {}).setdefault(store, []).append(
                     _item(e["name"], "doc", s, f, n, t_of(f), root, status=status_for_line(text)))
@@ -1616,6 +1621,18 @@ def _assemble(items: list[dict], entities: list[dict], ceiling: int, header_len:
     return kept, cut, ceiling_hit
 
 
+def store_in_scope_of(entity: dict, store_name: str) -> bool:
+    """A target entity's items come from the cases that declared it, plus the
+    project level; every other entity reads every store in scope."""
+    if entity.get("kind") != "target" or not entity.get("stores"):
+        return True
+    return store_name == PROJECT_STORE or store_name in entity["stores"]
+
+
+def stores_for(entity: dict, search_stores: list[dict]) -> list[dict]:
+    return [st for st in search_stores if store_in_scope_of(entity, st["name"])]
+
+
 def store_recency(items: list[dict]) -> dict[str, str]:
     """store -> the newest item date it carries. The project store always ranks
     first; the cases rank newest first, never by directory name: PR #308 review
@@ -1786,6 +1803,9 @@ def append_jsonl(path: Path, row: dict) -> None:
 
 MISS_CAP_PER_PROMPT = 20
 MISS_LEDGER_MAX_BYTES = 256 * 1024
+# A receipt row grows with the store count (3.4 KB at 45 stores, measured by the
+# PR #308 round 10 reviewer: 124 MB/year at 100 prompts/day unbounded).
+RECEIPT_LEDGER_MAX_BYTES = 2 * 1024 * 1024
 
 
 def miss_candidates(prompt: str, entities: list[dict]) -> list[dict]:
@@ -1815,8 +1835,8 @@ def miss_candidates(prompt: str, entities: list[dict]) -> list[dict]:
 
 def append_bounded(path: Path, row: dict, max_bytes: int = MISS_LEDGER_MAX_BYTES) -> None:
     """append_jsonl, then keep the file under max_bytes by dropping the oldest
-    half of its lines (atomic rewrite). The receipts ledger is small per row and
-    one per firing; the misses ledger is the one that can balloon."""
+    half of its lines (atomic rewrite). Both ledgers go through it: the misses
+    ledger balloons per paste, the receipts ledger per store count."""
     append_jsonl(path, row)
     try:
         if path.stat().st_size <= max_bytes:
@@ -1904,13 +1924,13 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
     entities = resolve_entities(scan, index, fire_alone)
     # Naming a sub-store (a 4_points case) scopes every other entity's search to
     # it plus the project level; naming none searches every store.
-    # A case the founder NAMED is the scope. A target's declaring cases scope the
-    # search only when no case was named: a target shared by 45 cases must not
-    # drag them all back in behind "in subject7, ..." (PR #308 review round 9,
-    # which the round 8 union did).
-    store_named = {s for e in entities if e.get("kind") == "store" for s in (e.get("stores") or [])}
-    target_named = {s for e in entities if e.get("kind") == "target" for s in (e.get("stores") or [])}
-    named_stores = store_named or target_named
+    # A case name the founder TYPED is the scope. A filename inside one case is
+    # not: a targets/ stem narrows only its own entity's items to the cases that
+    # declared it (stores_for), never the whole prompt. PR #308 review rounds 8,
+    # 9 and 10 each found a prompt-level target scope wrong on a different
+    # input (bypassed the corpus-common rule; unioned past the named case;
+    # hijacked an unrelated fully-indexed subject).
+    named_stores = {s for e in entities if e.get("kind") == "store" for s in (e.get("stores") or [])}
     search_stores = [project] + [s for s in substores if not named_stores or s["name"] in named_stores]
     # What the scope left out is a fact on the wire, not only in the receipt:
     # "payment fraud" in a prompt matched case-031-payment-fraud and silently
@@ -2036,7 +2056,7 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
             for ent in entities:
                 if deadline_hit is not None:
                     break
-                for st in search_stores:
+                for st in stores_for(ent, search_stores):
                     if time.time() > t_deadline:
                         deadline_hit = {"at_class": cls, "at_entity": ent["name"],
                                         "elapsed_ms": int((time.time() - t0) * 1000)}
@@ -2217,7 +2237,7 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
     }
     bundle["receipt"] = receipt
     if record:
-        append_jsonl(receipts_path, receipt)
+        append_bounded(receipts_path, receipt, RECEIPT_LEDGER_MAX_BYTES)
         _record_misses(qroot, prompt, scan, truncated, entities, ts, session_id, candidates_dropped)
         _record_recall(bundle, session_id, recall_path)
     return bundle

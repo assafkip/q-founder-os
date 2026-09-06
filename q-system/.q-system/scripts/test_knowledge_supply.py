@@ -1554,8 +1554,9 @@ def test_target_stem_scopes_to_the_declaring_case(tmp_path):
     b = run(root, "what do we know about miami")
     ent = next(e for e in b["entities"] if e["kind"] == "target")
     assert ent["stores"] == ["case-001-alpha1"]
-    assert b["coverage"]["scope"] == ["case-001-alpha1"] and len(b["coverage"]["stores_excluded"]) == 5
-    assert all("case-001-alpha1" in i["src"] or "/q-fix/" in i["src"] for i in b["items"]), [i["src"] for i in b["items"]]
+    assert b["coverage"]["scope"] == [] and b["coverage"]["stores_excluded"] == [], "a filename is never a prompt scope"
+    miami = items_of(b, entity="miami")
+    assert miami and all(i.get("store") in ("case-001-alpha1", "project") for i in miami), [i["src"] for i in miami]
     assert "[target of case-001-alpha1]" in ks.render(b).splitlines()[0]
 
 
@@ -1607,11 +1608,28 @@ def test_target_shared_by_many_cases_scopes_to_all_of_them_when_none_is_named(tm
     root, q = make_instance(tmp_path)
     _three_cases_sharing_a_target(q)
     b = run(root, "what did acme do")
-    assert b["coverage"]["scope"] == ["case-001-alpha", "case-002-beta", "case-003-gamma"]
-    assert b["coverage"]["stores_excluded"] == []
-    assert "WITHIN SCOPE" not in ks.render(b), "nothing excluded, nothing disclosed, no budget spent"
+    assert b["coverage"]["scope"] == [] and b["coverage"]["stores_excluded"] == []
+    assert "WITHIN SCOPE" not in ks.render(b)
     texts = [i["text"] for i in b["items"]]
     assert all(any(k in t for t in texts) for k in ("ALPHA-ONLY", "BETA-ONLY", "GAMMA-ONLY"))
+
+
+def test_target_never_narrows_another_entity(tmp_path):
+    """The round 10 reproducer: 'Orbit Holdings and the miami accounts' with
+    miami a target of one case must still deliver every Orbit Holdings fact."""
+    root, q = make_instance(tmp_path)
+    with open(q / "memory" / "graph.jsonl", "a") as f:   # a fully-indexed subject, as in the reviewer's repro
+        f.write(json.dumps({"s": "Orbit Holdings", "p": "is", "o": "a shell company", "t": "2026-09-01"}) + "\n")
+    for i in range(1, 6):
+        s = add_store(q, f"case-00{i}-thing{i}", "scope", f"Orbit Holdings fact {i}.")
+        if i == 3:
+            (s / "investigation" / "targets" / "miami.md").write_text("# miami\n\nmiami target notes\n")
+    b = run(root, "what do we have on Orbit Holdings and the miami accounts")
+    assert b["coverage"]["scope"] == [] and b["coverage"]["stores_excluded"] == []
+    orbit = items_of(b, entity="Orbit Holdings")
+    assert {i["store"] for i in orbit} >= {f"case-00{i}-thing{i}" for i in range(1, 6)}, sorted({i["store"] for i in orbit})
+    miami = items_of(b, entity="miami")
+    assert miami and all(i["store"] in ("case-003-thing3", "project") for i in miami)
 
 
 def test_scope_note_is_bounded(tmp_path):
@@ -1620,13 +1638,18 @@ def test_scope_note_is_bounded(tmp_path):
         s = add_store(q, f"case-00{i}-thing{i}", "scope", f"Acme in case {i}")
         if i <= 8:
             (s / "investigation" / "targets" / "acme.md").write_text("# acme\n")
-    b = run(root, "what did acme do")
+    named = ", ".join(f"thing{i}" for i in range(1, 9))
+    b = run(root, f"in {named}: what did acme do")
     assert len(b["coverage"]["scope"]) == 8 and b["coverage"]["stores_excluded"] == ["case-009-thing9"]
     head = ks.render(b).splitlines()[0]
     assert "and 2 more + project only; 1 other store not searched" in head, head
     scope_clause = head.split("WITHIN SCOPE", 1)[1].split("+ project", 1)[0]
     assert scope_clause.count("case-00") == 6, scope_clause
     assert "[target of case-001-thing1, case-002-thing2, case-003-thing3, case-004-thing4, case-005-thing5, case-006-thing6 and 2 more]" in head, head
+    # every store named: a scope with nothing excluded discloses nothing
+    b2 = run(root, "in " + ", ".join(f"thing{i}" for i in range(1, 10)) + ": what did acme do")
+    assert len(b2["coverage"]["scope"]) == 9 and b2["coverage"]["stores_excluded"] == []
+    assert "WITHIN SCOPE" not in ks.render(b2).splitlines()[0]
 
 
 def test_absent_class_is_never_searched_in_the_receipt(tmp_path):
@@ -1635,6 +1658,36 @@ def test_absent_class_is_never_searched_in_the_receipt(tmp_path):
     for cls in ("graph", "commitments", "meetings", "loops"):
         row = receipt_row(b, cls)
         assert row["present"] is False and row["searched"] is False and row["stores_searched"] == 0, row
+
+
+# PR #308 review round 10: an index of 0 still accounts for unreadable docs; the receipts ledger is bounded.
+
+def test_unreadable_store_is_seen_with_an_index_of_zero(tmp_path):
+    root, q = make_bare_instance(tmp_path)
+    (q / ".q-system" / "data").mkdir()
+    shutil.copy(INVESTIGATION_MANIFEST, q / ".q-system" / "data" / "knowledge-sources.json")
+    s = add_store(q, "case-001-alpha", "scope", "Bluepeak asked here too.")
+    only = s / "investigation" / "findings" / "finding-001.md"
+    only.chmod(0)
+    try:
+        b = run(root, "what did Bluepeak ask for")
+    finally:
+        only.chmod(0o644)
+    assert b is not None and any(e["kind"] == "docs_hit" for e in b["entities"])
+    row = receipt_row(b, "docs")
+    assert "case-001-alpha: 1 of 1 doc file(s) unreadable" in (row["problem"] or ""), row
+    assert row["searched"] == "partial" and b["coverage"]["verdict"] != "FULL", b["coverage"]
+
+
+def test_receipts_ledger_is_bounded(tmp_path, monkeypatch):
+    root, q = make_instance(tmp_path)
+    monkeypatch.setattr(ks, "RECEIPT_LEDGER_MAX_BYTES", 4000)
+    for _ in range(12):
+        run(root, "what do we know about Dana Okafor", record=True)
+    path = q / "memory" / ".knowledge-supply-receipts.jsonl"
+    assert path.stat().st_size <= 4000 * 2, path.stat().st_size   # one row may land before the trim
+    rows = [json.loads(l) for l in path.read_text().splitlines()]
+    assert 1 <= len(rows) < 12 and all("sources" in r for r in rows)
 
 
 # ---------------------------------------------------------------- the hook
