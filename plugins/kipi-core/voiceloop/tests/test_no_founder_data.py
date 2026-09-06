@@ -46,18 +46,55 @@ FORBIDDEN = (
 )
 
 
+# BINARY-ONLY DENYLIST, not a text allowlist (PR #311 review, MINOR, 2026-09-06).
+# This used to scan an ALLOWLIST of .py/.json/.jsonl/.md, which silently exempted
+# every other extension. The port that added this line also added a .txt file to
+# the tree, so the one guard standing between a public repo and the founder's
+# corpus did not read it -- and the same hole was open for .yaml, .toml, .cfg and
+# anything else a future module ships beside itself. The given name was widened
+# into FORBIDDEN the same night without anyone noticing the extension list
+# underneath it, which is the more dangerous half: a guard that looks stricter
+# while covering less.
+#
+# Inverted deliberately. An allowlist fails OPEN on the file nobody predicted,
+# and this guard is exactly the wrong place to fail open.
+_BINARY_SUFFIXES = (
+    ".pyc", ".pyo", ".so", ".dylib", ".png", ".jpg", ".jpeg", ".gif",
+    ".pdf", ".zip", ".gz", ".woff", ".woff2", ".ico",
+)
+
+
 def _tree_files():
     out = []
     for root, dirs, files in os.walk(PKG):
         dirs[:] = [d for d in dirs if d != "__pycache__"]
         out.extend(os.path.join(root, f) for f in files
-                   if f.endswith((".py", ".json", ".jsonl", ".md")))
+                   if not f.endswith(_BINARY_SUFFIXES))
     return out
 
 
 def test_the_tree_has_files_to_check():
-    """Vacuous-pass guard: if the walk breaks, this fails before the grep lies."""
-    assert len(_tree_files()) >= 7
+    """Vacuous-pass guard, DERIVED from the tree rather than a pinned literal.
+
+    This asserted `>= 7` against what is now a 44-file package (PR #311 review,
+    NIT), so a walk that returned 8 files would have passed while grepping
+    almost nothing. A floor that cannot notice a 36-file shortfall is decoration.
+
+    The honest version compares against the thing that must be there: every .py
+    the package ships has to appear in the scanned set. A truncated or
+    misfiltered walk fails this; a healthy one cannot.
+    """
+    scanned = set(_tree_files())
+    py_on_disk = {
+        os.path.join(root, f)
+        for root, dirs, files in os.walk(PKG)
+        if "__pycache__" not in root
+        for f in files
+        if f.endswith(".py")
+    }
+    assert py_on_disk, "the walk found no .py at all -- it is broken"
+    missing = sorted(py_on_disk - scanned)
+    assert not missing, "the scan skipped shipped files: %s" % ", ".join(missing)
 
 
 def test_no_founder_data_in_the_plugin_tree():
