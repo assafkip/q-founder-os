@@ -402,7 +402,13 @@ def build_index(stores: dict, substores: list[dict] | None = None) -> dict[str, 
         for key in st.get("client_keys") or []:
             _add(index, key, "client")
         for name in st.get("target_names") or []:
-            _add(index, name, "target")
+            ent = _add(index, name, "target")
+            # A targets/ file is one case's declaration of a subject; asking about
+            # it means that case unless another is named. Without this, a target
+            # stem that is also a common word ("miami") fired alone across every
+            # case and bypassed the corpus-common rule (PR #308 review round 8).
+            if ent is not None and st.get("name") and st["name"] != PROJECT_STORE:
+                ent.stores.add(st["name"])
         for name in st.get("noun_names") or []:
             _add(index, name, "noun")
         if st.get("name") and st["name"] != PROJECT_STORE:
@@ -1123,7 +1129,10 @@ def resolve_handoff(entity: dict, stores: dict, root: Path, window: dict | None)
     path = stores["paths"]["handoff"]
     if not path.is_file():
         return []
-    items = resolve_canonical(entity, stores, root, kind="handoff", files=[path])
+    # cls="handoff": the read failure lands under the handoff class, never under
+    # canonical's read_stats (PR #308 review round 8, pre-existing from #302).
+    items = resolve_canonical(entity, stores, root, kind="handoff", files=[path],
+                              errors=stores.get("problems"), cls="handoff")
     return [i for i in items if in_window(i["t"], window)]
 
 
@@ -1261,12 +1270,25 @@ def class_search_state(stopped_cold: bool, truncated: str | None) -> bool | str:
 
 def search_docs(files: list[Path], patterns: list[str], *, ignore_case: bool, word: bool,
                 deadline: float, failed: list[Path] | None = None) -> tuple[list[tuple[Path, int, str]], str]:
-    """`failed` collects the enumerated files the engine could not read."""
+    """`failed` collects the enumerated files the engine could not read. The
+    readability check is made HERE, before either engine runs, so it does not
+    depend on how a given grep reports an unreadable file (PR #308 review round
+    7 fix reported it on BSD grep and CI's GNU grep stayed silent): a file that
+    vanished or lost read permission between enumeration and the search is
+    recorded and never handed to the engine."""
     if not files or not patterns:
         return [], "none"
-    r = _grep(files, patterns, ignore_case=ignore_case, word=word, deadline=deadline, failed=failed)
+    readable: list[Path] = []
+    for f in files:
+        if os.access(f, os.R_OK):
+            readable.append(f)
+        elif failed is not None:
+            failed.append(f)
+    if not readable:
+        return [], "grep" if grep_binary() else "python"
+    r = _grep(readable, patterns, ignore_case=ignore_case, word=word, deadline=deadline, failed=failed)
     if r is None:
-        return _pyscan(files, patterns, ignore_case=ignore_case, word=word, deadline=deadline, failed=failed)
+        return _pyscan(readable, patterns, ignore_case=ignore_case, word=word, deadline=deadline, failed=failed)
     return r
 
 
@@ -1488,6 +1510,19 @@ def capability_hits(prompt: str, cap_index: dict) -> list[tuple[str, list]]:
 # ------------------------------------------------------------------ assembly
 
 def assemble(items: list[dict], entities: list[dict], ceiling: int, header_len: int) -> tuple[list[dict], int, bool]:
+    """Two passes at most: if the first leaves a store with nothing, the note
+    that names it is on the wire, so the second pass pays for the note up
+    front (PR #308 review round 8: the note pushed the render 128 chars past
+    the ceiling with every remaining line pinned and nothing left to drop)."""
+    kept, cut, ceiling_hit = _assemble(items, entities, ceiling, header_len)
+    cut_stores = stores_cut_by_ceiling(items, kept)
+    if cut_stores:
+        reserve = len(ceiling_note_text(cut_stores)) + 8
+        kept, cut, ceiling_hit = _assemble(items, entities, ceiling - reserve, header_len)
+    return kept, cut, ceiling_hit
+
+
+def _assemble(items: list[dict], entities: list[dict], ceiling: int, header_len: int) -> tuple[list[dict], int, bool]:
     """Order, dedupe, and cut to the ceiling. The newest graph item per entity is
     pinned first so a cut can never drop the one fact most likely to be current."""
     order = {norm(e["name"]): i for i, e in enumerate(entities)}
@@ -1506,7 +1541,8 @@ def assemble(items: list[dict], entities: list[dict], ceiling: int, header_len: 
             continue
         seen.add(key)
         deduped.append(it)
-    deduped.sort(key=item_order(order))  # stable: resolver order survives inside a tier (open commitments first, newest first)
+    recency = store_recency(deduped)
+    deduped.sort(key=item_order(order, recency))  # stable: resolver order survives inside a tier (open commitments first, newest first)
     pinned: set[int] = set()
     seen_ent: set[str] = set()
     for idx, it in enumerate(deduped):
@@ -1515,6 +1551,18 @@ def assemble(items: list[dict], entities: list[dict], ceiling: int, header_len: 
             seen_ent.add(norm(it["entity"]))
     used = header_len
     kept, cut, ceiling_hit = [], 0, False
+    blocks: set[tuple[str, str]] = set()
+
+    def cost_of(it: dict) -> tuple[int, tuple[str, str]]:
+        # A block heading ("== name [store] ==") is on the wire too. Uncounted, 40
+        # case headings put the rendered text 1,553 chars past the ceiling while
+        # the budget said it fit (PR #308 review round 8, measured).
+        key = (norm(it["entity"]), it.get("store") or PROJECT_STORE)
+        c = len(render_item(it)) + 1
+        if key not in blocks:
+            c += len(f"== {block_label(it)} ==") + 1
+        return c, key
+
     # Pins are reserved FIRST and always kept, so their cost sits inside `used`
     # before the fill starts. If the pins alone overrun the ceiling, that is
     # REPORTED (ceiling_hit, overflow), never hidden: Codex round 2 on PR #302
@@ -1522,10 +1570,32 @@ def assemble(items: list[dict], entities: list[dict], ceiling: int, header_len: 
     for idx, it in enumerate(deduped):
         it["pinned"] = idx in pinned
     for idx in sorted(pinned):
-        used += len(render_item(deduped[idx])) + 1
+        c, key = cost_of(deduped[idx])
+        used += c
+        blocks.add(key)
         kept.append(deduped[idx])
     if used > ceiling:
         ceiling_hit = True
+    # Then one line per (entity, store), newest store first, WHILE IT FITS: a
+    # store with a hit is never dropped whole because a newer store had more to
+    # say; a store that gets no line is named on the wire (stores_cut). PR #308
+    # review round 8: the fill kept case-001..006 by directory name and cut the
+    # case that held the answer.
+    seen_store: set[tuple[str, str]] = {(norm(deduped[i]["entity"]), deduped[i].get("store") or PROJECT_STORE) for i in pinned}
+    for idx, it in enumerate(deduped):
+        if idx in pinned:
+            continue
+        key = (norm(it["entity"]), it.get("store") or PROJECT_STORE)
+        if key in seen_store:
+            continue
+        seen_store.add(key)
+        c, _ = cost_of(it)
+        if not ceiling_hit and used + c <= ceiling:
+            pinned.add(idx)
+            it["pinned"] = True
+            blocks.add(key)
+            used += c
+            kept.append(it)
     # The first cut ends the fill for everything else. A per-item check would
     # let a short low-tier line slip into the gap left after a higher-tier cut,
     # which reorders priority by accident (measured: the pin mutation survived
@@ -1533,26 +1603,51 @@ def assemble(items: list[dict], entities: list[dict], ceiling: int, header_len: 
     for idx, it in enumerate(deduped):
         if idx in pinned:
             continue
-        cost = len(render_item(it)) + 1
-        if not ceiling_hit and used + cost <= ceiling:
+        c, key = cost_of(it)
+        if not ceiling_hit and used + c <= ceiling:
             kept.append(it)
-            used += cost
+            blocks.add(key)
+            used += c
         else:
             cut += 1
             ceiling_hit = True
-    kept.sort(key=item_order(order))  # stable: resolver order survives inside a tier (open commitments first, newest first)
+    kept.sort(key=item_order(order, recency))  # stable: resolver order survives inside a tier (open commitments first, newest first)
     return kept, cut, ceiling_hit
 
 
-def item_order(order: dict[str, int]):
-    """Entity, then the project block before each case block, then tier. A name
-    carried by two cases is two blocks, never one identity: PR #308 review
-    round 2 showed two different people called the same thing in two cases
-    rendering as one heading with contradictory KNOWN facts."""
+def store_recency(items: list[dict]) -> dict[str, str]:
+    """store -> the newest item date it carries. The project store always ranks
+    first; the cases rank newest first, never by directory name: PR #308 review
+    round 8 measured the ceiling keeping case-001..006 and cutting the case that
+    held the answer because "case-040" sorts last."""
+    newest: dict[str, str] = {}
+    for it in items:
+        st = it.get("store") or PROJECT_STORE
+        t = it.get("t") or ""
+        if t > newest.get(st, ""):
+            newest[st] = t
+    return newest
+
+
+def item_order(order: dict[str, int], recency: dict[str, str] | None = None):
+    """Entity, then the project block, then each case block newest first, then
+    tier. A name carried by two cases is two blocks, never one identity (PR #308
+    review round 2)."""
+    rec = recency or {}
+
     def key(i: dict):
         store = i.get("store") or PROJECT_STORE
-        return (order.get(norm(i["entity"]), 99), 0 if store == PROJECT_STORE else 1, store, TIER.get(i["kind"], 9))
-    return key
+        return (order.get(norm(i["entity"]), 99), 0 if store == PROJECT_STORE else 1,
+                "" if store == PROJECT_STORE else rec.get(store, ""), store, TIER.get(i["kind"], 9))
+
+    def wrapped(i: dict):
+        k = key(i)
+        # Newest date first, and on a tie the HIGHER case number first: in a
+        # case-NNN scheme the number grows with time, and a fresh checkout gives
+        # every doc one date (PR #308 review round 8). Both descend by sorting on
+        # the negated code points.
+        return (k[0], k[1], tuple(-ord(c) for c in k[2]), tuple(-ord(c) for c in k[3]), k[4])
+    return wrapped
 
 
 def block_label(it: dict) -> str:
@@ -1580,7 +1675,16 @@ def deadline_note(bundle: dict) -> str:
     dropped = bundle.get("entities_dropped") or []
     if dropped:
         parts.append(f" ENTITIES DROPPED (cap {MAX_ENTITIES}): {', '.join(dropped)}.")
+    cut_stores = (bundle.get("budget") or {}).get("stores_cut") or []
+    if cut_stores:
+        parts.append(ceiling_note_text(cut_stores))
     return "".join(parts)
+
+
+def ceiling_note_text(cut_stores: list[str]) -> str:
+    """Bounded: six names and a count, so the disclosure never eats the budget."""
+    shown = ", ".join(cut_stores[:6]) + (f" and {len(cut_stores) - 6} more" if len(cut_stores) > 6 else "")
+    return f" CEILING: {len(cut_stores)} store(s) with hits reached you with nothing: {shown} (full list in the receipt)."
 
 
 def render_header(bundle: dict) -> str:
@@ -1594,6 +1698,8 @@ def render_header(bundle: dict) -> str:
     def suffix(e: dict) -> str:
         if e.get("kind") == "store" and e.get("stores"):
             return f" [{', '.join(e['stores'])}]"
+        if e.get("kind") == "target" and e.get("stores"):
+            return f" [target of {', '.join(e['stores'])}]"
         if e.get("kind") == "docs_hit":
             return " [docs]"
         out = ""
@@ -1615,10 +1721,14 @@ def render_header(bundle: dict) -> str:
 
 
 def scope_note(cov: dict) -> str:
-    """One clause naming what a named case left out of the search."""
+    """One clause naming what a named case left out of the search. The verdict
+    word is relative to the scope and the clause says so, because the engine
+    cannot tell "in jennica pounds, ..." from an incidental "post it on
+    Facebook" matching case-005-facebook (PR #308 review rounds 7 and 8)."""
     if cov.get("scope"):
         n = len(cov.get("stores_excluded") or [])
-        return f" scope: {', '.join(cov['scope'])} + project ({n} other store{'s' if n != 1 else ''} not searched)."
+        return (f" WITHIN SCOPE {', '.join(cov['scope'])} + project only; {n} other store{'s' if n != 1 else ''} "
+                f"not searched (name a different case, or none, to widen).")
     return ""
 
 
@@ -1787,7 +1897,7 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
     entities = resolve_entities(scan, index, fire_alone)
     # Naming a sub-store (a 4_points case) scopes every other entity's search to
     # it plus the project level; naming none searches every store.
-    named_stores = {s for e in entities if e.get("kind") == "store" for s in (e.get("stores") or [])}
+    named_stores = {s for e in entities if e.get("kind") in ("store", "target") for s in (e.get("stores") or [])}
     search_stores = [project] + [s for s in substores if not named_stores or s["name"] in named_stores]
     # What the scope left out is a fact on the wire, not only in the receipt:
     # "payment fraud" in a prompt matched case-031-payment-fraud and silently
@@ -2061,13 +2171,19 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
     kept, cut, ceiling_hit = assemble(items, entities, ceiling, header_len)
     bundle["items"] = kept
     source_cut = sum(r["cut"] for r in source_rows)
+    # The cut-stores note is on the wire, so it is set BEFORE the exact fit and
+    # the fit pays for it; recomputed after, since the fit never drops a pinned
+    # line and so never cuts another store whole (PR #308 review round 8).
+    bundle["budget"]["stores_cut"] = stores_cut_by_ceiling(items, bundle["items"])
     cut, ceiling_hit, overflow = fit_to_ceiling(bundle, ceiling, cut, source_cut, ceiling_hit)
+    bundle["budget"]["stores_cut"] = stores_cut_by_ceiling(items, bundle["items"])
     receipt = {
         "ts": ts, "session_id": session_id, "task_class": task_class, "prompt_hash": _hash(prompt),
         "entities": [e["name"] for e in entities], "window": window,
         "sources": source_rows, "declared_missing": missing, "coverage": verdict,
         "scope": sorted(named_stores), "stores_excluded": stores_excluded,
         "conflicts": conflicts, "ceiling_hit": ceiling_hit, "overflow": overflow,
+        "stores_cut": bundle["budget"]["stores_cut"],
         "prompt_chars": len(prompt), "prompt_truncated": truncated,
         "deadline_hit": deadline_hit, "entities_dropped": entities_dropped,
         "candidates_dropped": candidates_dropped,
@@ -2120,6 +2236,15 @@ def fit_to_ceiling(bundle: dict, ceiling: int, cut: int, source_cut: int,
     overflow = max(0, bundle["budget"]["used"] - ceiling)
     bundle["budget"]["overflow"] = overflow   # chars the pins alone ran past the ceiling; 0 when honest
     return cut, ceiling_hit, overflow
+
+
+def stores_cut_by_ceiling(all_items: list[dict], kept: list[dict]) -> list[str]:
+    """Stores that had a hit and reached the model with nothing. With one pin per
+    (entity, store) this is empty unless the pins alone overran the ceiling,
+    and then it is named on the wire (PR #308 review round 8)."""
+    had = {it.get("store") or PROJECT_STORE for it in all_items}
+    have = {it.get("store") or PROJECT_STORE for it in kept}
+    return sorted(had - have)
 
 
 def _record_recall(bundle: dict, session_id: str, recall_path: Path | None) -> None:

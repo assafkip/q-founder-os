@@ -1285,7 +1285,8 @@ def test_same_name_in_two_cases_renders_one_block_per_case(tmp_path):
     assert "\n== John Smith ==\n" not in out, "no project-level block when the project has nothing"
     alpha = out.index("[case-010-alpha] ==")
     bravo = out.index("[case-020-bravo] ==")
-    assert out.index("the victim in alpha") > alpha and out.index("the victim in alpha") < bravo
+    assert bravo < alpha, "the newer case (2026-09-02) renders first (PR #308 review round 8)"
+    assert out.index("the victim in alpha") > alpha and out.index("the suspect in bravo") > bravo and out.index("the suspect in bravo") < alpha
     assert all(i["status"] == "KNOWN" for i in items_of(b, kind="graph")), "a case never supersedes another case"
 
 
@@ -1470,7 +1471,7 @@ def test_scoped_search_names_what_it_left_out(tmp_path):
     assert b["coverage"]["scope"] == ["case-031-payment-fraud"]
     assert b["coverage"]["stores_excluded"] == ["case-001-thing-1", "case-002-thing-2", "case-003-thing-3"]
     head = ks.render(b).splitlines()[0]
-    assert "scope: case-031-payment-fraud + project (3 other stores not searched)" in head, head
+    assert "WITHIN SCOPE case-031-payment-fraud + project only; 3 other stores not searched" in head, head
     assert b["receipt"]["stores_excluded"] == b["coverage"]["stores_excluded"]
     b2 = run(root, "what do we know about Dana Okafor")
     assert b2["coverage"]["scope"] == [] and "scope:" not in ks.render(b2).splitlines()[0]
@@ -1488,6 +1489,98 @@ def test_corpus_common_rule_declares_itself_inapplicable_when_the_candidate_pass
     assert rule["applicable"] is False and "candidate pass truncated" in rule["note"], rule
     assert b["receipt"]["candidates_dropped"] == [], "a count over a cut hit set is not a count"
     assert any(e["name"] == "Wachovia Trust" for e in b["entities"]), "admitted, and the receipt says the rule did not run"
+
+
+# PR #308 review round 8: no store is dropped whole by the ceiling; cases order newest first; a target scopes.
+
+def test_every_store_with_a_hit_keeps_one_line_under_the_ceiling(tmp_path):
+    """A newest store with a lot to say cannot starve the others of their one line."""
+    root, q = make_instance(tmp_path)
+    big = add_store(q, "case-003-charlie", "scope", "nothing about anyone")
+    # inside the per-store caps (12 graph, 6 docs) and still past the ceiling on its own
+    _graph(big / "memory" / "graph.jsonl", [{"s": "Satoshi Nakamoto", "p": "owns", "o": f"thing {k} " + "x" * 540, "t": "2026-09-03"} for k in range(12)])
+    (big / "investigation" / "findings" / "flood.md").write_text("".join(f"Satoshi Nakamoto note {k} " + "y" * 420 + "\n" for k in range(6)))
+    for i in (1, 2):
+        s = add_store(q, f"case-00{i}-alpha{i}", "scope", "nothing about anyone")
+        _graph(s / "memory" / "graph.jsonl", [{"s": "Satoshi Nakamoto", "p": "owns", "o": f"older thing {i}", "t": f"2026-08-0{i}"}])
+    b = run(root, "what do we know about Satoshi Nakamoto")
+    assert b["budget"]["cut"] > 0, "the ceiling must actually bite for this test to mean anything"
+    assert {i.get("store") for i in b["items"]} >= {"case-001-alpha1", "case-002-alpha2", "case-003-charlie"}
+    assert b["budget"]["stores_cut"] == [] and "CEILING:" not in ks.render(b)
+    assert ks.render(b).splitlines()[2] == "== Satoshi Nakamoto [case-003-charlie] ==", "newest store first"
+    assert len(ks.render(b)) <= 8000, "block headings are inside the budget now"
+
+
+def test_ceiling_keeps_the_newest_stores_and_names_the_cut(tmp_path):
+    """The reviewer's shape: 60 cases mention the subject, the answer is the only
+    line in the newest one. Under the ceiling the newest cases survive, the
+    oldest are cut, and the cut ones are named on the wire."""
+    root, q = make_instance(tmp_path)
+    for i in range(1, 60):
+        s = add_store(q, f"case-{i:03d}-alpha{i:02d}", "scope", "nothing about anyone")
+        day = f"2026-{7 + i // 28:02d}-{i % 28 + 1:02d}"
+        _graph(s / "memory" / "graph.jsonl", [{"s": "Satoshi Nakamoto", "p": "owns", "o": f"thing {i} " + "x" * 90, "t": day}])
+    add_store(q, "case-060-alpha60", "scope", "Satoshi Nakamoto ANSWER lives here.")
+    b = run(root, "what do we know about Satoshi Nakamoto")
+    assert any("ANSWER lives here" in i["text"] for i in b["items"]), "the newest case reaches the model"
+    assert ks.render(b).splitlines()[2] == "== Satoshi Nakamoto [case-060-alpha60] =="
+    cut_stores = b["budget"]["stores_cut"]
+    assert cut_stores, "60 lines of this size cannot fit 8,000 chars; something must be cut"
+    kept_nums = {int(i["store"].split("-")[1]) for i in b["items"] if i.get("store", "").startswith("case-")}
+    cut_nums = {int(s.split("-")[1]) for s in cut_stores}
+    assert max(cut_nums) < min(kept_nums), (sorted(cut_nums)[-3:], sorted(kept_nums)[:3])
+    assert f"CEILING: {len(cut_stores)} store(s) with hits reached you with nothing: " in ks.render(b)
+    assert b["receipt"]["stores_cut"] == cut_stores and len(ks.render(b)) <= 8000
+
+
+def test_a_store_cut_by_the_ceiling_is_named(tmp_path, monkeypatch):
+    root, q = make_instance(tmp_path)
+    for i in range(1, 4):
+        s = add_store(q, f"case-00{i}-alpha{i}", "scope", "Dana Okafor " + "y" * 300 + f" {i}.")
+    b = run(root, "what do we know about Dana Okafor")
+    bundle_items = list(b["items"])
+    kept = [i for i in bundle_items if (i.get("store") or "project") != "case-003-alpha3"]
+    assert ks.stores_cut_by_ceiling(bundle_items, kept) == ["case-003-alpha3"]
+    b["budget"]["stores_cut"] = ["case-003-alpha3"]
+    assert "CEILING: 1 store(s) with hits reached you with nothing: case-003-alpha3" in ks.render(b)
+
+
+def test_target_stem_scopes_to_the_declaring_case(tmp_path):
+    root, q = make_instance(tmp_path)
+    for i in range(1, 7):
+        add_store(q, f"case-00{i}-alpha{i}", "scope", f"Miami appears in case {i}.")
+    t = q / "investigations" / "case-001-alpha1" / "investigation" / "targets" / "miami.md"
+    t.write_text("# miami\n\nMiami target notes.\n")
+    b = run(root, "what do we know about miami")
+    ent = next(e for e in b["entities"] if e["kind"] == "target")
+    assert ent["stores"] == ["case-001-alpha1"]
+    assert b["coverage"]["scope"] == ["case-001-alpha1"] and len(b["coverage"]["stores_excluded"]) == 5
+    assert all("case-001-alpha1" in i["src"] or "/q-fix/" in i["src"] for i in b["items"]), [i["src"] for i in b["items"]]
+    assert "[target of case-001-alpha1]" in ks.render(b).splitlines()[0]
+
+
+def test_unreadable_handoff_is_filed_under_handoff(tmp_path):
+    root, q = make_instance(tmp_path)
+    (q / "memory" / "last-handoff.md").chmod(0)
+    try:
+        b = run(root, "what do we know about Dana Okafor")
+    finally:
+        (q / "memory" / "last-handoff.md").chmod(0o644)
+    row = receipt_row(b, "handoff")
+    assert row["problem"] and "last-handoff" in row["problem"] and row["present"] is False, row   # unreadable, the way a ledger is
+    assert receipt_row(b, "canonical")["problem"] is None and receipt_row(b, "canonical")["present"] is True
+
+
+def test_store_recency_beats_case_number(tmp_path):
+    """An older-numbered case with newer activity renders before a newer-numbered
+    quiet one; the case number is only the tie-break for a fresh checkout."""
+    root, q = make_instance(tmp_path)
+    a = add_store(q, "case-001-alpha", "scope", "nothing")
+    b_ = add_store(q, "case-050-bravo", "scope", "nothing")
+    _graph(a / "memory" / "graph.jsonl", [{"s": "Satoshi Nakamoto", "p": "owns", "o": "fresh work", "t": "2026-09-01"}])
+    _graph(b_ / "memory" / "graph.jsonl", [{"s": "Satoshi Nakamoto", "p": "owns", "o": "old work", "t": "2026-07-01"}])
+    heads = [l for l in ks.render(run(root, "what do we know about Satoshi Nakamoto")).splitlines() if l.startswith("== ")]
+    assert heads[0] == "== Satoshi Nakamoto [case-001-alpha] ==", heads
 
 
 # ---------------------------------------------------------------- the hook
