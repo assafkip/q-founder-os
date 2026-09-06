@@ -161,7 +161,8 @@ def items_of(bundle, kind=None, entity=None):
     if kind:
         out = [i for i in out if i["kind"] == kind]
     if entity:
-        out = [i for i in out if i["entity"] == entity]
+        # a merged heading ("== A, B ==") carries B in co_entities (round 11)
+        out = [i for i in out if i["entity"] == entity or entity in (i.get("co_entities") or [])]
     return out
 
 
@@ -901,6 +902,842 @@ def test_missing_manifest_is_observable_not_silent(tmp_path):
     assert run(root, "what do we know about Dana Okafor") is None
     r = json.loads((q / "memory" / ".knowledge-supply-receipts.jsonl").read_text().splitlines()[-1])
     assert r["error"] == "manifest_missing"
+
+
+# ---------------------------------------------------------------- project folders
+# Founder-directed 2026-09-05 (plan knowledge-supply-project-folders-2026-09-05):
+# every project reads its OWN folder, and each 4_points investigation is its own
+# knowledge base. Reproducer: 4_points had 1,475 case files and an index of 40;
+# a consulting instance had 83 files and an index of 0, so the reader never woke up.
+
+INVESTIGATION_MANIFEST = HERE.parent / "knowledge-sources.investigation.json"
+
+
+def add_store(q: Path, name: str, scope_line: str, finding_line: str) -> Path:
+    s = q / "investigations" / name
+    (s / "canonical").mkdir(parents=True)
+    (s / "memory").mkdir()
+    (s / "investigation" / "findings").mkdir(parents=True)
+    (s / "investigation" / "targets").mkdir(parents=True)
+    (s / "canonical" / "scope.md").write_text(f"# Investigation Scope\n\n## Primary Question\n\n{scope_line}\n")
+    (s / "investigation" / "findings" / "finding-001.md").write_text(
+        f"# Finding 001\n\n## Summary\n\n{finding_line}\n\n## Next Steps\n\n- none\n")
+    return s
+
+
+def make_bare_instance(tmp: Path) -> tuple[Path, Path]:
+    """A project with NO graph, relationships, commitments or meetings: documents only.
+    a consulting instance's shape on 2026-09-05."""
+    root = tmp / "bare"
+    q = root / "q-bare"
+    for d in ("canonical", "memory", "output", ".q-system"):
+        (q / d).mkdir(parents=True)
+    shutil.copy(MANIFEST, q / ".q-system" / "knowledge-sources.json")
+    (q / "canonical" / "client-profile.md").write_text("# Client\n\nThe client sells gold coins.\n")
+    (q / "output" / "brief-2026-08-14.md").write_text(
+        "# Brief\n\nBluepeak asked for a name column on the intake form.\n\n## Next Steps\n\n- reply to the carrier\n")
+    return root, q
+
+
+def receipt_row(bundle, cls):
+    return next(r for r in bundle["receipt"]["sources"] if r["class"] == cls)
+
+
+def test_store_named_in_prompt_scopes_to_that_store(tmp_path):
+    root, q = make_instance(tmp_path)
+    add_store(q, "case-001-foo-bar", "Why does Foo Bar keep getting breached?", "Dana Okafor briefed the Foo Bar victim list.")
+    add_store(q, "case-002-other-thing", "What is Other Thing?", "Dana Okafor also appears in the Other Thing case.")
+    b = run(root, "what do we know about foo bar")
+    assert b is not None
+    ents = {e["name"]: e for e in b["entities"]}
+    assert "foo bar" in ents and ents["foo bar"]["kind"] == "store" and ents["foo bar"]["stores"] == ["case-001-foo-bar"]
+    srcs = [i["src"] for i in b["items"]]
+    assert any("investigations/case-001-foo-bar/canonical/scope.md:5" in s for s in srcs), srcs
+    assert any("investigations/case-001-foo-bar/investigation/findings/finding-001.md:5" in s for s in srcs), srcs
+    assert not any("case-002-other-thing" in s for s in srcs), srcs
+
+
+def test_store_plus_person_never_leaks_the_other_store(tmp_path):
+    root, q = make_instance(tmp_path)
+    add_store(q, "case-001-foo-bar", "scope", "Dana Okafor briefed the Foo Bar victim list.")
+    add_store(q, "case-002-other-thing", "scope", "Dana Okafor also appears in the Other Thing case.")
+    b = run(root, "in foo bar, what did Dana Okafor brief")
+    dana = items_of(b, entity="Dana Okafor")
+    assert any("case-001-foo-bar" in i["src"] for i in dana), [i["src"] for i in dana]
+    assert not any("case-002-other-thing" in i["src"] for i in b["items"]), [i["src"] for i in b["items"]]
+    assert any(i["kind"] == "graph" for i in dana)   # project-level stores are always in scope
+
+
+def test_no_store_named_searches_every_store(tmp_path):
+    root, q = make_instance(tmp_path)
+    add_store(q, "case-001-foo-bar", "scope", "Dana Okafor briefed the Foo Bar victim list.")
+    add_store(q, "case-002-other-thing", "scope", "Dana Okafor also appears in the Other Thing case.")
+    b = run(root, "what do we know about Dana Okafor")
+    srcs = [i["src"] for i in items_of(b, kind="doc")]
+    assert any("case-001-foo-bar" in s for s in srcs) and any("case-002-other-thing" in s for s in srcs), srcs
+    row = receipt_row(b, "docs")
+    assert row["stores_searched"] == 3 and sorted(row["stores_hit"]) == ["case-001-foo-bar", "case-002-other-thing"]
+    assert receipt_row(b, "canonical")["stores_searched"] == 3
+
+
+def test_target_file_stem_fires_alone_but_a_finding_stem_does_not(tmp_path):
+    root, q = make_instance(tmp_path)
+    s = add_store(q, "case-003-x-case", "scope", "finding")
+    (s / "investigation" / "targets" / "acme-corp.md").write_text("# acme-corp\n\nacme-corp runs the fake exchange.\n")
+    (s / "investigation" / "findings" / "weird-note.md").write_text("# weird-note\n\nweird-note is a finding file.\n")
+    b = run(root, "pull everything on acme-corp")
+    assert b is not None and any(e["kind"] == "target" and e["name"] == "acme corp" for e in b["entities"])
+    assert any(i["text"] == "acme-corp runs the fake exchange." for i in items_of(b, kind="doc"))
+    b2 = run(root, "pull everything on weird-note")
+    assert b2 is None or not any(e["name"] == "weird note" for e in b2["entities"])
+
+
+def test_proper_nouns_file_indexes_curated_names_only(tmp_path):
+    root, q = make_instance(tmp_path)
+    (q / "canonical" / "proper-nouns.txt").write_text("# names kept OUT of common words\n\nMarilyn\nBlue Peak\n")
+    (q / "output" / "call-2026-09-01.md").write_text("# Call\n\nMarilyn asked for the pay sheet by Friday.\n")
+    b = run(root, "what did Marilyn ask for")
+    assert b is not None and any(e["kind"] == "noun" and e["name"] == "Marilyn" for e in b["entities"])
+    docs = items_of(b, kind="doc", entity="Marilyn")
+    assert docs and docs[0]["text"] == "Marilyn asked for the pay sheet by Friday."
+    assert docs[0]["src"].endswith("output/call-2026-09-01.md:3")
+    manifest, _ = ks.load_manifest(q, root)
+    assert ks.load_stores(q, root, manifest)[0]["noun_names"] == ["Marilyn", "Blue Peak"], "comment and blank lines never index"
+
+
+def test_docs_class_returns_verbatim_line_after_graph_and_canonical(tmp_path):
+    root, q = make_instance(tmp_path)
+    (q / "output" / "notes-2026-09-01.md").write_text("# Notes\n\nDana Okafor asked for the runbook in writing.\n")
+    b = run(root, "what do we know about Dana Okafor")
+    docs = items_of(b, kind="doc", entity="Dana Okafor")
+    assert docs and docs[0]["text"] == "Dana Okafor asked for the runbook in writing."
+    assert docs[0]["src"].endswith("output/notes-2026-09-01.md:3")
+    kinds = [i["kind"] for i in b["items"] if i["entity"] == "Dana Okafor"]
+    assert kinds.index("doc") > kinds.index("graph") and kinds.index("doc") > kinds.index("canonical")
+    row = receipt_row(b, "docs")
+    assert row["engine"] == "grep" and row["files"] >= 1 and row["present"] is True
+
+
+def test_docs_python_fallback_matches_grep(tmp_path, monkeypatch):
+    root, q = make_instance(tmp_path)
+    (q / "output" / "notes.md").write_text("Dana Okafor asked for the runbook in writing.\n")
+    a = run(root, "what do we know about Dana Okafor")
+    monkeypatch.setattr(ks.shutil, "which", lambda name: None)
+    b = run(root, "what do we know about Dana Okafor")
+    assert [i["src"] for i in items_of(a, kind="doc")] == [i["src"] for i in items_of(b, kind="doc")]
+    assert receipt_row(a, "docs")["engine"] == "grep" and receipt_row(b, "docs")["engine"] == "python"
+
+
+def test_docs_engines_agree_on_the_per_file_cap_and_both_report_it(tmp_path, monkeypatch):
+    """PR #308 review round 4: grep -m capped a file at 200 silently while the
+    Python scan returned 300, under searched=True. The one way the engines could
+    differ is the one this fixture exercises."""
+    root, q = make_instance(tmp_path)
+    (q / "output" / "flood.md").write_text("".join(f"Dana Okafor line {i}\n" for i in range(300)))
+    manifest, _ = ks.load_manifest(q, root)
+    project, subs, _ = ks.load_all_stores(q, root, manifest)
+    files = project["doc_files"]
+    g_hits, g_engine = ks.search_docs(files, ["Dana Okafor"], ignore_case=True, word=False, deadline=dt.datetime.now().timestamp() + 5)
+    monkeypatch.setattr(ks.shutil, "which", lambda name: None)
+    p_hits, p_engine = ks.search_docs(files, ["Dana Okafor"], ignore_case=True, word=False, deadline=dt.datetime.now().timestamp() + 5)
+    assert len(g_hits) == len(p_hits) == ks.GREP_MAX_PER_FILE
+    assert [h[1] for h in g_hits] == [h[1] for h in p_hits]
+    assert g_engine == "grep (file cap)" and p_engine == "python (file cap)"
+    monkeypatch.undo()
+    b = run(root, "what do we know about Dana Okafor")
+    row = receipt_row(b, "docs")
+    assert row["searched"] == "partial" and "file cap" in row["problem"], row
+    # exactly the cap is NOT a truncation (PR #308 review round 7 minor 4)
+    (q / "output" / "flood.md").write_text("".join(f"Dana Okafor line {i}\n" for i in range(ks.GREP_MAX_PER_FILE)))
+    project2, subs2, _ = ks.load_all_stores(q, root, manifest)
+    g2, e2 = ks.search_docs(project2["doc_files"], ["Dana Okafor"], ignore_case=True, word=False, deadline=dt.datetime.now().timestamp() + 5)
+    assert len(g2) == ks.GREP_MAX_PER_FILE and e2 == "grep", (len(g2), e2)
+    monkeypatch.setattr(ks.shutil, "which", lambda name: None)
+    p2, pe2 = ks.search_docs(project2["doc_files"], ["Dana Okafor"], ignore_case=True, word=False, deadline=dt.datetime.now().timestamp() + 5)
+    assert len(p2) == ks.GREP_MAX_PER_FILE and pe2 == "python", (len(p2), pe2)
+    monkeypatch.undo()
+    b2 = run(root, "what do we know about Dana Okafor")
+    assert receipt_row(b2, "docs")["searched"] is True
+
+
+def test_prompt_proper_noun_with_doc_hits_becomes_entity(tmp_path):
+    root, q = make_bare_instance(tmp_path)
+    b = run(root, "what did Bluepeak ask for")
+    assert b is not None, "an index of 0 must not mean the reader never wakes up"
+    e = b["entities"][0]
+    assert e["name"] == "Bluepeak" and e["resolved_from"] == "docs" and e["kind"] == "docs_hit"
+    assert any(i["text"] == "Bluepeak asked for a name column on the intake form." for i in items_of(b, kind="doc"))
+    assert b["coverage"]["verdict"] in ("FULL", "PARTIAL")
+
+
+def test_prompt_proper_noun_without_hits_lowercase_or_initial_never_fires(tmp_path):
+    root, q = make_bare_instance(tmp_path)
+    assert run(root, "what did Nobody ask for") is None
+    assert run(root, "what did bluepeak ask for") is None
+    assert run(root, "Bluepeak asked for what") is None
+    assert run(root, "- Bluepeak asked for what") is None
+
+
+def test_headings_never_become_entities(tmp_path):
+    root, q = make_bare_instance(tmp_path)
+    assert run(root, "what are the next steps") is None
+    assert run(root, "what are the Next Steps here") is None
+
+
+def test_docs_skip_big_hidden_and_node_modules(tmp_path):
+    root, q = make_instance(tmp_path)
+    (q / "output" / "big.md").write_text("Dana Okafor big\n" + "x" * 600_000)
+    (q / "output" / ".hidden").mkdir()
+    (q / "output" / ".hidden" / "h.md").write_text("Dana Okafor hidden\n")
+    (q / "output" / "node_modules").mkdir()
+    (q / "output" / "node_modules" / "n.md").write_text("Dana Okafor node\n")
+    (q / "output" / "ok.md").write_text("Dana Okafor ok\n")
+    b = run(root, "what do we know about Dana Okafor")
+    texts = [i["text"] for i in items_of(b, kind="doc")]
+    assert "Dana Okafor ok" in texts
+    assert not any(t in texts for t in ("Dana Okafor big", "Dana Okafor hidden", "Dana Okafor node"))
+    assert receipt_row(b, "docs")["files"] == 1
+    assert receipt_row(b, "docs")["files_skipped_oversize"] == 1, "a declared skip is counted, never silent"
+
+
+def test_docs_items_are_verbatim_and_dated_by_file(tmp_path):
+    root, q = make_instance(tmp_path)
+    add_store(q, "case-001-foo-bar", "scope", "Dana Okafor briefed the Foo Bar victim list.")
+    b = run(root, "what do we know about Dana Okafor")
+    for it in items_of(b, kind="doc"):
+        text = Path(it["abs_src"]).read_text()
+        for piece in ks.verbatim_pieces(it):
+            assert piece in text
+        assert it["t"] is not None
+
+
+def test_shipped_manifests_declare_project_folders():
+    m = json.loads(MANIFEST.read_text())
+    assert m["_version"] >= 2
+    assert any(s["glob"] == "investigations/case-*" for s in m["stores"])
+    assert {"output", "investigation", "research"} <= set(m["folders"])
+    assert {"targets", "clients"} <= set(m["entity_dirs"])
+    assert {"exports", "screenshots", "raw-collections"} <= set(m["skip_dirs"]), "skips are declared, never hardcoded"
+    assert set(inv_skip := json.loads(INVESTIGATION_MANIFEST.read_text())["skip_dirs"]) >= {"raw-collections"}
+    assert {"store", "target", "noun"} <= set(m["entity_kinds_that_fire_alone"])
+    for cls, spec in m["classes"].items():
+        assert "docs" in spec["sources"], cls
+    inv = json.loads(INVESTIGATION_MANIFEST.read_text())
+    lookup = inv["classes"]["entity_lookup"]["sources"]
+    assert lookup["graph"]["required"] and lookup["canonical"]["required"] and lookup["docs"]["required"]
+    for cls, spec in inv["classes"].items():
+        for name in ("commitments", "meetings", "relationships"):
+            assert not spec["sources"].get(name, {}).get("required"), (cls, name)
+
+
+def test_investigation_manifest_loads_as_instance_override(tmp_path):
+    root, q = make_instance(tmp_path)
+    (q / ".q-system" / "data").mkdir()
+    shutil.copy(INVESTIGATION_MANIFEST, q / ".q-system" / "data" / "knowledge-sources.json")
+    for p in ("my-project/commitments.jsonl", "output/granola-cache.json", "my-project/relationships.md"):
+        (q / p).unlink()
+    add_store(q, "case-001-foo-bar", "scope", "Dana Okafor briefed the Foo Bar victim list.")
+    b = run(root, "what is still outstanding on Dana Okafor")
+    assert b is not None and b["task_class"] == "commitment"
+    assert b["coverage"]["verdict"] == "FULL", b["coverage"]
+    assert b["receipt"]["manifest"].endswith(".q-system/data/knowledge-sources.json")
+
+
+def test_corpus_common_word_is_dropped_unless_a_store_is_named(tmp_path):
+    root, q = make_instance(tmp_path)
+    for i in range(1, 7):
+        add_store(q, f"case-00{i}-thing-{i}", "scope", f"Facebook profile checked in case {i}.")
+    b0 = run(root, "update on the Facebook profiles", record=True)
+    assert b0 is not None and b0["items"] == [] and "corpus-common" in ks.render(b0) and "Facebook (6 stores)" in ks.render(b0), \
+        "a word in 6 of 6 cases is not a subject, and the hook still says it searched (round 7 minor 5)"
+    rows = [json.loads(l) for l in (q / "memory" / ".knowledge-supply-misses.jsonl").read_text().splitlines()]
+    assert any(r["candidate"] == "Facebook" and r["shape"] == "corpus_common" and r["stores"] == 6 for r in rows), rows
+    b = run(root, "in thing 2, what did the Facebook profiles show")
+    names = {e["name"]: e for e in b["entities"]}
+    assert "Facebook" in names and names["Facebook"]["resolved_from"] == "docs"
+    srcs = [i["src"] for i in items_of(b, entity="Facebook")]
+    assert srcs and all("case-002-thing-2" in s for s in srcs), srcs
+
+
+def test_dropped_candidates_are_named_in_the_receipt(tmp_path):
+    root, q = make_instance(tmp_path)
+    for i in range(1, 7):
+        add_store(q, f"case-00{i}-thing-{i}", "scope", f"Facebook profile checked in case {i}.")
+    b = run(root, "what do we know about Dana Okafor and the Facebook profiles")
+    assert b is not None and not any(e["name"] == "Facebook" for e in b["entities"])
+    assert b["receipt"]["candidates_dropped"] == [{"candidate": "Facebook", "stores": 6}]
+
+
+# PR #308 review round 1: the reviewer's executed reproducers, kept as tests.
+
+def test_same_subject_in_two_cases_searches_both(tmp_path):
+    root, q = make_instance(tmp_path)
+    add_store(q, "case-010-lapsus", "scope", "LAPSUS first engagement: server in Rio.")
+    add_store(q, "case-041-lapsus", "scope", "LAPSUS second engagement: server in Oslo.")
+    b = run(root, "what do we know about lapsus")
+    ent = next(e for e in b["entities"] if e["kind"] == "store")
+    assert ent["stores"] == ["case-010-lapsus", "case-041-lapsus"]
+    srcs = [i["src"] for i in b["items"]]
+    assert any("case-010-lapsus" in s for s in srcs) and any("case-041-lapsus" in s for s in srcs), srcs
+    assert receipt_row(b, "docs")["stores_searched"] == 3
+    assert "case-010-lapsus, case-041-lapsus" in ks.render(b).splitlines()[0]
+
+
+def _graph(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+
+
+def test_alias_asserted_in_one_case_never_rewrites_another(tmp_path):
+    root, q = make_instance(tmp_path)
+    a = add_store(q, "case-010-alpha", "scope", "alpha finding")
+    b_ = add_store(q, "case-020-bravo", "scope", "bravo finding")
+    _graph(a / "memory" / "graph.jsonl", [
+        {"s": "Widget Corp", "p": "alias_of", "o": "Zeta Holdings", "t": "2026-09-01"},
+        {"s": "Zeta Holdings", "p": "status", "o": "under sanctions", "t": "2026-09-02"},
+    ])
+    _graph(b_ / "memory" / "graph.jsonl", [
+        {"s": "Widget Corp", "p": "status", "o": "clean, no findings", "t": "2026-09-03"},
+    ])
+    b = run(root, "what do we know about Widget Corp")
+    names = {e["name"]: e for e in b["entities"]}
+    assert "Widget Corp" in names, "a name another case contributed on its own survives the alias edge"
+    assert "Zeta Holdings" in names and names["Zeta Holdings"]["via_alias"] == "Widget Corp"
+    assert names["Zeta Holdings"]["alias_stores"] == {"Widget Corp": ["case-010-alpha"]}
+    widget = items_of(b, entity="Widget Corp")
+    zeta = items_of(b, entity="Zeta Holdings")
+    assert widget and all("case-020-bravo" in i["src"] for i in widget), [i["src"] for i in widget]
+    assert zeta and all("case-010-alpha" in i["src"] for i in zeta), [i["src"] for i in zeta]
+    assert not any("clean, no findings" in i["text"] for i in zeta), "case-020's line never lands under Zeta"
+    assert "(via alias Widget Corp: case-010-alpha)" in ks.render(b).splitlines()[0]
+
+
+def test_project_level_alias_still_applies_everywhere(tmp_path):
+    root, q = make_instance(tmp_path)   # the fixture graph has "DO alias_of Dana Okafor" at the project level
+    add_store(q, "case-001-foo-bar", "DO briefed the Foo Bar victim list.", "finding")
+    b = run(root, "what do we know about Dana Okafor")
+    hits = [i for i in items_of(b, kind="canonical", entity="Dana Okafor") if "case-001-foo-bar" in i["src"]]
+    assert hits and hits[0]["text"] == "DO briefed the Foo Bar victim list.", "a project-level alias reaches every case"
+
+
+def test_deadline_on_the_first_required_class_is_not_full(tmp_path):
+    root, q = make_instance(tmp_path)
+    (q / ".q-system" / "data").mkdir()
+    shutil.copy(INVESTIGATION_MANIFEST, q / ".q-system" / "data" / "knowledge-sources.json")
+    add_store(q, "case-001-foo-bar", "scope", "Dana Okafor briefed the Foo Bar victim list yesterday.")
+    b = run(root, "what happened yesterday with Dana Okafor", deadline_s=0)
+    assert b is not None and b["task_class"] == "temporal_event"
+    assert b["coverage"]["verdict"] != "FULL", b["coverage"]
+    assert "docs" in b["coverage"]["missing"]
+    row = receipt_row(b, "docs")
+    assert row["searched"] is False and row["stores_searched"] == 0 and row["problem"] == "not searched (deadline)"
+
+
+def test_receipt_says_when_the_corpus_common_rule_cannot_run(tmp_path):
+    root, q = make_bare_instance(tmp_path)
+    for i in range(8):
+        (q / "output" / f"r{i}.md").write_text("Bluepeak again.\n")
+    b = run(root, "what did Bluepeak ask for")
+    assert b["receipt"]["candidate_rule"] == {"max_stores": 4, "applicable": False, "note": "single store: rule cannot run"}
+    root2, q2 = make_instance(tmp_path)
+    add_store(q2, "case-001-foo-bar", "scope", "x")
+    b2 = run(root2, "what do we know about Dana Okafor")
+    assert b2["receipt"]["candidate_rule"]["applicable"] is True
+
+
+# PR #308 review round 2: truncation is one rule, the docs fold is bounded, one block per case.
+
+def test_truncated_docs_search_is_partial_never_full(tmp_path, monkeypatch):
+    root, q = make_instance(tmp_path)
+    (q / ".q-system" / "data").mkdir()
+    shutil.copy(INVESTIGATION_MANIFEST, q / ".q-system" / "data" / "knowledge-sources.json")
+    add_store(q, "case-001-foo-bar", "scope", "Dana Okafor briefed the Foo Bar victim list.")
+    for reason in ("grep (timeout)", "grep (deadline)", "python (budget)", "grep (hit cap)"):
+        monkeypatch.setattr(ks, "search_docs", lambda files, patterns, **kw: ([], reason))
+        b = run(root, "what do we know about Dana Okafor")
+        row = receipt_row(b, "docs")
+        assert row["searched"] == "partial" and row["problem"].startswith("partially searched ("), (reason, row)
+        assert b["coverage"]["verdict"] != "FULL" and "docs" in b["coverage"]["missing"], (reason, b["coverage"])
+        assert "partially searched" in b["coverage"]["missing_paths"]["docs"]
+
+
+def test_docs_hit_cap_bounds_the_fold(tmp_path, monkeypatch):
+    root, q = make_instance(tmp_path)
+    (q / "output" / "flood.md").write_text("".join(f"Dana Okafor line {i}\n" for i in range(3000)))
+    monkeypatch.setattr(ks, "MAX_DOC_HITS", 40)
+    b = run(root, "what do we know about Dana Okafor")
+    row = receipt_row(b, "docs")
+    assert "(hit cap)" in row["engine"] and row["searched"] == "partial", row
+    assert len(items_of(b, kind="doc")) <= 40
+    monkeypatch.setattr(ks.shutil, "which", lambda name: None)
+    b2 = run(root, "what do we know about Dana Okafor")
+    assert "(hit cap)" in receipt_row(b2, "docs")["engine"]
+
+
+def test_same_name_in_two_cases_renders_one_block_per_case(tmp_path):
+    root, q = make_instance(tmp_path)
+    a = add_store(q, "case-010-alpha", "scope", "alpha")
+    b_ = add_store(q, "case-020-bravo", "scope", "bravo")
+    _graph(a / "memory" / "graph.jsonl", [{"s": "John Smith", "p": "role", "o": "the victim in alpha", "t": "2026-09-01"}])
+    _graph(b_ / "memory" / "graph.jsonl", [{"s": "John Smith", "p": "role", "o": "the suspect in bravo", "t": "2026-09-02"}])
+    b = run(root, "what do we know about John Smith")
+    out = ks.render(b)
+    assert "== John Smith [case-010-alpha] ==" in out and "== John Smith [case-020-bravo] ==" in out
+    assert "\n== John Smith ==\n" not in out, "no project-level block when the project has nothing"
+    alpha = out.index("[case-010-alpha] ==")
+    bravo = out.index("[case-020-bravo] ==")
+    assert bravo < alpha, "the newer case (2026-09-02) renders first (PR #308 review round 8)"
+    assert out.index("the victim in alpha") > alpha and out.index("the suspect in bravo") > bravo and out.index("the suspect in bravo") < alpha
+    assert all(i["status"] == "KNOWN" for i in items_of(b, kind="graph")), "a case never supersedes another case"
+
+
+def test_project_block_comes_before_case_blocks(tmp_path):
+    root, q = make_instance(tmp_path)
+    add_store(q, "case-001-foo-bar", "scope", "Dana Okafor briefed the Foo Bar victim list.")
+    out = ks.render(run(root, "what do we know about Dana Okafor"))
+    assert out.index("== Dana Okafor ==") < out.index("== Dana Okafor [case-001-foo-bar] ==")
+
+
+# PR #308 review round 3: the fold's deadline always ends it; the project walk never enters a case.
+
+def test_docs_fold_stops_at_the_deadline_even_after_a_hit_cap(tmp_path, monkeypatch):
+    import time as _time
+    root, q = make_instance(tmp_path)
+    (q / "output" / "one.md").write_text("Dana Okafor line\n")
+    manifest, _ = ks.load_manifest(q, root)
+    project, subs, _ = ks.load_all_stores(q, root, manifest)
+    ent = {"name": "Dana Okafor", "kind": "contact", "aliases": [], "alias_stores": {}, "stores": []}
+    f = q / "output" / "one.md"
+    flood = [(f, 1, "Dana Okafor line")] * 200_000
+    for engine_in in ("grep (hit cap)", "grep"):
+        monkeypatch.setattr(ks, "search_docs", lambda files, patterns, **kw: (flood, engine_in))
+        t0 = _time.time()
+        out, meta = ks.resolve_docs([ent], [project] + subs, root, {}, deadline=_time.time() - 1)
+        assert _time.time() - t0 < 1.0, "the fold must end at the deadline, not after 200,000 hits"
+        assert sum(len(v) for by in out.values() for v in by.values()) <= 500
+        assert "(deadline)" in meta["engine"] or "(hit cap)" in meta["engine"]
+        if engine_in == "grep (hit cap)":
+            assert meta["engine"] == "grep (hit cap)", "an existing stop reason is kept, not doubled"
+
+
+def test_project_store_never_indexes_a_substore_target(tmp_path):
+    root, q = make_instance(tmp_path)   # relationships.md present: the loop that used to rebind `name`
+    s = add_store(q, "case-003-x-case", "scope", "finding")
+    (s / "investigation" / "targets" / "acme-corp.md").write_text("# acme-corp\n")
+    manifest, _ = ks.load_manifest(q, root)
+    project, subs, _ = ks.load_all_stores(q, root, manifest)
+    assert project["name"] == "project" and "acme corp" not in project["target_names"], project["target_names"]
+    assert subs[0]["target_names"] == ["acme corp"]
+    assert not any("case-003-x-case" in str(f) for f in project["doc_files"])
+
+
+# PR #308 review round 4: order inside a store is by file time, then mentions, never by name.
+
+def test_docs_order_is_file_time_then_mentions_never_path(tmp_path):
+    import os as _os
+    root, q = make_instance(tmp_path)
+    same = 1_700_000_000
+    for i in range(1, 10):
+        f = q / "output" / f"z-noise-{i}.md"
+        f.write_text("Dana Okafor filler.\n")
+        _os.utime(f, ns=(same * 10**9, same * 10**9))
+    ans = q / "output" / "a-the-answer.md"
+    ans.write_text("Dana Okafor ANSWER one.\nDana Okafor ANSWER two.\nDana Okafor ANSWER three.\n")
+    _os.utime(ans, ns=(same * 10**9, same * 10**9))
+    b = run(root, "what do we know about Dana Okafor")
+    docs = items_of(b, kind="doc")
+    assert docs and "a-the-answer.md" in docs[0]["src"], [i["src"] for i in docs]
+    assert [i["src"].rsplit(":", 1)[-1] for i in docs[:3]] == ["1", "2", "3"], "lines of one file stay in file order"
+    newer = q / "output" / "b-newer.md"
+    newer.write_text("Dana Okafor newer.\n")
+    _os.utime(newer, ns=((same + 60) * 10**9, (same + 60) * 10**9))
+    b2 = run(root, "what do we know about Dana Okafor")
+    assert "b-newer.md" in items_of(b2, kind="doc")[0]["src"], "a file one minute newer on the same date wins"
+
+
+# PR #308 review round 5: unreadable anywhere in scope is never FULL; a candidate stays case-sensitive.
+
+def test_unreadable_copy_in_one_store_is_never_full(tmp_path):
+    root, q = make_instance(tmp_path)
+    s = add_store(q, "case-045-zeta", "scope", "finding")
+    _graph(s / "memory" / "graph.jsonl", [{"s": "Dana Okafor", "p": "status", "o": "sanctioned in zeta", "t": "2026-09-05"}])
+    ok = run(root, "what do we know about Dana Okafor")
+    assert ok["coverage"]["verdict"] == "FULL", "control: a readable case graph is FULL"
+    (s / "memory" / "graph.jsonl").write_text('{"s": "Dana Okafor", "p": "status", "o": "sanct\n')   # a killed writer
+    b = run(root, "what do we know about Dana Okafor")
+    assert b["coverage"]["verdict"] != "FULL", b["coverage"]
+    assert b["coverage"]["missing_paths"]["graph"].endswith("unreadable in case-045-zeta")
+    row = receipt_row(b, "graph")
+    assert row["present"] is True and row["searched"] == "partial" and "case-045-zeta: unreadable" in row["problem"]
+    assert "unreadable in case-045-zeta" in ks.render(b).splitlines()[0], "the header, not only the receipt, says it"
+    # the mirror image: the PROJECT graph corrupt, one healthy case, still never FULL
+    (s / "memory" / "graph.jsonl").write_text(json.dumps({"s": "Dana Okafor", "p": "owns", "o": "zeta", "t": "2026-09-05"}) + "\n")
+    (q / "memory" / "graph.jsonl").write_text("{not json\n{still not\n")
+    b2 = run(root, "what do we know about Dana Okafor")
+    assert b2["coverage"]["verdict"] != "FULL" and "unreadable in project" in b2["coverage"]["missing_paths"]["graph"]
+
+
+def test_docs_candidate_stays_case_sensitive_in_every_resolver(tmp_path):
+    root, q = make_bare_instance(tmp_path)
+    (q / "canonical" / "client-profile.md").write_text("# Client\n\nthe bluepeak channel is closed for now.\n")
+    b = run(root, "what did Bluepeak ask for")
+    ent = next(e for e in b["entities"] if e["name"] == "Bluepeak")
+    assert ent["case_sensitive"] is True
+    texts = [i["text"] for i in b["items"]]
+    assert "Bluepeak asked for a name column on the intake form." in texts
+    assert not any("bluepeak channel" in t for t in texts), texts
+
+
+# PR #308 review round 6: the stop reason is a field; dedupe keeps stores apart; a store name survives.
+
+def test_candidate_pass_truncation_is_partial_without_monkeypatch(tmp_path):
+    """The reviewer's fixture: the index pass (Dana Okafor) finishes clean, the
+    candidate pass (Bluepeak, 300 lines) hits grep -m. No monkeypatch, so a
+    composed engine string cannot hide the stop the way it did in round 6."""
+    root, q = make_instance(tmp_path)
+    (q / ".q-system" / "data").mkdir()
+    shutil.copy(INVESTIGATION_MANIFEST, q / ".q-system" / "data" / "knowledge-sources.json")
+    (q / "output" / "flood.md").write_text("".join(f"Bluepeak asked line {i}\n" for i in range(300)))
+    b = run(root, "what did Bluepeak ask Dana Okafor about")
+    assert any(e["name"] == "Bluepeak" and e["kind"] == "docs_hit" for e in b["entities"])
+    row = receipt_row(b, "docs")
+    assert row["searched"] == "partial", row
+    assert "file cap" in row["problem"] and "candidates" in row["engine"], row
+    assert b["coverage"]["verdict"] != "FULL" and "docs" in b["coverage"]["missing"], b["coverage"]
+
+
+def test_identical_line_in_two_cases_keeps_both(tmp_path):
+    root, q = make_instance(tmp_path)
+    add_store(q, "case-010-alpha", "scope", "Dana Okafor reused the same bulletproof host.")
+    add_store(q, "case-041-beta", "scope", "Dana Okafor reused the same bulletproof host.")
+    b = run(root, "what do we know about Dana Okafor")
+    docs = [i for i in items_of(b, kind="doc") if "bulletproof" in i["text"]]
+    assert sorted(i["store"] for i in docs) == ["case-010-alpha", "case-041-beta"], [i["src"] for i in docs]
+    out = ks.render(b)
+    assert "[case-010-alpha] ==" in out and "[case-041-beta] ==" in out
+    assert b["budget"]["cut"] == 0
+
+
+def test_named_store_survives_the_longest_name_rule(tmp_path):
+    root, q = make_instance(tmp_path)
+    a = add_store(q, "case-010-zeta", "scope", "zeta finding")
+    b_ = add_store(q, "case-020-other", "scope", "other finding")
+    _graph(a / "memory" / "graph.jsonl", [{"s": "Zeta Holdings", "p": "status", "o": "sanctioned", "t": "2026-09-05"}])
+    _graph(b_ / "memory" / "graph.jsonl", [{"s": "Zeta Holdings", "p": "status", "o": "clean", "t": "2026-09-05"}])
+    b = run(root, "in zeta, what do we know about Zeta Holdings")
+    assert any(e["kind"] == "store" and e["stores"] == ["case-010-zeta"] for e in b["entities"]), b["entities"]
+    srcs = [i["src"] for i in b["items"]]
+    assert srcs and not any("case-020-other" in s for s in srcs), srcs
+
+
+# PR #308 review round 7: docs read failures are counted; a scoped search says so; the rule declares itself.
+
+def test_unreadable_doc_files_are_counted_and_an_all_failed_store_degrades(tmp_path, monkeypatch):
+    root, q = make_instance(tmp_path)
+    (q / ".q-system" / "data").mkdir()
+    shutil.copy(INVESTIGATION_MANIFEST, q / ".q-system" / "data" / "knowledge-sources.json")
+    s = add_store(q, "case-001-foo-bar", "scope", "Dana Okafor briefed the Foo Bar victim list.")
+    (q / "output" / "ok.md").write_text("Dana Okafor ok\n")
+    only = s / "investigation" / "findings" / "finding-001.md"
+    for engine_off in (False, True):
+        if engine_off:
+            monkeypatch.setattr(ks.shutil, "which", lambda name: None)
+        only.chmod(0)
+        try:
+            b = run(root, "what do we know about Dana Okafor")
+        finally:
+            only.chmod(0o644)
+        row = receipt_row(b, "docs")
+        assert row["problem"] and "1 of 1 doc file(s) unreadable" in row["problem"], row
+        assert row["searched"] == "partial" and "case-001-foo-bar" in b["coverage"]["missing_paths"].get("docs", ""), b["coverage"]
+        assert b["coverage"]["verdict"] != "FULL"
+    # one unreadable among readable ones in the SAME store: recorded, never PARTIAL
+    (q / "output" / "bad.md").write_text("Dana Okafor bad\n")
+    (q / "output" / "bad.md").chmod(0)
+    only.chmod(0o644)
+    try:
+        b2 = run(root, "what do we know about Dana Okafor")
+    finally:
+        (q / "output" / "bad.md").chmod(0o644)
+    row2 = receipt_row(b2, "docs")
+    assert "1 of 2 doc file(s) unreadable" in (row2["problem"] or "") and row2["searched"] is True, row2
+
+
+def test_scoped_search_names_what_it_left_out(tmp_path):
+    root, q = make_instance(tmp_path)
+    for i in (1, 2, 3):
+        add_store(q, f"case-00{i}-thing-{i}", "scope", f"Dana Okafor fact {i}.")
+    add_store(q, "case-031-payment-fraud", "scope", "nothing here")
+    b = run(root, "for the payment fraud workstream, what do we know about Dana Okafor")
+    assert b["coverage"]["scope"] == ["case-031-payment-fraud"]
+    assert b["coverage"]["stores_excluded"] == ["case-001-thing-1", "case-002-thing-2", "case-003-thing-3"]
+    head = ks.render(b).splitlines()[0]
+    assert "WITHIN SCOPE case-031-payment-fraud + project only; 3 other stores not searched" in head, head
+    assert b["receipt"]["stores_excluded"] == b["coverage"]["stores_excluded"]
+    b2 = run(root, "what do we know about Dana Okafor")
+    assert b2["coverage"]["scope"] == [] and "scope:" not in ks.render(b2).splitlines()[0]
+
+
+def test_corpus_common_rule_declares_itself_inapplicable_when_the_candidate_pass_truncated(tmp_path, monkeypatch):
+    root, q = make_instance(tmp_path)
+    for i in range(1, 7):
+        add_store(q, f"case-00{i}-thing-{i}", "scope", "Wachovia Trust checked here.")
+    # Six stores, one line each, cap five: the cut hit set still spans five stores,
+    # so a rule applied over it WOULD drop the candidate; the correct code does not.
+    monkeypatch.setattr(ks, "MAX_DOC_HITS", 5)
+    b = run(root, "what do we know about Wachovia Trust and Dana Okafor")
+    rule = b["receipt"]["candidate_rule"]
+    assert rule["applicable"] is False and "candidate pass truncated" in rule["note"], rule
+    assert b["receipt"]["candidates_dropped"] == [], "a count over a cut hit set is not a count"
+    assert any(e["name"] == "Wachovia Trust" for e in b["entities"]), "admitted, and the receipt says the rule did not run"
+
+
+# PR #308 review round 8: no store is dropped whole by the ceiling; cases order newest first; a target scopes.
+
+def test_every_store_with_a_hit_keeps_one_line_under_the_ceiling(tmp_path):
+    """A newest store with a lot to say cannot starve the others of their one line."""
+    root, q = make_instance(tmp_path)
+    big = add_store(q, "case-003-charlie", "scope", "nothing about anyone")
+    # inside the per-store caps (12 graph, 6 docs) and still past the ceiling on its own
+    _graph(big / "memory" / "graph.jsonl", [{"s": "Satoshi Nakamoto", "p": "owns", "o": f"thing {k} " + "x" * 540, "t": "2026-09-03"} for k in range(12)])
+    (big / "investigation" / "findings" / "flood.md").write_text("".join(f"Satoshi Nakamoto note {k} " + "y" * 420 + "\n" for k in range(6)))
+    for i in (1, 2):
+        s = add_store(q, f"case-00{i}-alpha{i}", "scope", "nothing about anyone")
+        _graph(s / "memory" / "graph.jsonl", [{"s": "Satoshi Nakamoto", "p": "owns", "o": f"older thing {i}", "t": f"2026-08-0{i}"}])
+    b = run(root, "what do we know about Satoshi Nakamoto")
+    assert b["budget"]["cut"] > 0, "the ceiling must actually bite for this test to mean anything"
+    assert {i.get("store") for i in b["items"]} >= {"case-001-alpha1", "case-002-alpha2", "case-003-charlie"}
+    assert b["budget"]["stores_cut"] == [] and "CEILING:" not in ks.render(b)
+    assert ks.render(b).splitlines()[2] == "== Satoshi Nakamoto [case-003-charlie] ==", "newest store first"
+    assert len(ks.render(b)) <= 8000, "block headings are inside the budget now"
+
+
+def test_ceiling_keeps_the_newest_stores_and_names_the_cut(tmp_path):
+    """The reviewer's shape: 60 cases mention the subject, the answer is the only
+    line in the newest one. Under the ceiling the newest cases survive, the
+    oldest are cut, and the cut ones are named on the wire."""
+    root, q = make_instance(tmp_path)
+    for i in range(1, 60):
+        s = add_store(q, f"case-{i:03d}-alpha{i:02d}", "scope", "nothing about anyone")
+        day = f"2026-{7 + i // 28:02d}-{i % 28 + 1:02d}"
+        _graph(s / "memory" / "graph.jsonl", [{"s": "Satoshi Nakamoto", "p": "owns", "o": f"thing {i} " + "x" * 90, "t": day}])
+    add_store(q, "case-060-alpha60", "scope", "Satoshi Nakamoto ANSWER lives here.")
+    b = run(root, "what do we know about Satoshi Nakamoto")
+    assert any("ANSWER lives here" in i["text"] for i in b["items"]), "the newest case reaches the model"
+    assert ks.render(b).splitlines()[2] == "== Satoshi Nakamoto [case-060-alpha60] =="
+    cut_stores = b["budget"]["stores_cut"]
+    assert cut_stores, "60 lines of this size cannot fit 8,000 chars; something must be cut"
+    kept_nums = {int(i["store"].split("-")[1]) for i in b["items"] if i.get("store", "").startswith("case-")}
+    cut_nums = {int(s.split("-")[1]) for s in cut_stores}
+    assert max(cut_nums) < min(kept_nums), (sorted(cut_nums)[-3:], sorted(kept_nums)[:3])
+    assert f"CEILING: {len(cut_stores)} store(s) with hits reached you with nothing: " in ks.render(b)
+    assert b["receipt"]["stores_cut"] == cut_stores and len(ks.render(b)) <= 8000
+
+
+def test_a_store_cut_by_the_ceiling_is_named(tmp_path, monkeypatch):
+    root, q = make_instance(tmp_path)
+    for i in range(1, 4):
+        s = add_store(q, f"case-00{i}-alpha{i}", "scope", "Dana Okafor " + "y" * 300 + f" {i}.")
+    b = run(root, "what do we know about Dana Okafor")
+    bundle_items = list(b["items"])
+    kept = [i for i in bundle_items if (i.get("store") or "project") != "case-003-alpha3"]
+    assert ks.stores_cut_by_ceiling(bundle_items, kept) == ["case-003-alpha3"]
+    b["budget"]["stores_cut"] = ["case-003-alpha3"]
+    assert "CEILING: 1 store(s) with hits reached you with nothing: case-003-alpha3" in ks.render(b)
+
+
+def test_target_stem_scopes_to_the_declaring_case(tmp_path):
+    root, q = make_instance(tmp_path)
+    for i in range(1, 7):
+        add_store(q, f"case-00{i}-alpha{i}", "scope", f"Miami appears in case {i}.")
+    t = q / "investigations" / "case-001-alpha1" / "investigation" / "targets" / "miami.md"
+    t.write_text("# miami\n\nMiami target notes.\n")
+    b = run(root, "what do we know about miami")
+    ent = next(e for e in b["entities"] if e["kind"] == "target")
+    assert ent["stores"] == ["case-001-alpha1"]
+    assert b["coverage"]["scope"] == [] and b["coverage"]["stores_excluded"] == [], "a filename is never a prompt scope"
+    miami = items_of(b, entity="miami")
+    assert miami and all(i.get("store") in ("case-001-alpha1", "project") for i in miami), [i["src"] for i in miami]
+    assert "[target of case-001-alpha1]" in ks.render(b).splitlines()[0]
+
+
+def test_unreadable_handoff_is_filed_under_handoff(tmp_path):
+    root, q = make_instance(tmp_path)
+    (q / "memory" / "last-handoff.md").chmod(0)
+    try:
+        b = run(root, "what do we know about Dana Okafor")
+    finally:
+        (q / "memory" / "last-handoff.md").chmod(0o644)
+    row = receipt_row(b, "handoff")
+    assert row["problem"] and "last-handoff" in row["problem"] and row["present"] is False, row   # unreadable, the way a ledger is
+    assert receipt_row(b, "canonical")["problem"] is None and receipt_row(b, "canonical")["present"] is True
+
+
+def test_store_recency_beats_case_number(tmp_path):
+    """An older-numbered case with newer activity renders before a newer-numbered
+    quiet one; the case number is only the tie-break for a fresh checkout."""
+    root, q = make_instance(tmp_path)
+    a = add_store(q, "case-001-alpha", "scope", "nothing")
+    b_ = add_store(q, "case-050-bravo", "scope", "nothing")
+    _graph(a / "memory" / "graph.jsonl", [{"s": "Satoshi Nakamoto", "p": "owns", "o": "fresh work", "t": "2026-09-01"}])
+    _graph(b_ / "memory" / "graph.jsonl", [{"s": "Satoshi Nakamoto", "p": "owns", "o": "old work", "t": "2026-07-01"}])
+    heads = [l for l in ks.render(run(root, "what do we know about Satoshi Nakamoto")).splitlines() if l.startswith("== ")]
+    assert heads[0] == "== Satoshi Nakamoto [case-001-alpha] ==", heads
+
+
+# PR #308 review round 9: a named case wins over a shared target; the scope note is bounded; absent = never searched.
+
+def _three_cases_sharing_a_target(q):
+    for name, line in (("case-001-alpha", "Acme wired ALPHA-ONLY to the shell company"),
+                       ("case-002-beta", "Acme wired BETA-ONLY to the shell company"),
+                       ("case-003-gamma", "Acme wired GAMMA-ONLY to the shell company")):
+        s = add_store(q, name, "scope", line)
+        (s / "investigation" / "targets" / "acme.md").write_text("# acme\n")
+
+
+def test_named_case_wins_over_a_target_shared_by_other_cases(tmp_path):
+    root, q = make_instance(tmp_path)
+    _three_cases_sharing_a_target(q)
+    b = run(root, "in beta, what did acme do")
+    assert b["coverage"]["scope"] == ["case-002-beta"], b["coverage"]
+    assert b["coverage"]["stores_excluded"] == ["case-001-alpha", "case-003-gamma"]
+    texts = [i["text"] for i in b["items"]]
+    assert any("BETA-ONLY" in t for t in texts) and not any("ALPHA-ONLY" in t or "GAMMA-ONLY" in t for t in texts), texts
+
+
+def test_target_shared_by_many_cases_scopes_to_all_of_them_when_none_is_named(tmp_path):
+    root, q = make_instance(tmp_path)
+    _three_cases_sharing_a_target(q)
+    b = run(root, "what did acme do")
+    assert b["coverage"]["scope"] == [] and b["coverage"]["stores_excluded"] == []
+    assert "WITHIN SCOPE" not in ks.render(b)
+    texts = [i["text"] for i in b["items"]]
+    assert all(any(k in t for t in texts) for k in ("ALPHA-ONLY", "BETA-ONLY", "GAMMA-ONLY"))
+
+
+def test_target_never_narrows_another_entity(tmp_path):
+    """The round 10 reproducer: 'Orbit Holdings and the miami accounts' with
+    miami a target of one case must still deliver every Orbit Holdings fact."""
+    root, q = make_instance(tmp_path)
+    with open(q / "memory" / "graph.jsonl", "a") as f:   # a fully-indexed subject, as in the reviewer's repro
+        f.write(json.dumps({"s": "Orbit Holdings", "p": "is", "o": "a shell company", "t": "2026-09-01"}) + "\n")
+    for i in range(1, 6):
+        s = add_store(q, f"case-00{i}-thing{i}", "scope", f"Orbit Holdings fact {i}.")
+        if i == 3:
+            (s / "investigation" / "targets" / "miami.md").write_text("# miami\n\nmiami target notes\n")
+    b = run(root, "what do we have on Orbit Holdings and the miami accounts")
+    assert b["coverage"]["scope"] == [] and b["coverage"]["stores_excluded"] == []
+    orbit = items_of(b, entity="Orbit Holdings")
+    assert {i["store"] for i in orbit} >= {f"case-00{i}-thing{i}" for i in range(1, 6)}, sorted({i["store"] for i in orbit})
+    miami = items_of(b, entity="miami")
+    assert miami and all(i["store"] in ("case-003-thing3", "project") for i in miami)
+
+
+def test_scope_note_is_bounded(tmp_path):
+    root, q = make_instance(tmp_path)
+    for i in range(1, 10):
+        s = add_store(q, f"case-00{i}-thing{i}", "scope", f"Acme in case {i}")
+        if i <= 8:
+            (s / "investigation" / "targets" / "acme.md").write_text("# acme\n")
+    named = ", ".join(f"thing{i}" for i in range(1, 9))
+    b = run(root, f"in {named}: what did acme do")
+    assert len(b["coverage"]["scope"]) == 8 and b["coverage"]["stores_excluded"] == ["case-009-thing9"]
+    head = ks.render(b).splitlines()[0]
+    assert "and 2 more + project only; 1 other store not searched" in head, head
+    scope_clause = head.split("WITHIN SCOPE", 1)[1].split("+ project", 1)[0]
+    assert scope_clause.count("case-00") == 6, scope_clause
+    assert "[target of case-001-thing1, case-002-thing2, case-003-thing3, case-004-thing4, case-005-thing5, case-006-thing6 and 2 more]" in head, head
+    # every store named: a scope with nothing excluded discloses nothing
+    b2 = run(root, "in " + ", ".join(f"thing{i}" for i in range(1, 10)) + ": what did acme do")
+    assert len(b2["coverage"]["scope"]) == 9 and b2["coverage"]["stores_excluded"] == []
+    assert "WITHIN SCOPE" not in ks.render(b2).splitlines()[0]
+
+
+def test_absent_class_is_never_searched_in_the_receipt(tmp_path):
+    root, q = make_bare_instance(tmp_path)
+    b = run(root, "what did Bluepeak ask for")
+    for cls in ("graph", "commitments", "meetings", "loops"):
+        row = receipt_row(b, cls)
+        assert row["present"] is False and row["searched"] is False and row["stores_searched"] == 0, row
+
+
+# PR #308 review round 10: an index of 0 still accounts for unreadable docs; the receipts ledger is bounded.
+
+def test_unreadable_store_is_seen_with_an_index_of_zero(tmp_path):
+    root, q = make_bare_instance(tmp_path)
+    (q / ".q-system" / "data").mkdir()
+    shutil.copy(INVESTIGATION_MANIFEST, q / ".q-system" / "data" / "knowledge-sources.json")
+    s = add_store(q, "case-001-alpha", "scope", "Bluepeak asked here too.")
+    only = s / "investigation" / "findings" / "finding-001.md"
+    only.chmod(0)
+    try:
+        b = run(root, "what did Bluepeak ask for")
+    finally:
+        only.chmod(0o644)
+    assert b is not None and any(e["kind"] == "docs_hit" for e in b["entities"])
+    row = receipt_row(b, "docs")
+    assert "case-001-alpha: 1 of 1 doc file(s) unreadable" in (row["problem"] or ""), row
+    assert row["searched"] == "partial" and b["coverage"]["verdict"] != "FULL", b["coverage"]
+
+
+def test_receipts_ledger_is_bounded(tmp_path, monkeypatch):
+    root, q = make_instance(tmp_path)
+    monkeypatch.setattr(ks, "RECEIPT_LEDGER_MAX_BYTES", 4000)
+    for _ in range(12):
+        run(root, "what do we know about Dana Okafor", record=True)
+    path = q / "memory" / ".knowledge-supply-receipts.jsonl"
+    assert path.stat().st_size <= 4000 * 2, path.stat().st_size   # one row may land before the trim
+    rows = [json.loads(l) for l in path.read_text().splitlines()]
+    assert 1 <= len(rows) < 12 and all("sources" in r for r in rows)
+
+
+# PR #308 review round 11: consumed bigram halves; declared skips disclosed; identical blocks collapse.
+
+def test_suppressed_bigram_half_is_never_a_candidate(tmp_path):
+    root, q = make_instance(tmp_path)
+    add_store(q, "case-023-shinyhunters", "scope", "ShinyHunters hit the CRM vendor.")
+    (q / "output" / "others.md").write_text("The Lapsus Crew was dormant all quarter.\nA different Crew filed the takedown request.\n")
+    b = run(root, "what do we know about ShinyHunters Crew")
+    names = [e["name"] for e in b["entities"]]
+    assert "shinyhunters" in names and "Crew" not in names, names
+    assert not any("Lapsus" in i["text"] or "takedown" in i["text"] for i in b["items"]), [i["text"] for i in b["items"]]
+
+
+def test_declared_skips_are_counted_and_disclosed(tmp_path):
+    root, q = make_instance(tmp_path)
+    s = add_store(q, "case-001-foo-bar", "scope", "Dana Okafor briefed the Foo Bar victim list.")
+    (s / "investigation" / "raw-collections").mkdir()
+    (s / "investigation" / "raw-collections" / "dump.md").write_text("Dana Okafor controls the wallet.\n")
+    (q / "output" / "big.md").write_text("Dana Okafor pilot is cancelled\n" + "x" * 600_000)
+    b = run(root, "what do we know about Dana Okafor")
+    row = receipt_row(b, "docs")
+    assert row["files_skipped_oversize"] == 1 and row["dirs_skipped"] == 1
+    assert row["dirs_skipped_sample"] == ["q-fix/investigations/case-001-foo-bar/investigation/raw-collections"]
+    head = ks.render(b).splitlines()[0]
+    assert "SKIPPED (declared): 1 file(s) over doc_max_bytes, 1 dir(s) in skip_dirs; the receipt lists them." in head, head
+    assert b["coverage"]["verdict"] == "FULL", "a declared exclusion is not a truncation"
+    texts = [i["text"] for i in b["items"]]
+    assert not any("controls the wallet" in t or "pilot is cancelled" in t for t in texts)
+    # tooling dirs stay silent
+    (q / "output" / "node_modules").mkdir()
+    (q / "output" / "node_modules" / "n.md").write_text("Dana Okafor node\n")
+    b2 = run(root, "what do we know about Dana Okafor")
+    assert receipt_row(b2, "docs")["dirs_skipped"] == 1
+
+
+def test_identical_blocks_collapse_into_one_heading(tmp_path):
+    root, q = make_instance(tmp_path)
+    _graph(q / "memory" / "graph.jsonl", GRAPH_ROWS + [
+        {"s": "Priya Raman", "p": "met", "o": "Tomas Lind", "t": "2026-08-20", "project": "v"},
+    ])
+    b = run(root, "what do we know about Priya Raman and Tomas Lind")
+    out = ks.render(b)
+    assert "== Priya Raman, Tomas Lind ==" in out, out
+    assert "== Tomas Lind ==" not in out
+    assert out.count("Priya Raman met Tomas Lind") == 1
+    assert [e["name"] for e in b["entities"]] == ["Priya Raman", "Tomas Lind"], "both still resolved"
 
 
 # ---------------------------------------------------------------- the hook
