@@ -79,13 +79,22 @@ PUBLISHED_PATH_PATTERNS = [
 
 SKIP_MARKER = "voice-lint-skip"
 
+# CALIBRATED AGAINST THE FOUNDER'S OWN CORPUS, never grown by taste. "robust" and
+# "foster" were dropped 2026-09-06: the one instance that holds his voice corpus
+# measured 7 and 16 organic uses ("it fosters a broad discussion", "a robust
+# understanding of the attackers"), had already removed both on 2026-08-27
+# (its PR #71), and the fleet sync put them back because the skeleton never
+# learned. A word he demonstrably writes is not AI-sounding in his voice, and a
+# ban list that blocks his real vocabulary is the six-word scar again. The
+# instance's pipeline/tests/test_voice_list_audit.py pins this list's size to
+# the measured value, so the next unmeasured addition here goes red there.
 BANNED_WORDS = {
-    "leverage", "robust", "transformative", "innovative", "cutting-edge",
+    "leverage", "transformative", "innovative", "cutting-edge",
     "groundbreaking", "delve", "tapestry", "synergy", "paradigm", "cornerstone",
     "linchpin", "testament", "vital", "pivotal", "crucial", "meticulous",
     "nuanced", "vibrant", "enduring", "unparalleled", "unwavering",
     "intricate", "comprehensive",
-    "utilize", "optimize", "foster", "underscore", "embark", "garner",
+    "utilize", "optimize", "underscore", "embark", "garner",
     "bolster", "showcase", "empower", "unlock", "revolutionize",
     "streamline", "spearhead",
     "meticulously", "effectively", "efficiently", "strategically",
