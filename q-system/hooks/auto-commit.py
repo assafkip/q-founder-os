@@ -398,10 +398,55 @@ def commit_group(commit_type, message, files):
         print(f"  skipped: {header} - {r.stderr.strip()[:80]}")
 
 
+def fleet_update_in_progress():
+    """The fleet updater's run marker, or None when no live run owns this checkout.
+
+    kipi-update.sh writes <git-common-dir>/kipi-update.run ("<pid> <start>") for
+    the duration of one instance apply. This hook fires at every turn end of
+    every session sitting in the checkout, so on 2026-09-06 it committed the
+    updater's half-delivered rules, settings and plugins under its own generic
+    messages while the sync was still running, and its pre-commit held
+    index.lock for the whole verify (sp-9306036e). A live marker means the
+    updater owns the index right now: commit nothing. A marker whose pid is
+    dead is a crashed run's leftover: remove it and proceed, so a crash cannot
+    silence this safety net forever. The common dir, not the worktree git dir,
+    so a linked worktree of the same checkout reads the same marker.
+    """
+    r = run(["git", "rev-parse", "--git-common-dir"])
+    if r.returncode != 0:
+        return None
+    common = r.stdout.strip()
+    if not os.path.isabs(common):
+        common = os.path.abspath(common)
+    marker = os.path.join(common, "kipi-update.run")
+    if not os.path.exists(marker):
+        return None
+    try:
+        with open(marker, encoding="utf-8") as fh:
+            pid = int(fh.read().split()[0])
+        os.kill(pid, 0)
+    except (ValueError, IndexError, ProcessLookupError, FileNotFoundError):
+        try:
+            os.remove(marker)
+        except OSError:
+            pass
+        return None
+    except PermissionError:
+        # Alive, owned by another user: still a live writer.
+        return f"pid {pid}"
+    return f"pid {pid}"
+
+
 def main():
     # Check we're in a git repo
     r = run(["git", "rev-parse", "--is-inside-work-tree"])
     if r.returncode != 0:
+        return
+
+    live_run = fleet_update_in_progress()
+    if live_run is not None:
+        print(f"auto-commit: fleet updater run in progress ({live_run}); "
+              "committing nothing", file=sys.stderr)
         return
 
     files = get_changed_files()
