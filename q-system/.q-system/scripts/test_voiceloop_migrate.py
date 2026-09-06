@@ -108,7 +108,7 @@ class EngineTest(unittest.TestCase):
         p = mig.plan(r, skeleton=sk)
         self.assertEqual(p["rewrite"], ["q-consult/pipeline/voice.py",
                                         "q-system/.q-system/scripts/mine.py"])
-        self.assertEqual(p["shipped_by_skeleton"], ["plugins/kipi-core/" + NEW + "/__init__.py",
+        self.assertEqual(p["delivered_by_sync"], ["plugins/kipi-core/" + NEW + "/__init__.py",
                                                     "q-system/.q-system/scripts/tool.py"])
         out = mig.apply(r, commit=False, skeleton=sk)
         self.assertTrue(out["verified"], out["errors"])
@@ -129,7 +129,7 @@ class EngineTest(unittest.TestCase):
         empty = os.path.join(self.tmp, "empty-skeleton")
         os.makedirs(empty)
         p = mig.plan(r, skeleton=empty)
-        self.assertEqual(p["shipped_by_skeleton"], [])
+        self.assertEqual(p["delivered_by_sync"], [])
         self.assertIn("q-system/.q-system/scripts/tool.py", p["rewrite"])
         self.assertNotIn("plugins/kipi-core/" + NEW + "/__init__.py", p["rewrite"])
         mig.apply(r, commit=False, skeleton=empty)
@@ -231,7 +231,7 @@ class EngineTest(unittest.TestCase):
         _, r = self._skeleton_and_instance()
         p = mig.plan(r, skeleton=r)
         self.assertIsNone(p["skeleton"])
-        self.assertEqual(p["shipped_by_skeleton"], [])
+        self.assertEqual(p["delivered_by_sync"], [])
         self.assertIn("q-consult/pipeline/voice.py", p["rewrite"])
 
     def test_the_move_still_happens_under_a_skeleton_that_ships_the_package(self):
@@ -250,6 +250,100 @@ class EngineTest(unittest.TestCase):
         self.assertNotIn(OLD, moved_core)
         self.assertIn("plugins/kipi-core/" + NEW + "/core.py", out["rewritten"])
         self.assertNotIn("plugins/kipi-core/" + NEW + "/__init__.py", out["rewritten"])
+
+    def test_exclude_lists_derive_from_the_updater_and_match_bash(self):
+        """The owned subtrees and plugin excludes are read from kipi-update.sh,
+        the file that runs the rsync. Floor: non-empty. Bound: equal to what
+        bash itself evaluates the two arrays to."""
+        owned, excl = mig._updater_lists(REPO)
+        self.assertTrue(owned and excl)
+        script = (
+            'eval "$(sed -n \'/^INSTANCE_OWNED_SUBTREES=(/,/^)/p\' "$1")"; '
+            'eval "$(sed -n \'/^PLUGIN_COPY_EXCLUDES=(/,/^)/p\' "$1")"; '
+            'printf "O %s\\n" "${INSTANCE_OWNED_SUBTREES[@]}"; '
+            'printf "P %s\\n" "${PLUGIN_COPY_EXCLUDES[@]}"')
+        out = subprocess.run(["bash", "-c", script, "_", UPDATER], capture_output=True, text=True, check=True).stdout
+        bash_owned = [l[2:] for l in out.splitlines() if l.startswith("O ")]
+        bash_excl = [l[2:].split("::", 1)[1] for l in out.splitlines() if l.startswith("P ")]
+        self.assertEqual(owned, bash_owned)
+        self.assertEqual([r.pattern for r in excl], bash_excl)
+        self.assertIn("my-project", owned)
+
+    def test_an_owned_subtree_a_root_file_and_settings_are_the_instances_even_when_the_skeleton_has_them(self):
+        """Round 1 major: the sync never writes these, so a stale import there
+        must still migrate. Skeleton presence is not delivery."""
+        sk, r = self._skeleton_and_instance()
+        cases = [
+            ("q-system/memory/tools/probe.py", "from " + OLD + " import x\n"),      # owned subtree
+            ("q-system/.q-system/data/hook.py", "from " + OLD + " import x\n"),     # owned subtree, dotted
+            ("lefthook.py", "from " + OLD + " import x\n"),                          # skeleton root
+            (".claude/settings.json", '{"hooks": ["' + OLD + '/lint.py"]}\n'),      # merged, not copied
+            ("plugins/kipi-core/.env.py", "from " + OLD + " import x\n"),          # PLUGIN_COPY_EXCLUDES
+        ]
+        for rel, body in cases:
+            for root in (sk, r):
+                path = os.path.join(root, rel)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                open(path, "w").write(body)
+        p = mig.plan(r, skeleton=sk)
+        for rel, _ in cases:
+            self.assertIn(rel, p["rewrite"], rel)
+            self.assertNotIn(rel, p["delivered_by_sync"], rel)
+        self.assertIn("q-system/.q-system/scripts/tool.py", p["delivered_by_sync"])
+        out = mig.apply(r, commit=False, skeleton=sk)
+        self.assertTrue(out["verified"], out["errors"])
+        for rel, _ in cases:
+            self.assertNotIn(OLD, open(os.path.join(r, rel)).read(), rel)
+
+    def test_a_null_prefix_instance_maps_the_skeleton_q_system_onto_its_root(self):
+        """Round 1 minor: with subtree_prefix null the skeleton's q-system/<x>
+        lands at <x>, so that is where delivery is judged, owned subtrees
+        included."""
+        sk = os.path.join(self.tmp, "skeleton")
+        for rel, body in [("q-system/.q-system/scripts/tool.py", "import " + OLD + ".core\n"),
+                          ("q-system/memory/tools/probe.py", "from " + OLD + " import x\n")]:
+            path = os.path.join(sk, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            open(path, "w").write(body)
+        r = build_instance(os.path.join(self.tmp, "flat"), package=NEW, extra=[
+            (".q-system/scripts/tool.py", "import " + OLD + ".core\n"),
+            ("memory/tools/probe.py", "from " + OLD + " import x\n"),
+            ("q-system/.q-system/scripts/tool.py", "import " + OLD + ".core\n"),
+        ])
+        p = mig.plan(r, skeleton=sk, prefix="")
+        self.assertEqual(p["prefix"], "")
+        self.assertEqual(p["delivered_by_sync"], [".q-system/scripts/tool.py"])
+        self.assertIn("memory/tools/probe.py", p["rewrite"])
+        # under a null prefix the nested q-system/ copy is NOT where the sync writes
+        self.assertIn("q-system/.q-system/scripts/tool.py", p["rewrite"])
+
+    def test_the_prefix_comes_from_the_registry_beside_the_skeleton(self):
+        sk, r = self._skeleton_and_instance()
+        import json
+        json.dump({"instances": [{"name": "i", "path": r, "subtree_prefix": None}]},
+                  open(os.path.join(sk, "instance-registry.json"), "w"))
+        self.assertEqual(mig.plan(r, skeleton=sk)["prefix"], "")
+        json.dump({"instances": [{"name": "i", "path": r, "subtree_prefix": "q-system"}]},
+                  open(os.path.join(sk, "instance-registry.json"), "w"))
+        self.assertEqual(mig.plan(r, skeleton=sk)["prefix"], "q-system")
+        os.unlink(os.path.join(sk, "instance-registry.json"))
+        self.assertEqual(mig.plan(r, skeleton=sk)["prefix"], mig.DEFAULT_PREFIX)
+
+    def test_unreadable_exclude_lists_exempt_nothing_and_say_so(self):
+        """Fail toward migrating: a skeleton whose updater cannot be read
+        exempts no path and the plan carries a warning, so the miss is churn,
+        never a stranded import."""
+        sk, r = self._skeleton_and_instance()
+        real = mig._updater_lists
+        mig._updater_lists = lambda skeleton: (_ for _ in ()).throw(ValueError("no updater here"))
+        try:
+            p = mig.plan(r, skeleton=sk)
+        finally:
+            mig._updater_lists = real
+        self.assertIsNone(p["skeleton"])
+        self.assertEqual(p["delivered_by_sync"], [])
+        self.assertTrue(any("no path is exempt" in w for w in p["warnings"]), p["warnings"])
+        self.assertIn("q-system/.q-system/scripts/tool.py", p["rewrite"])
 
     def test_both_present_never_deletes_either_package(self):
         """A half-synced instance is reported, not resolved by removal.

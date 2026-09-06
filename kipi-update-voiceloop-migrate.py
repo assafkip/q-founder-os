@@ -60,12 +60,17 @@ file carrying the name that cannot be parsed refuses the instance rather than
 being swapped blind. The other REWRITE_EXTS have no such classifier and keep
 the blanket swap, comments included.
 
-A path the SKELETON ships is never rewritten, whatever its extension: the rsync
-this script runs ahead of delivers the skeleton's copy of it seconds later, so
+A path the SYNC DELIVERS is never rewritten, whatever its extension: the rsync
+this script runs ahead of writes the skeleton's copy over it seconds later, so
 the rewrite is churn at best and a refused commit at worst (2026-09-06: the
-engine's own __init__.py documents the rename in a why-comment that names the
-old package on purpose; see SKELETON_ROOT). Instance-only files, including ones
-that live inside q-system/, do not exist in the skeleton and are migrated.
+engine's own __init__.py documents the rename in its docstring, naming the old
+package on purpose). Delivered means the skeleton's q-system/ tree mapped
+through the instance's subtree_prefix minus INSTANCE_OWNED_SUBTREES, plus the
+skeleton's plugins/<name>/ trees minus PLUGIN_COPY_EXCLUDES, both arrays read
+from kipi-update.sh itself (see SKELETON_ROOT). Everything else the instance
+holds, including a file the skeleton ships as a template under an owned
+subtree, a file at the skeleton root, or its merged .claude/settings.json, is
+the instance's and is migrated.
 """
 from __future__ import annotations
 
@@ -156,14 +161,35 @@ SKIP_PATH_PARTS = (os.path.join("tests", "fixtures") + os.sep,)
 #     commit, this script reported "migration failed", and the rsync it exists
 #     to prepare never started (sp-b0389e48, sp-2c1bcc3f's neighbour).
 #
-# The test is exact, not a path heuristic: if the same relative path exists in
-# the skeleton tree, it is the skeleton's. An instance-only file INSIDE q-system/
-# (the updater preserves those) does not exist in the skeleton and is still
-# migrated. The package MOVE (step 1 of apply) is untouched by this rule: the
-# old package name never exists in the skeleton, so its files are seen at their
-# pre-move paths and the move proceeds; after the move they sit at paths the
-# skeleton ships and the rsync delivers the real ones.
+# THE SET IS WHAT THE SYNC DELIVERS, NOT WHAT THE SKELETON CONTAINS. "Exists in
+# the skeleton" was the first cut and the reviewer of PR #312 named where the
+# two sets differ: a path under an INSTANCE_OWNED_SUBTREES dir (my-project/,
+# memory/, .q-system/data/ ...) that the skeleton happens to ship as a template
+# is never overwritten, the sync excludes it; a file at the skeleton ROOT
+# (kipi-update.sh, lefthook.yml, README.md) is never copied anywhere; the
+# instance's .claude/settings.json is MERGED from a template, its own hook
+# entries survive, so a stale path there is the instance's to migrate. Exempting
+# any of those leaves the old name in place forever and reports verified=True.
+# And the instance keeps its q-system under `subtree_prefix` (null for one
+# registered instance), so the skeleton's q-system/<x> lands at <prefix>/<x>.
+#
+# So the exemption is derived, per file, from the same three facts the rsync
+# uses: the skeleton's q-system/ tree minus INSTANCE_OWNED_SUBTREES, mapped
+# through the instance's subtree_prefix; and the skeleton's plugins/<name>/
+# trees minus PLUGIN_COPY_EXCLUDES. Both arrays are read from kipi-update.sh
+# itself, the file that will run the rsync, so this script cannot drift from
+# it (the deletion guard keeps a hand copy and a test to compare; this one
+# reads the owner). If the arrays cannot be read, nothing is exempt and the
+# plan says so under `warnings`: rewriting a file the sync would have replaced
+# is churn, skipping one it would not have is a stranded import.
+#
+# The package MOVE (step 1 of apply) is untouched: the old package name is never
+# a delivered path, so its files are seen at their pre-move paths and the move
+# proceeds; after the move they sit where the rsync delivers the real ones.
 SKELETON_ROOT = os.path.dirname(SELF_PATH)
+UPDATER_NAME = "kipi-update.sh"
+REGISTRY_NAME = "instance-registry.json"
+DEFAULT_PREFIX = "q-system"
 
 
 def _resolve_skeleton(repo: str, skeleton: str | None) -> str | None:
@@ -176,8 +202,90 @@ def _resolve_skeleton(repo: str, skeleton: str | None) -> str | None:
     return root
 
 
-def _shipped_by_skeleton(rel: str, skeleton: str | None) -> bool:
-    return skeleton is not None and os.path.lexists(os.path.join(skeleton, rel))
+def _bash_array(text: str, name: str) -> list[str]:
+    """The literal elements of `NAME=( ... )` as bash reads them: one element
+    per whitespace-separated word, double quotes stripped with the four
+    backslash escapes bash honours inside them (dollar, quote, backslash,
+    backtick) unescaped, `#` comments dropped. Enough for the two arrays this
+    reads, which are literal lists by design (ASK-772)."""
+    m = re.search(r"^%s=\(\s*\n(.*?)^\)" % re.escape(name), text, re.S | re.M)
+    if not m:
+        return []
+    out: list[str] = []
+    for raw in m.group(1).splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        for word in re.findall(r'"(?:[^"\\]|\\.)*"|\S+', line):
+            if word.startswith("#"):
+                break
+            if word.startswith('"') and word.endswith('"') and len(word) >= 2:
+                word = re.sub(r'\\([$"\\`])', r"\1", word[1:-1])
+            out.append(word)
+    return out
+
+
+def _updater_lists(skeleton: str) -> tuple[list[str], list[re.Pattern]]:
+    """(INSTANCE_OWNED_SUBTREES, PLUGIN_COPY_EXCLUDES regexes) from the
+    kipi-update.sh that will run the rsync: the one beside the delivered tree,
+    or the one beside this script."""
+    for root in (skeleton, SKELETON_ROOT):
+        updater = os.path.join(root, UPDATER_NAME)
+        if os.path.isfile(updater):
+            break
+    else:
+        raise ValueError(f"{UPDATER_NAME} not found beside the skeleton or this script")
+    text = open(updater, encoding="utf-8").read()
+    owned = _bash_array(text, "INSTANCE_OWNED_SUBTREES")
+    excl = [e.split("::", 1)[1] for e in _bash_array(text, "PLUGIN_COPY_EXCLUDES") if "::" in e]
+    if not owned or not excl:
+        raise ValueError(f"could not read INSTANCE_OWNED_SUBTREES / PLUGIN_COPY_EXCLUDES from {updater}")
+    return owned, [re.compile(r) for r in excl]
+
+
+def _instance_prefix(repo: str, skeleton: str) -> str:
+    """The instance's subtree_prefix from the registry beside the skeleton (or
+    beside this script); DEFAULT_PREFIX for a repo the registry does not know,
+    which is every fixture and the only layout the updater creates."""
+    for root in (skeleton, SKELETON_ROOT):
+        reg = os.path.join(root, REGISTRY_NAME)
+        if not os.path.isfile(reg):
+            continue
+        try:
+            rows = json.load(open(reg, encoding="utf-8")).get("instances") or []
+        except (OSError, ValueError):
+            continue
+        for row in rows:
+            path = row.get("path") if isinstance(row, dict) else None
+            if path and os.path.realpath(os.path.expanduser(path)) == os.path.realpath(repo):
+                return (row.get("subtree_prefix") or "").strip("/")
+        break
+    return DEFAULT_PREFIX
+
+
+def _delivered_by_sync(rel: str, skeleton: str | None, prefix: str,
+                       owned: list[str], plugin_excl: list[re.Pattern]) -> bool:
+    """Would the next sync write the skeleton's copy over this instance path?"""
+    if skeleton is None:
+        return False
+    # q-system half: skeleton q-system/<sub> lands at <prefix>/<sub>, minus the
+    # anchored instance-owned excludes.
+    if prefix:
+        sub = rel[len(prefix) + 1:] if rel.startswith(prefix + "/") else None
+    else:
+        sub = rel
+    if sub and not any(sub == o or sub.startswith(o + "/") for o in owned) \
+            and os.path.lexists(os.path.join(skeleton, "q-system", sub)):
+        return True
+    # plugins half: skeleton plugins/<name>/ lands at plugins/<name>/, minus
+    # PLUGIN_COPY_EXCLUDES (--delete-excluded).
+    parts = rel.split("/")
+    if len(parts) >= 3 and parts[0] == "plugins" \
+            and os.path.isdir(os.path.join(skeleton, "plugins", parts[1])) \
+            and os.path.lexists(os.path.join(skeleton, rel)) \
+            and not any(r.search("/".join(parts[2:])) for r in plugin_excl):
+        return True
+    return False
 
 
 def _exempt(path: str) -> bool:
@@ -320,13 +428,30 @@ def rewrite_text(text: str, ext: str) -> str:
     return _swap_outside(lines, spans)
 
 
-def plan(repo: str, skeleton: str | None = None) -> dict:
+def plan(repo: str, skeleton: str | None = None, prefix: str | None = None) -> dict:
     """Read-only. What this instance needs, without touching a byte.
 
     `skeleton` is the tree the sync delivers (default: the one this script sits
-    in); a path it ships is skipped entirely, see SKELETON_ROOT above."""
+    in); a path the sync would overwrite is skipped entirely, see SKELETON_ROOT
+    above. `prefix` is the instance's subtree_prefix (default: the registry's
+    answer, else DEFAULT_PREFIX)."""
     repo = os.path.abspath(repo)
     delivered = _resolve_skeleton(repo, skeleton)
+    warnings: list[str] = []
+    owned: list[str] = []
+    plugin_excl: list[re.Pattern] = []
+    if delivered is not None:
+        try:
+            owned, plugin_excl = _updater_lists(delivered)
+        except ValueError as exc:
+            warnings.append(f"no path is exempt: {exc}")
+            delivered = None
+    if prefix is not None:
+        sub_prefix = prefix.strip("/")
+    elif delivered is not None:
+        sub_prefix = _instance_prefix(repo, delivered)
+    else:
+        sub_prefix = DEFAULT_PREFIX
     old_pkg = os.path.join(repo, PLUGIN_PARENT, OLD)
     new_pkg = os.path.join(repo, PLUGIN_PARENT, NEW)
     has_old = os.path.isdir(old_pkg)
@@ -346,7 +471,7 @@ def plan(repo: str, skeleton: str | None = None) -> dict:
         if _exempt(path):
             continue
         rel = os.path.relpath(path, repo)
-        if _shipped_by_skeleton(rel, delivered):
+        if _delivered_by_sync(rel, delivered, sub_prefix, owned, plugin_excl):
             shipped.append(rel)
             continue
         base = os.path.basename(path)
@@ -432,10 +557,12 @@ def plan(repo: str, skeleton: str | None = None) -> dict:
     return {
         "repo": repo,
         "skeleton": delivered,
+        "prefix": sub_prefix,
+        "warnings": warnings,
         "package_action": package_action,
         "rewrite": sorted(rewrite),
         "renames": sorted(renames),
-        "shipped_by_skeleton": sorted(shipped),
+        "delivered_by_sync": sorted(shipped),
         "unparseable": sorted(unparseable),
         "history_left": sorted(history),
         "staged_migration": staged_migration,
@@ -489,9 +616,10 @@ def _dirty_tracked(repo: str, rels: list) -> list:
     return sorted(set(out))
 
 
-def apply(repo: str, commit: bool = True, skeleton: str | None = None) -> dict:
+def apply(repo: str, commit: bool = True, skeleton: str | None = None,
+          prefix: str | None = None) -> dict:
     repo = os.path.abspath(repo)
-    p = plan(repo, skeleton)
+    p = plan(repo, skeleton, prefix)
     result = {**p, "moved": False, "rewritten": [], "renamed": [], "committed": False,
               "errors": [], "left_untracked": [], "backed_up": []}
     # Snapshot tracked-ness BEFORE any write, because `git mv` and the rewrites
@@ -551,7 +679,7 @@ def apply(repo: str, commit: bool = True, skeleton: str | None = None) -> dict:
     # pre-move relative paths are stale. Re-reading is cheap; acting on a stale
     # path list is the "validate the mutant applied" failure -- an edit that
     # silently lands nowhere.
-    p2 = plan(repo, skeleton)
+    p2 = plan(repo, skeleton, prefix)
     for rel in p2["rewrite"]:
         path = os.path.join(repo, rel)
         try:
@@ -613,7 +741,7 @@ def apply(repo: str, commit: bool = True, skeleton: str | None = None) -> dict:
         result["renamed"].append(f"{rel} -> {dst_rel}")
 
     # --- step 3: prove it, against the tree we just wrote --------------------
-    after = plan(repo, skeleton)
+    after = plan(repo, skeleton, prefix)
     if after["package_action"] == "move":
         result["errors"].append("package still named voicekit after apply")
     if after["rewrite"]:
