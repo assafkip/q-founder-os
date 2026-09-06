@@ -75,6 +75,294 @@ class EngineTest(unittest.TestCase):
         self.assertFalse(out["moved"])
         self.assertEqual(out["rewritten"], [])
 
+    def _skeleton_and_instance(self, *, package=NEW, instance_carries_shipped=True):
+        """A fake skeleton that ships the engine init with the rename comment
+        plus one q-system script, and an instance carrying the same two files
+        (unless it is still on the old package: then the new package must not
+        exist yet or the move is a `both_present` refusal), an instance-only
+        script INSIDE q-system/, and its own pipeline import."""
+        why = ('"""engine.\n\nwhy the name changed: this package was called `' + OLD
+               + '` here and the\nexporter renamed it on the way out.\n"""\nVERSION = 2\n')
+        tool = "import " + OLD + ".core as core  # the skeleton's own helper, code not prose\n"
+        shipped = [("plugins/kipi-core/" + NEW + "/__init__.py", why),
+                   ("q-system/.q-system/scripts/tool.py", tool)]
+        sk = os.path.join(self.tmp, "skeleton")
+        for rel, body in shipped:
+            p = os.path.join(sk, rel)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            open(p, "w").write(body)
+        carried = shipped if instance_carries_shipped else []
+        r = build_instance(os.path.join(self.tmp, "i"), package=package, extra=carried + [
+            ("q-system/.q-system/scripts/mine.py", "from " + OLD + " import x\n"),
+            ("q-consult/pipeline/voice.py", "from " + OLD + " import x\n"),
+        ])
+        return sk, r
+
+    def test_a_path_the_skeleton_ships_is_the_syncs_not_the_migrations(self):
+        """2026-09-06: the engine's own __init__.py documents the rename in a
+        why-comment that names the old package on purpose. Rewriting it made
+        every sync commit churn on 22 instances and made the one instance whose
+        pre-commit compares the engine to a public mirror refuse the commit, so
+        the rsync never started (sp-b0389e48)."""
+        sk, r = self._skeleton_and_instance()
+        p = mig.plan(r, skeleton=sk)
+        self.assertEqual(p["rewrite"], ["q-consult/pipeline/voice.py",
+                                        "q-system/.q-system/scripts/mine.py"])
+        self.assertEqual(p["delivered_by_sync"], ["plugins/kipi-core/" + NEW + "/__init__.py",
+                                                    "q-system/.q-system/scripts/tool.py"])
+        out = mig.apply(r, commit=False, skeleton=sk)
+        self.assertTrue(out["verified"], out["errors"])
+        self.assertEqual(sorted(out["rewritten"]), p["rewrite"])
+        init = open(os.path.join(r, "plugins/kipi-core", NEW, "__init__.py")).read()
+        self.assertIn("called `" + OLD + "` here", init)
+        self.assertIn("import " + OLD + ".core", open(os.path.join(r, "q-system/.q-system/scripts/tool.py")).read())
+        self.assertNotIn(OLD, open(os.path.join(r, "q-system/.q-system/scripts/mine.py")).read())
+        self.assertNotIn(OLD, open(os.path.join(r, "q-consult/pipeline/voice.py")).read())
+        self.assertFalse(mig.plan(r, skeleton=sk)["needs_work"])
+
+    def test_without_the_skeleton_shipped_code_is_rewritten_and_prose_still_survives(self):
+        """Negative self-test for the skeleton rule: an empty skeleton ships
+        nothing, so the skeleton's CODE helper is rewritten like any instance
+        file. The docstring in the init survives on the prose rule alone, which
+        the next test takes away in turn."""
+        _, r = self._skeleton_and_instance()
+        empty = os.path.join(self.tmp, "empty-skeleton")
+        os.makedirs(empty)
+        p = mig.plan(r, skeleton=empty)
+        self.assertEqual(p["delivered_by_sync"], [])
+        self.assertIn("q-system/.q-system/scripts/tool.py", p["rewrite"])
+        self.assertNotIn("plugins/kipi-core/" + NEW + "/__init__.py", p["rewrite"])
+        mig.apply(r, commit=False, skeleton=empty)
+        self.assertNotIn(OLD, open(os.path.join(r, "q-system/.q-system/scripts/tool.py")).read())
+        init = open(os.path.join(r, "plugins/kipi-core", NEW, "__init__.py")).read()
+        self.assertIn("called `" + OLD + "` here", init)
+
+    def test_without_the_prose_rule_the_docstring_is_rewritten(self):
+        """Negative self-test for the prose rule: with span detection taken
+        away, the same docstring IS rewritten into an identity rename. The
+        classifier is what holds the line, not the shape of the text."""
+        _, r = self._skeleton_and_instance()
+        empty = os.path.join(self.tmp, "empty-skeleton")
+        os.makedirs(empty)
+        real = mig._prose_spans
+        mig._prose_spans = lambda text, lines: []
+        try:
+            p = mig.plan(r, skeleton=empty)
+            self.assertIn("plugins/kipi-core/" + NEW + "/__init__.py", p["rewrite"])
+            mig.apply(r, commit=False, skeleton=empty)
+        finally:
+            mig._prose_spans = real
+        init = open(os.path.join(r, "plugins/kipi-core", NEW, "__init__.py")).read()
+        self.assertNotIn(OLD, init)
+        self.assertIn("called `" + NEW + "` here", init)
+
+    def test_prose_in_an_instance_file_survives_and_its_code_migrates(self):
+        """The exporter shape from the aborted 2026-09-06 run: a docstring and
+        two # comments that document the rename, next to an import and a path
+        literal that must migrate. Exact text, both directions."""
+        before = ('"""Exporter.\n\nThe pair (' + OLD + ' -> ' + NEW + ') lived here until the rename.\n"""\n'
+                  'import ' + OLD + '.core  # ' + OLD + ' was the name\n'
+                  'RENAMES = [("' + OLD + '/validate.py", "' + NEW + '/validate.py")]\n'
+                  '# test_' + OLD + '.py went with it\n')
+        after = ('"""Exporter.\n\nThe pair (' + OLD + ' -> ' + NEW + ') lived here until the rename.\n"""\n'
+                 'import ' + NEW + '.core  # ' + OLD + ' was the name\n'
+                 'RENAMES = [("' + NEW + '/validate.py", "' + NEW + '/validate.py")]\n'
+                 '# test_' + OLD + '.py went with it\n')
+        r = build_instance(os.path.join(self.tmp, "i"), package=NEW, extra=[
+            ("automation/export.py", before),
+        ])
+        out = mig.apply(r, commit=False, skeleton=os.path.join(self.tmp, "nothing-shipped"))
+        self.assertTrue(out["verified"], out["errors"])
+        self.assertEqual(open(os.path.join(r, "automation/export.py")).read(), after)
+        self.assertFalse(mig.plan(r, skeleton=os.path.join(self.tmp, "nothing-shipped"))["needs_work"])
+
+    def test_a_docstring_only_file_is_not_work(self):
+        """A file whose only mention is prose is not a rewrite candidate, so an
+        already-migrated instance reports needs_work=False and never commits."""
+        r = build_instance(os.path.join(self.tmp, "i"), package=NEW, extra=[
+            ("automation/notes.py", '"""' + OLD + ' was the old name."""\n# and ' + OLD + ' again\nX = 1\n'),
+        ])
+        p = mig.plan(r, skeleton=os.path.join(self.tmp, "nothing-shipped"))
+        self.assertEqual(p["rewrite"], [])
+        self.assertFalse(p["needs_work"])
+
+    def test_columns_survive_non_ascii_text_before_the_docstring_end(self):
+        """ast counts bytes, tokenize counts characters; the conversion is what
+        keeps a docstring ending after a non-ASCII char protected while the code
+        on the next line still migrates."""
+        body = ('"""Résumé: café ' + OLD + ' é"""\n'
+                'from ' + OLD + ' import x  # ' + OLD + '\n')
+        r = build_instance(os.path.join(self.tmp, "i"), package=NEW, extra=[("automation/u.py", body)])
+        mig.apply(r, commit=False, skeleton=os.path.join(self.tmp, "nothing-shipped"))
+        got = open(os.path.join(r, "automation/u.py"), encoding="utf-8").read()
+        self.assertEqual(got, '"""Résumé: café ' + OLD + ' é"""\nfrom ' + NEW + ' import x  # ' + OLD + '\n')
+
+    def test_a_file_that_cannot_be_classified_refuses_the_instance(self):
+        """No blanket fallback: a .py that carries the old name and does not
+        parse is reported, apply refuses, and nothing else is written."""
+        r = build_instance(os.path.join(self.tmp, "i"), package=NEW, extra=[
+            ("automation/broken.py", "x = (" + OLD + "\n"),
+            ("q-consult/pipeline/voice.py", "from " + OLD + " import x\n"),
+        ])
+        p = mig.plan(r, skeleton=os.path.join(self.tmp, "nothing-shipped"))
+        self.assertEqual(len(p["unparseable"]), 1)
+        self.assertTrue(p["unparseable"][0].startswith("automation/broken.py: "))
+        self.assertTrue(p["needs_work"])
+        out = mig.apply(r, commit=False, skeleton=os.path.join(self.tmp, "nothing-shipped"))
+        self.assertFalse(out["verified"])
+        self.assertTrue(any("cannot be classified" in e for e in out["errors"]), out["errors"])
+        self.assertEqual(out["rewritten"], [])
+        self.assertIn(OLD, open(os.path.join(r, "q-consult/pipeline/voice.py")).read())
+
+    def test_non_python_files_keep_the_blanket_swap(self):
+        """Pinned on purpose: nothing here can tell a shell comment from a shell
+        string, so .sh (and the rest of REWRITE_EXTS) still swap everything."""
+        r = build_instance(os.path.join(self.tmp, "i"), package=NEW, extra=[
+            ("automation/run.sh", "# " + OLD + " era\nexport PKG=" + OLD + "\n"),
+        ])
+        mig.apply(r, commit=False, skeleton=os.path.join(self.tmp, "nothing-shipped"))
+        self.assertEqual(open(os.path.join(r, "automation/run.sh")).read(),
+                         "# " + NEW + " era\nexport PKG=" + NEW + "\n")
+
+    def test_an_instance_is_never_its_own_skeleton(self):
+        """A caller passing the instance as its skeleton would exempt every file
+        and report a clean no-op on an unmigrated tree. Same path resolves to
+        no skeleton at all, and the migration runs in full."""
+        _, r = self._skeleton_and_instance()
+        p = mig.plan(r, skeleton=r)
+        self.assertIsNone(p["skeleton"])
+        self.assertEqual(p["delivered_by_sync"], [])
+        self.assertIn("q-consult/pipeline/voice.py", p["rewrite"])
+
+    def test_the_move_still_happens_under_a_skeleton_that_ships_the_package(self):
+        """The old package name never exists in the skeleton, so the move is
+        planned from pre-move paths and proceeds; after it, the init the skeleton
+        ships is left for the rsync and an instance-only module inside the
+        package is still migrated."""
+        sk, r = self._skeleton_and_instance(package=OLD, instance_carries_shipped=False)
+        core = os.path.join(r, "plugins/kipi-core", OLD, "core.py")
+        open(core, "w").write("from " + OLD + " import __init__ as _\n")
+        out = mig.apply(r, commit=False, skeleton=sk)
+        self.assertTrue(out["moved"])
+        self.assertTrue(out["verified"], out["errors"])
+        self.assertFalse(os.path.isdir(os.path.join(r, "plugins/kipi-core", OLD)))
+        moved_core = open(os.path.join(r, "plugins/kipi-core", NEW, "core.py")).read()
+        self.assertNotIn(OLD, moved_core)
+        self.assertIn("plugins/kipi-core/" + NEW + "/core.py", out["rewritten"])
+        self.assertNotIn("plugins/kipi-core/" + NEW + "/__init__.py", out["rewritten"])
+
+    def test_exclude_lists_derive_from_the_updater_and_match_bash(self):
+        """The owned subtrees and plugin excludes are read from kipi-update.sh,
+        the file that runs the rsync. Floor: non-empty. Bound: equal to what
+        bash itself evaluates the two arrays to."""
+        owned, excl = mig._updater_lists(REPO)
+        self.assertTrue(owned and excl)
+        script = (
+            'eval "$(sed -n \'/^INSTANCE_OWNED_SUBTREES=(/,/^)/p\' "$1")"; '
+            'eval "$(sed -n \'/^PLUGIN_COPY_EXCLUDES=(/,/^)/p\' "$1")"; '
+            'printf "O %s\\n" "${INSTANCE_OWNED_SUBTREES[@]}"; '
+            'printf "P %s\\n" "${PLUGIN_COPY_EXCLUDES[@]}"')
+        out = subprocess.run(["bash", "-c", script, "_", UPDATER], capture_output=True, text=True, check=True).stdout
+        bash_owned = [l[2:] for l in out.splitlines() if l.startswith("O ")]
+        bash_excl = [l[2:].split("::", 1)[1] for l in out.splitlines() if l.startswith("P ")]
+        self.assertEqual(owned, bash_owned)
+        self.assertEqual([r.pattern for r in excl], bash_excl)
+        self.assertIn("my-project", owned)
+
+    def test_an_owned_subtree_a_root_file_and_settings_are_the_instances_even_when_the_skeleton_has_them(self):
+        """Round 1 major: the sync never writes these, so a stale import there
+        must still migrate. Skeleton presence is not delivery."""
+        sk, r = self._skeleton_and_instance()
+        cases = [
+            ("q-system/memory/tools/probe.py", "from " + OLD + " import x\n"),      # owned subtree
+            ("q-system/.q-system/data/hook.py", "from " + OLD + " import x\n"),     # owned subtree, dotted
+            ("lefthook.py", "from " + OLD + " import x\n"),                          # skeleton root
+            (".claude/settings.json", '{"hooks": ["' + OLD + '/lint.py"]}\n'),      # merged, not copied
+            ("plugins/kipi-core/.env.py", "from " + OLD + " import x\n"),          # PLUGIN_COPY_EXCLUDES
+        ]
+        for rel, body in cases:
+            for root in (sk, r):
+                path = os.path.join(root, rel)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                open(path, "w").write(body)
+        p = mig.plan(r, skeleton=sk)
+        for rel, _ in cases:
+            self.assertIn(rel, p["rewrite"], rel)
+            self.assertNotIn(rel, p["delivered_by_sync"], rel)
+        self.assertIn("q-system/.q-system/scripts/tool.py", p["delivered_by_sync"])
+        out = mig.apply(r, commit=False, skeleton=sk)
+        self.assertTrue(out["verified"], out["errors"])
+        for rel, _ in cases:
+            self.assertNotIn(OLD, open(os.path.join(r, rel)).read(), rel)
+
+    def test_a_null_prefix_instance_maps_the_skeleton_q_system_onto_its_root(self):
+        """Round 1 minor: with subtree_prefix null the skeleton's q-system/<x>
+        lands at <x>, so that is where delivery is judged, owned subtrees
+        included."""
+        sk = os.path.join(self.tmp, "skeleton")
+        for rel, body in [("q-system/.q-system/scripts/tool.py", "import " + OLD + ".core\n"),
+                          ("q-system/memory/tools/probe.py", "from " + OLD + " import x\n")]:
+            path = os.path.join(sk, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            open(path, "w").write(body)
+        r = build_instance(os.path.join(self.tmp, "flat"), package=NEW, extra=[
+            (".q-system/scripts/tool.py", "import " + OLD + ".core\n"),
+            ("memory/tools/probe.py", "from " + OLD + " import x\n"),
+            ("q-system/.q-system/scripts/tool.py", "import " + OLD + ".core\n"),
+        ])
+        p = mig.plan(r, skeleton=sk, prefix="")
+        self.assertEqual(p["prefix"], "")
+        self.assertEqual(p["delivered_by_sync"], [".q-system/scripts/tool.py"])
+        self.assertIn("memory/tools/probe.py", p["rewrite"])
+        # under a null prefix the nested q-system/ copy is NOT where the sync writes
+        self.assertIn("q-system/.q-system/scripts/tool.py", p["rewrite"])
+
+    def test_the_prefix_comes_from_the_registry_beside_the_skeleton(self):
+        sk, r = self._skeleton_and_instance()
+        import json
+        json.dump({"instances": [{"name": "i", "path": r, "subtree_prefix": None}]},
+                  open(os.path.join(sk, "instance-registry.json"), "w"))
+        self.assertEqual(mig.plan(r, skeleton=sk)["prefix"], "")
+        json.dump({"instances": [{"name": "i", "path": r, "subtree_prefix": "q-system"}]},
+                  open(os.path.join(sk, "instance-registry.json"), "w"))
+        self.assertEqual(mig.plan(r, skeleton=sk)["prefix"], "q-system")
+        os.unlink(os.path.join(sk, "instance-registry.json"))
+        self.assertEqual(mig.plan(r, skeleton=sk)["prefix"], mig.DEFAULT_PREFIX)
+
+    def test_unreadable_exclude_lists_exempt_nothing_and_say_so(self):
+        """Fail toward migrating: a skeleton whose updater cannot be read
+        exempts no path and the plan carries a warning, so the miss is churn,
+        never a stranded import."""
+        sk, r = self._skeleton_and_instance()
+        real = mig._updater_lists
+        mig._updater_lists = lambda skeleton: (_ for _ in ()).throw(ValueError("no updater here"))
+        try:
+            p = mig.plan(r, skeleton=sk)
+        finally:
+            mig._updater_lists = real
+        self.assertIsNone(p["skeleton"])
+        self.assertEqual(p["delivered_by_sync"], [])
+        self.assertTrue(any("no path is exempt" in w for w in p["warnings"]), p["warnings"])
+        self.assertIn("q-system/.q-system/scripts/tool.py", p["rewrite"])
+
+    def test_the_plan_line_names_every_input_to_needs_work(self):
+        """kipi-update.sh --dry pipes the human-readable plan line through sed,
+        so a plan that says needs_work=True has to say which input made it so;
+        `unparseable` was the one it could not name (PR #312 round 2)."""
+        r = build_instance(os.path.join(self.tmp, "i"), package=NEW, extra=[
+            ("automation/broken.py", "x = (" + OLD + "\n"),
+        ])
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        out = subprocess.run([sys.executable, MIGRATE, "--repo", r], capture_output=True, text=True, env=env)
+        line = out.stdout.strip().splitlines()[-1]
+        self.assertIn("unparseable=1", line)
+        self.assertIn("needs_work=True", line)
+        out = subprocess.run([sys.executable, MIGRATE, "--repo", r, "--apply", "--no-commit"],
+                             capture_output=True, text=True, env=env)
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("unparseable=1", out.stdout)
+        self.assertIn("verified=False", out.stdout)
+
     def test_both_present_never_deletes_either_package(self):
         """A half-synced instance is reported, not resolved by removal.
 

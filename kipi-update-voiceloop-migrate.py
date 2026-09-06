@@ -51,11 +51,34 @@ counted and reported as `history_left`, never edited.
 than an oversight: .json here is config the engine reads (voice-channels.json
 names `voiceloop/validate.py`, a path that genuinely moved), .jsonl is an
 append-only ledger.
+
+Prose is never rewritten. In a .py file a comment or a docstring that names the
+old package is documenting the rename (the engine's own module docstring, the
+exporter's RENAMES note) and must keep the name; Python's tokenizer and parser
+tell that prose from the code and string literals that genuinely migrate. A .py
+file carrying the name that cannot be parsed refuses the instance rather than
+being swapped blind. The other REWRITE_EXTS have no such classifier and keep
+the blanket swap, comments included.
+
+A path the SYNC DELIVERS is never rewritten, whatever its extension: the rsync
+this script runs ahead of writes the skeleton's copy over it seconds later, so
+the rewrite is churn at best and a refused commit at worst (2026-09-06: the
+engine's own __init__.py documents the rename in its docstring, naming the old
+package on purpose). Delivered means the skeleton's q-system/ tree mapped
+through the instance's subtree_prefix minus INSTANCE_OWNED_SUBTREES, plus the
+skeleton's plugins/<name>/ trees minus PLUGIN_COPY_EXCLUDES, both arrays read
+from kipi-update.sh itself (see SKELETON_ROOT). Everything else the instance
+holds, including a file the skeleton ships as a template under an owned
+subtree, a file at the skeleton root, or its merged .claude/settings.json, is
+the instance's and is migrated.
 """
 from __future__ import annotations
 
 import argparse
+import ast
+import io
 import json
+import tokenize
 import os
 import re
 import shutil
@@ -76,7 +99,8 @@ NEW = "voiceloop"
 # word boundary would miss every one of them. This is the same rule
 # consulting's automation/export_voice_loop.py has applied to its public mirror
 # since 2026-08-20, which is the evidence that a blanket token swap is safe on
-# this corpus.
+# CODE. It is not safe on prose: see rewrite_text, which keeps comments and
+# docstrings out of the swap for .py files (2026-09-06).
 CASE_FORMS = (
     ("voicekit", "voiceloop"),
     ("Voicekit", "Voiceloop"),
@@ -118,6 +142,150 @@ SKIP_DIR_PREFIXES = (".wt-",)
 # definition is not a rule.
 SELF_PATH = os.path.realpath(__file__)
 SKIP_PATH_PARTS = (os.path.join("tests", "fixtures") + os.sep,)
+
+# A FILE THE SKELETON SHIPS IS THE SYNC'S TO DELIVER, NEVER THIS SCRIPT'S TO
+# REWRITE. This script lives at the skeleton root and kipi-update.sh runs it
+# right before the rsync that copies the skeleton's q-system/ .claude/ plugins/
+# over the instance. Any path the skeleton itself carries is therefore
+# overwritten seconds later with the skeleton's bytes, so rewriting it here is
+# at best a churn commit and at worst a refused one:
+#
+#   * The skeleton's own plugins/kipi-core/voiceloop/__init__.py names the old
+#     package in a why-comment ("this package was called `voicekit` here"),
+#     deliberately, as history. Measured 2026-09-06 across the fleet: every sync
+#     rewrote that comment in every instance, committed it, and the rsync put the
+#     skeleton's copy back, forever ("rewritten=1" on all 22 instances, 7 on the
+#     one that also carried six skeleton-shipped q-system scripts and tests).
+#   * On the instance whose pre-commit compares the engine to a public mirror,
+#     that one-line rewrite is a diff against the mirror, the gate refused the
+#     commit, this script reported "migration failed", and the rsync it exists
+#     to prepare never started (sp-b0389e48, sp-2c1bcc3f's neighbour).
+#
+# THE SET IS WHAT THE SYNC DELIVERS, NOT WHAT THE SKELETON CONTAINS. "Exists in
+# the skeleton" was the first cut and the reviewer of PR #312 named where the
+# two sets differ: a path under an INSTANCE_OWNED_SUBTREES dir (my-project/,
+# memory/, .q-system/data/ ...) that the skeleton happens to ship as a template
+# is never overwritten, the sync excludes it; a file at the skeleton ROOT
+# (kipi-update.sh, lefthook.yml, README.md) is never copied anywhere; the
+# instance's .claude/settings.json is MERGED from a template, its own hook
+# entries survive, so a stale path there is the instance's to migrate. Exempting
+# any of those leaves the old name in place forever and reports verified=True.
+# And the instance keeps its q-system under `subtree_prefix` (null for one
+# registered instance), so the skeleton's q-system/<x> lands at <prefix>/<x>.
+#
+# So the exemption is derived, per file, from the same three facts the rsync
+# uses: the skeleton's q-system/ tree minus INSTANCE_OWNED_SUBTREES, mapped
+# through the instance's subtree_prefix; and the skeleton's plugins/<name>/
+# trees minus PLUGIN_COPY_EXCLUDES. Both arrays are read from kipi-update.sh
+# itself, the file that will run the rsync, so this script cannot drift from
+# it (the deletion guard keeps a hand copy and a test to compare; this one
+# reads the owner). If the arrays cannot be read, nothing is exempt and the
+# plan says so under `warnings`: rewriting a file the sync would have replaced
+# is churn, skipping one it would not have is a stranded import.
+#
+# The package MOVE (step 1 of apply) is untouched: the old package name is never
+# a delivered path, so its files are seen at their pre-move paths and the move
+# proceeds; after the move they sit where the rsync delivers the real ones.
+SKELETON_ROOT = os.path.dirname(SELF_PATH)
+UPDATER_NAME = "kipi-update.sh"
+REGISTRY_NAME = "instance-registry.json"
+DEFAULT_PREFIX = "q-system"
+
+
+def _resolve_skeleton(repo: str, skeleton: str | None) -> str | None:
+    """The tree whose files the sync delivers, or None when there is none to
+    compare against (the script run over the skeleton itself, or a caller that
+    passed the instance as its own skeleton)."""
+    root = SKELETON_ROOT if skeleton is None else os.path.abspath(skeleton)
+    if os.path.realpath(root) == os.path.realpath(repo):
+        return None
+    return root
+
+
+def _bash_array(text: str, name: str) -> list[str]:
+    """The literal elements of `NAME=( ... )` as bash reads them: one element
+    per whitespace-separated word, double quotes stripped with the four
+    backslash escapes bash honours inside them (dollar, quote, backslash,
+    backtick) unescaped, `#` comments dropped. Enough for the two arrays this
+    reads, which are literal lists by design (ASK-772)."""
+    m = re.search(r"^%s=\(\s*\n(.*?)^\)" % re.escape(name), text, re.S | re.M)
+    if not m:
+        return []
+    out: list[str] = []
+    for raw in m.group(1).splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        for word in re.findall(r'"(?:[^"\\]|\\.)*"|\S+', line):
+            if word.startswith("#"):
+                break
+            if word.startswith('"') and word.endswith('"') and len(word) >= 2:
+                word = re.sub(r'\\([$"\\`])', r"\1", word[1:-1])
+            out.append(word)
+    return out
+
+
+def _updater_lists(skeleton: str) -> tuple[list[str], list[re.Pattern]]:
+    """(INSTANCE_OWNED_SUBTREES, PLUGIN_COPY_EXCLUDES regexes) from the
+    kipi-update.sh that will run the rsync: the one beside the delivered tree,
+    or the one beside this script."""
+    for root in (skeleton, SKELETON_ROOT):
+        updater = os.path.join(root, UPDATER_NAME)
+        if os.path.isfile(updater):
+            break
+    else:
+        raise ValueError(f"{UPDATER_NAME} not found beside the skeleton or this script")
+    text = open(updater, encoding="utf-8").read()
+    owned = _bash_array(text, "INSTANCE_OWNED_SUBTREES")
+    excl = [e.split("::", 1)[1] for e in _bash_array(text, "PLUGIN_COPY_EXCLUDES") if "::" in e]
+    if not owned or not excl:
+        raise ValueError(f"could not read INSTANCE_OWNED_SUBTREES / PLUGIN_COPY_EXCLUDES from {updater}")
+    return owned, [re.compile(r) for r in excl]
+
+
+def _instance_prefix(repo: str, skeleton: str) -> str:
+    """The instance's subtree_prefix from the registry beside the skeleton (or
+    beside this script); DEFAULT_PREFIX for a repo the registry does not know,
+    which is every fixture and the only layout the updater creates."""
+    for root in (skeleton, SKELETON_ROOT):
+        reg = os.path.join(root, REGISTRY_NAME)
+        if not os.path.isfile(reg):
+            continue
+        try:
+            rows = json.load(open(reg, encoding="utf-8")).get("instances") or []
+        except (OSError, ValueError):
+            continue
+        for row in rows:
+            path = row.get("path") if isinstance(row, dict) else None
+            if path and os.path.realpath(os.path.expanduser(path)) == os.path.realpath(repo):
+                return (row.get("subtree_prefix") or "").strip("/")
+        break
+    return DEFAULT_PREFIX
+
+
+def _delivered_by_sync(rel: str, skeleton: str | None, prefix: str,
+                       owned: list[str], plugin_excl: list[re.Pattern]) -> bool:
+    """Would the next sync write the skeleton's copy over this instance path?"""
+    if skeleton is None:
+        return False
+    # q-system half: skeleton q-system/<sub> lands at <prefix>/<sub>, minus the
+    # anchored instance-owned excludes.
+    if prefix:
+        sub = rel[len(prefix) + 1:] if rel.startswith(prefix + "/") else None
+    else:
+        sub = rel
+    if sub and not any(sub == o or sub.startswith(o + "/") for o in owned) \
+            and os.path.lexists(os.path.join(skeleton, "q-system", sub)):
+        return True
+    # plugins half: skeleton plugins/<name>/ lands at plugins/<name>/, minus
+    # PLUGIN_COPY_EXCLUDES (--delete-excluded).
+    parts = rel.split("/")
+    if len(parts) >= 3 and parts[0] == "plugins" \
+            and os.path.isdir(os.path.join(skeleton, "plugins", parts[1])) \
+            and os.path.lexists(os.path.join(skeleton, rel)) \
+            and not any(r.search("/".join(parts[2:])) for r in plugin_excl):
+        return True
+    return False
 
 
 def _exempt(path: str) -> bool:
@@ -165,9 +333,125 @@ def has_token(text: str) -> bool:
     return any(before in text for before, _ in CASE_FORMS)
 
 
-def plan(repo: str) -> dict:
-    """Read-only. What this instance needs, without touching a byte."""
+# PROSE IS NEVER REWRITTEN. A why-comment that documents the rename has to name
+# the old package, or it documents nothing: the engine's own module docstring
+# says "this package was called `voicekit` here and the exporter renamed it to
+# `voiceloop`", and the exporter's RENAMES table carries "the pair (voicekit ->
+# voiceloop) lived here until the rename" as a # comment. The blanket swap
+# turned both into an identity pair described as a rename (2026-09-06, the
+# fleet sync refused on the one instance whose commit gate compares the engine
+# to its public mirror; the same run rewrote and STAGED the exporter's comment
+# in the instance's own automation/ and abandoned the checkout that way).
+#
+# "Skip comments" by regex cannot tell a comment that documents the old name
+# from a string that is a module path, and the module path is exactly what a
+# migration must rewrite. Python's own tokenizer and parser can: a COMMENT
+# token is prose, and a STRING that is the first statement of a module, class
+# or function is a docstring (the rule ast.get_docstring uses). Everything else,
+# NAME tokens (`from voicekit import`), STRING literals (`"voicekit/validate.py"`)
+# and filenames, is code and migrates as before. Only .py gets this: nothing
+# here can classify a shell comment against a shell string, so the other
+# REWRITE_EXTS keep the blanket swap, documented in the module docstring.
+#
+# A .py file that carries the token and cannot be parsed is NOT swapped
+# blindly: that would restore the defect for exactly the file nobody looked at.
+# It is reported and apply() refuses the instance, the same posture the updater
+# takes on a dirty tree (a-gate-that-cannot-run-must-not-pass).
+PROSE_EXTS = {".py"}
+
+
+def _char_col(line: str, byte_col: int) -> int:
+    """ast reports columns in UTF-8 bytes; tokenize and str slicing use
+    characters. Same value on ASCII lines, different after a non-ASCII char."""
+    return len(line.encode("utf-8")[:byte_col].decode("utf-8", "replace"))
+
+
+def _prose_spans(text: str, lines: list[str]) -> list[tuple[int, int, int, int]]:
+    """(start_line, start_col, end_line, end_col), 1-based lines, character
+    columns, end exclusive: every COMMENT token and every docstring."""
+    spans: list[tuple[int, int, int, int]] = []
+    tree = ast.parse(text)
+    holders = [tree] + [n for n in ast.walk(tree)
+                        if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))]
+    for node in holders:
+        body = getattr(node, "body", None)
+        if not body:
+            continue
+        first = body[0]
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) \
+                and isinstance(first.value.value, str):
+            v = first.value
+            spans.append((v.lineno, _char_col(lines[v.lineno - 1], v.col_offset),
+                          v.end_lineno, _char_col(lines[v.end_lineno - 1], v.end_col_offset)))
+    for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+        if tok.type == tokenize.COMMENT:
+            spans.append((tok.start[0], tok.start[1], tok.end[0], tok.end[1]))
+    return spans
+
+
+def _swap_outside(lines: list[str], spans: list[tuple[int, int, int, int]]) -> str:
+    """The token swap applied to every character that is not inside a span."""
+    protected: dict[int, list[tuple[int, int]]] = {}
+    for l1, c1, l2, c2 in spans:
+        for ln in range(l1, l2 + 1):
+            start = c1 if ln == l1 else 0
+            end = c2 if ln == l2 else len(lines[ln - 1])
+            protected.setdefault(ln, []).append((start, end))
+    out = []
+    for i, line in enumerate(lines, start=1):
+        ranges = sorted(protected.get(i, ()))
+        if not ranges:
+            out.append(swap_tokens(line))
+            continue
+        pos, parts = 0, []
+        for start, end in ranges:
+            parts.append(swap_tokens(line[pos:start]))
+            parts.append(line[start:end])
+            pos = max(pos, end)
+        parts.append(swap_tokens(line[pos:]))
+        out.append("".join(parts))
+    return "".join(out)
+
+
+def rewrite_text(text: str, ext: str) -> str:
+    """The migrated text for a file of this extension. Raises ValueError for a
+    prose-aware extension whose file cannot be classified."""
+    if ext not in PROSE_EXTS:
+        return swap_tokens(text)
+    if "\r" in text.replace("\r\n", ""):
+        raise ValueError("lone CR line endings: ast and tokenize would disagree on line numbers")
+    lines = io.StringIO(text).readlines()
+    try:
+        spans = _prose_spans(text, lines)
+    except (SyntaxError, ValueError, tokenize.TokenError) as exc:
+        raise ValueError(f"cannot classify prose from code: {type(exc).__name__}: {exc}") from exc
+    return _swap_outside(lines, spans)
+
+
+def plan(repo: str, skeleton: str | None = None, prefix: str | None = None) -> dict:
+    """Read-only. What this instance needs, without touching a byte.
+
+    `skeleton` is the tree the sync delivers (default: the one this script sits
+    in); a path the sync would overwrite is skipped entirely, see SKELETON_ROOT
+    above. `prefix` is the instance's subtree_prefix (default: the registry's
+    answer, else DEFAULT_PREFIX)."""
     repo = os.path.abspath(repo)
+    delivered = _resolve_skeleton(repo, skeleton)
+    warnings: list[str] = []
+    owned: list[str] = []
+    plugin_excl: list[re.Pattern] = []
+    if delivered is not None:
+        try:
+            owned, plugin_excl = _updater_lists(delivered)
+        except ValueError as exc:
+            warnings.append(f"no path is exempt: {exc}")
+            delivered = None
+    if prefix is not None:
+        sub_prefix = prefix.strip("/")
+    elif delivered is not None:
+        sub_prefix = _instance_prefix(repo, delivered)
+    else:
+        sub_prefix = DEFAULT_PREFIX
     old_pkg = os.path.join(repo, PLUGIN_PARENT, OLD)
     new_pkg = os.path.join(repo, PLUGIN_PARENT, NEW)
     has_old = os.path.isdir(old_pkg)
@@ -182,11 +466,14 @@ def plan(repo: str) -> dict:
     else:
         package_action = "absent"
 
-    rewrite, renames, history = [], [], []
+    rewrite, renames, history, shipped, unparseable = [], [], [], [], []
     for path in iter_source_files(repo):
         if _exempt(path):
             continue
         rel = os.path.relpath(path, repo)
+        if _delivered_by_sync(rel, delivered, sub_prefix, owned, plugin_excl):
+            shipped.append(rel)
+            continue
         base = os.path.basename(path)
         ext = os.path.splitext(base)[1].lower()
         # A FILENAME follows the same record/source split as file CONTENT, and
@@ -211,8 +498,15 @@ def plan(repo: str) -> dict:
             text = open(path, encoding="utf-8", errors="strict").read()
         except (OSError, UnicodeError):
             continue
-        if has_token(text):
-            rewrite.append(rel)
+        if not has_token(text):
+            continue
+        # The same function apply() writes with decides whether there is
+        # anything to write, so plan and apply cannot disagree about prose.
+        try:
+            if rewrite_text(text, ext) != text:
+                rewrite.append(rel)
+        except ValueError as exc:
+            unparseable.append(f"{rel}: {exc}")
 
     # STAGED-BUT-UNCOMMITTED MIGRATION WORK IS UNFINISHED WORK, and reading the
     # disk alone cannot see that. Measured 2026-08-30 on one instance: its own
@@ -262,16 +556,21 @@ def plan(repo: str) -> dict:
 
     return {
         "repo": repo,
+        "skeleton": delivered,
+        "prefix": sub_prefix,
+        "warnings": warnings,
         "package_action": package_action,
         "rewrite": sorted(rewrite),
         "renames": sorted(renames),
+        "delivered_by_sync": sorted(shipped),
+        "unparseable": sorted(unparseable),
         "history_left": sorted(history),
         "staged_migration": staged_migration,
         "staged_rewrites": staged_rewrites,
         # The one line a caller can branch on. `already`/`absent` with nothing to
         # rewrite AND nothing staged is a finished instance.
         "needs_work": (package_action in ("move", "both_present")
-                       or bool(rewrite) or bool(renames)
+                       or bool(rewrite) or bool(renames) or bool(unparseable)
                        or bool(staged_migration) or bool(staged_rewrites)),
     }
 
@@ -317,9 +616,10 @@ def _dirty_tracked(repo: str, rels: list) -> list:
     return sorted(set(out))
 
 
-def apply(repo: str, commit: bool = True) -> dict:
+def apply(repo: str, commit: bool = True, skeleton: str | None = None,
+          prefix: str | None = None) -> dict:
     repo = os.path.abspath(repo)
-    p = plan(repo)
+    p = plan(repo, skeleton, prefix)
     result = {**p, "moved": False, "rewritten": [], "renamed": [], "committed": False,
               "errors": [], "left_untracked": [], "backed_up": []}
     # Snapshot tracked-ness BEFORE any write, because `git mv` and the rewrites
@@ -343,6 +643,13 @@ def apply(repo: str, commit: bool = True) -> dict:
     #
     # Checked ONCE, here, against the PRE-MOVE paths. After `git mv` the package's
     # own files read as staged renames and would false-trip this.
+    if p["unparseable"]:
+        result["errors"].append(
+            "refusing to migrate: %d .py file(s) carry the old name and cannot be "
+            "classified into code and prose; fix the file or move it out of the "
+            "tree and re-run: %s" % (len(p["unparseable"]), "; ".join(p["unparseable"][:3])))
+        result["verified"] = False
+        return result
     blocked = _dirty_tracked(repo, p["rewrite"] + p["renames"])
     if blocked:
         result["errors"].append(
@@ -372,7 +679,7 @@ def apply(repo: str, commit: bool = True) -> dict:
     # pre-move relative paths are stale. Re-reading is cheap; acting on a stale
     # path list is the "validate the mutant applied" failure -- an edit that
     # silently lands nowhere.
-    p2 = plan(repo)
+    p2 = plan(repo, skeleton, prefix)
     for rel in p2["rewrite"]:
         path = os.path.join(repo, rel)
         try:
@@ -380,7 +687,11 @@ def apply(repo: str, commit: bool = True) -> dict:
         except (OSError, UnicodeError) as exc:
             result["errors"].append(f"read {rel}: {exc}")
             continue
-        new_text = swap_tokens(text)
+        try:
+            new_text = rewrite_text(text, os.path.splitext(rel)[1].lower())
+        except ValueError as exc:
+            result["errors"].append(f"classify {rel}: {exc}")
+            continue
         if new_text == text:
             continue
         # NOTHING RESTORES WHAT WAS NEVER TRACKED. Codex BLOCKER on PR #292:
@@ -430,7 +741,7 @@ def apply(repo: str, commit: bool = True) -> dict:
         result["renamed"].append(f"{rel} -> {dst_rel}")
 
     # --- step 3: prove it, against the tree we just wrote --------------------
-    after = plan(repo)
+    after = plan(repo, skeleton, prefix)
     if after["package_action"] == "move":
         result["errors"].append("package still named voicekit after apply")
     if after["rewrite"]:
@@ -570,13 +881,19 @@ def main(argv=None) -> int:
     else:
         name = os.path.basename(os.path.abspath(args.repo))
         if not args.apply:
+            # Every input to needs_work is printed beside it, so a plan that says
+            # work is needed also says WHICH kind: kipi-update.sh --dry pipes
+            # this line through sed, and `unparseable` was the one input it could
+            # not name (PR #312 review round 2).
             print(f"{name}: package={out['package_action']} "
                   f"rewrite={len(out['rewrite'])} rename={len(out['renames'])} "
+                  f"unparseable={len(out['unparseable'])} "
                   f"history_left={len(out['history_left'])} "
                   f"needs_work={out['needs_work']}")
         else:
             print(f"{name}: moved={out['moved']} "
                   f"rewritten={len(out['rewritten'])} renamed={len(out['renamed'])} "
+                  f"unparseable={len(out['unparseable'])} "
                   f"committed={out['committed']} verified={out['verified']}")
             for e in out["errors"]:
                 print("  ERROR: " + e, file=sys.stderr)
