@@ -12,6 +12,13 @@ content as a list of text blocks.
 The lane tests build a fake `q-consult/pipeline` package in a temp root and
 point the gate's INSTANCE_ROOT at it, so the three outcomes of `_route_context`
 (absent, broken, present) are each exercised without the real lane.
+
+Round 2 (PR #313 review): the slash-command and hook-opener cases use record
+text lifted verbatim from this fleet's own session logs (a `/goal` turn with his
+words in `<command-args>`, a plugin command with `<command-message>` first), and
+the receipt cases run against a fake `route_contract` that hashes with the
+producer's exact envelope, so each of the five verification branches in
+`enforce_route_receipt` is killed by at least one case (mutation-checked).
 """
 import importlib.util
 import json
@@ -46,6 +53,20 @@ PEER = (
     'from-name="voice loop" from-mode="bypass">\n'
     'If you add a `social-comment` surface, its pointers are now verified.\n'
     '</cross-session-message>'
+)
+# Verbatim from a 2026-09-06 session log: the harness's own shape for a slash
+# command, indentation included, and not flagged isMeta.
+GOAL_TURN = (
+    "<command-name>/goal</command-name>\n"
+    "            <command-message>goal</command-message>\n"
+    "            <command-args>ensure you know from the other projects tht you "
+    "know when you can go and then go</command-args>"
+)
+GOAL_ARGS = "ensure you know from the other projects tht you know when you can go and then go"
+# A plugin command: `<command-message>` comes FIRST, and there are no args.
+PLUGIN_COMMAND_TURN = (
+    "<command-message>kipi-core:wiring-check</command-message>\n"
+    "<command-name>/kipi-core:wiring-check</command-name>"
 )
 
 
@@ -145,9 +166,98 @@ def test_assistant_text_is_unaffected(transcript):
     assert "here is the draft" in vsg.find_final_assistant_text(path)
 
 
+# --- a slash command is HIS turn ------------------------------------------
+
+def test_a_slash_command_turn_is_his_arguments():
+    assert vsg.founder_typed_text(GOAL_TURN) == GOAL_ARGS
+
+
+def test_a_slash_command_turn_is_not_an_older_request(transcript):
+    """The PR #313 reproducer: truncating at the first tag returned "" and the
+    gate answered with the PREVIOUS turn, so the scorer and the route hasher
+    were handed words he did not type this turn."""
+    path = transcript([
+        _record("write me a linkedin post about the audit"),
+        _record(GOAL_TURN),
+    ])
+    assert vsg.find_final_user_text(path) == GOAL_ARGS
+
+
+def test_a_bare_command_is_still_his_turn(transcript):
+    assert vsg.founder_typed_text(PLUGIN_COMMAND_TURN) == "/kipi-core:wiring-check"
+    path = transcript([
+        _record("write me a linkedin post about the audit"),
+        _record(PLUGIN_COMMAND_TURN),
+    ])
+    assert vsg.find_final_user_text(path) == "/kipi-core:wiring-check"
+
+
+@pytest.mark.parametrize("typed", [
+    "PostToolUse hook is refusing my edit again, why?",
+    "Stop hook feedback is firing on every turn, fix it",
+    "SessionStart hook output looks wrong",
+])
+def test_his_message_about_a_hook_is_his_message(typed):
+    """He pastes hook errors as a workflow. The harness flags its OWN hook
+    feedback isMeta (251 of 251 records over 30 session logs), so prose that
+    opens with an event name is his, not the machine's."""
+    assert vsg.founder_typed_text(typed) == typed
+
+
 # --- the route lane: absent, broken, present ------------------------------
 
-def _fake_lane(root, broken=False, status="NOT_ROUTED"):
+# The contract half of the fake lane hashes with the PRODUCER's exact envelope
+# (route_contract._hash: NFC-normalised text, sorted compact JSON, sha256) and
+# matches on its MATCH_FIELDS, so a receipt minted here is refused or consumed
+# for the same reasons a real one is. An empty module here was PR #313's
+# finding 3: every verification branch survived deletion with the suite green.
+FAKE_CONTRACT = '''
+import hashlib, json, pathlib, unicodedata
+
+class route_receipts:
+    MATCH_FIELDS = {"attempt_id", "session_id", "origin_message_id",
+                    "completion_message_id", "request_hash", "surface",
+                    "channel", "output_hash", "loop_sha"}
+
+STORE = pathlib.Path(__file__).with_name("receipts.json")
+
+def normalize_text(text):
+    return unicodedata.normalize("NFC", str(text)).replace("\\r\\n", "\\n").replace("\\r", "\\n")
+
+def _hash(kind, text, surface, channel):
+    envelope = {"channel": channel, "kind": kind, "surface": surface, "text": normalize_text(text)}
+    encoded = json.dumps(envelope, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+def request_hash(request, surface, channel):
+    return _hash("request", request, surface, channel)
+
+def output_hash(output, surface, channel):
+    return _hash("output", output, surface, channel)
+
+def create_receipt(request, output, *, surface, channel, **overrides):
+    row = {"attempt_id": "attempt-1", "session_id": "session-1",
+           "origin_message_id": "origin-1", "completion_message_id": "completion-1",
+           "request_hash": request_hash(request, surface, channel),
+           "surface": surface, "channel": channel,
+           "output_hash": output_hash(output, surface, channel),
+           "loop_sha": "loop-1", "status": "pending"}
+    row.update(overrides)
+    STORE.write_text(json.dumps(row))
+    return row
+
+def verify_and_consume(identity, *, draft=None, **_):
+    row = json.loads(STORE.read_text()) if STORE.exists() else None
+    if row is None or row["status"] != "pending" or any(row.get(k) != v for k, v in identity.items()):
+        raise LookupError("no current receipt matches the identity")
+    row["status"] = "consumed"
+    row["draft"] = draft
+    STORE.write_text(json.dumps(row))
+    return row
+'''
+
+
+def _fake_lane(root, broken=False, status="NOT_ROUTED", owner=False):
     pkg = root / "q-consult" / "pipeline"
     pkg.mkdir(parents=True)
     (pkg / "__init__.py").write_text("")
@@ -164,18 +274,20 @@ def _fake_lane(root, broken=False, status="NOT_ROUTED"):
         def classify(request):
             return Result({status!r}, "linkedin_post", "linkedin", "fixture")
     """))
-    (pkg / "route_contract.py").write_text("")
+    (pkg / "route_contract.py").write_text(FAKE_CONTRACT)
     (pkg / "audit_only_routes.py").write_text(textwrap.dedent("""
         class AuditOnlyRouteError(Exception):
             pass
         def routes():
             return []
     """))
-    (pkg / "route_registry.py").write_text(textwrap.dedent("""
+    (pkg / "route_registry.py").write_text(textwrap.dedent(f"""
         class RouteRegistryError(Exception):
             pass
         def resolve(surface, channel):
-            raise RouteRegistryError("no owner in the fixture")
+            if not {owner!r}:
+                raise RouteRegistryError("no owner in the fixture")
+            return {{"surface": surface, "channel": channel, "owner": "fixture"}}
     """))
     return pkg
 
@@ -224,3 +336,73 @@ def test_a_receipt_block_must_be_json():
         vsg._receipt_block("=== ROUTE RECEIPT ===\nnot json")
     assert vsg._receipt_block("no marker here") is None
     assert vsg._receipt_block('=== ROUTE RECEIPT ===\n{"surface": "x"}') == {"surface": "x"}
+
+
+# --- the receipt: each verification branch refuses for its own reason ------
+
+REQUEST = "write me a linkedin post about the audit"
+DRAFT = "The audit found the gate green and the test never ran."
+
+
+def _routed_lane(lane_root):
+    """A present lane that ROUTES the request to an owner; returns its contract."""
+    _fake_lane(lane_root, status="ROUTE", owner=True)
+    return vsg._route_context()[1]
+
+
+def _assistant(receipt, draft=DRAFT):
+    return "=== ROUTE RECEIPT ===\n" + json.dumps(receipt) + "\n=== DRAFT ===\n" + draft
+
+
+def test_a_matching_receipt_passes_and_is_consumed(lane_root):
+    contract = _routed_lane(lane_root)
+    receipt = contract.create_receipt(REQUEST, DRAFT, surface="linkedin_post", channel="linkedin")
+    row = vsg.enforce_route_receipt(REQUEST, _assistant(receipt))
+    assert row["status"] == "consumed"
+    assert row["draft"] == DRAFT
+
+
+def test_a_routed_completion_with_no_receipt_is_refused(lane_root):
+    _routed_lane(lane_root)
+    with pytest.raises(vsg.RouteBoundaryError, match="has no route receipt"):
+        vsg.enforce_route_receipt(REQUEST, "=== DRAFT ===\n" + DRAFT)
+
+
+def test_an_incomplete_identity_is_refused(lane_root):
+    contract = _routed_lane(lane_root)
+    receipt = contract.create_receipt(REQUEST, DRAFT, surface="linkedin_post", channel="linkedin")
+    del receipt["loop_sha"]
+    with pytest.raises(vsg.RouteBoundaryError, match="identity is incomplete"):
+        vsg.enforce_route_receipt(REQUEST, _assistant(receipt))
+
+
+def test_a_receipt_for_another_surface_is_refused(lane_root):
+    contract = _routed_lane(lane_root)
+    receipt = contract.create_receipt(REQUEST, DRAFT, surface="reddit_post", channel="reddit")
+    with pytest.raises(vsg.RouteBoundaryError, match="requested surface"):
+        vsg.enforce_route_receipt(REQUEST, _assistant(receipt))
+
+
+def test_a_receipt_for_another_request_is_refused(lane_root):
+    contract = _routed_lane(lane_root)
+    receipt = contract.create_receipt("write me a linkedin post about another audit", DRAFT,
+                                      surface="linkedin_post", channel="linkedin")
+    with pytest.raises(vsg.RouteBoundaryError, match="does not match the user request"):
+        vsg.enforce_route_receipt(REQUEST, _assistant(receipt))
+
+
+def test_a_draft_edited_after_minting_is_refused(lane_root):
+    contract = _routed_lane(lane_root)
+    receipt = contract.create_receipt(REQUEST, DRAFT, surface="linkedin_post", channel="linkedin")
+    with pytest.raises(vsg.RouteBoundaryError, match="does not match the assistant output"):
+        vsg.enforce_route_receipt(REQUEST, _assistant(receipt, draft=DRAFT + " Edited."))
+
+
+def test_a_receipt_the_store_does_not_hold_is_refused(lane_root):
+    """A well-formed block whose row is gone (or already consumed) is not a
+    proof; the store's refusal is surfaced, never swallowed."""
+    contract = _routed_lane(lane_root)
+    receipt = contract.create_receipt(REQUEST, DRAFT, surface="linkedin_post", channel="linkedin")
+    contract.STORE.unlink()
+    with pytest.raises(vsg.RouteBoundaryError, match="was not accepted"):
+        vsg.enforce_route_receipt(REQUEST, _assistant(receipt))

@@ -513,12 +513,19 @@ _INJECTED_BLOCK = re.compile(
     r"\b.*?</\1>",
     re.I | re.S,
 )
+# A turn that OPENS with an injected tag is machine text end to end. Two
+# alternatives left this list on 2026-09-06 (PR #313 review, findings 1 and 4):
+# `command-name`, because a slash-command turn is HIS turn and is rebuilt by
+# `_command_invocation` below; and the "<Event> hook" prose opener, because the
+# harness labels every hook-feedback record isMeta (measured over 30 session
+# logs in two projects: 251 of 251 such records carry the flag, which
+# `find_final_user_text` already honours), so the only text that alternative
+# ever matched was his own, "PostToolUse hook is refusing my edit again, why?",
+# which then read as an OLDER turn's request.
 _INJECTED_OPENER = re.compile(
-    r"^\s*(?:<(?:system-reminder|task-notification|command-name|"
+    r"^\s*(?:<(?:system-reminder|task-notification|"
     r"local-command-stdout|user-prompt-submit-hook|cross-session-message)\b"
-    r"|\[SYSTEM NOTIFICATION"
-    r"|(?:PreToolUse|PostToolUse|Stop|SessionStart|UserPromptSubmit)"
-    r"(?::\w+)?\s+hook\b)",
+    r"|\[SYSTEM NOTIFICATION)",
     re.I,
 )
 # A SKILL or SLASH-COMMAND invocation injects its whole BODY as bare markdown
@@ -539,34 +546,58 @@ _INJECTED_OPENER = re.compile(
 # UNSUPPORTED, so every completion was held while the founder's actual message,
 # "Explain this simply no tables", is correctly not-routed.
 #
-# His typed words come FIRST and the injection follows, so the fix is a
-# truncation, not another tag to enumerate. Enumerating tags is what failed
-# twice: each round adds the one carrier that just bit, and the next carrier is
-# invisible until it does.
+# His typed words come FIRST, or, for a slash command, INSIDE `<command-args>`,
+# and the injected body follows. Measured 2026-09-06 over 30 session logs in two
+# projects: 50 command turns, none flagged isMeta; 13 carry his words in
+# command-args, 37 are bare (a plugin command puts `<command-message>` before
+# `<command-name>`), and none has typed text before the first tag. Truncating
+# at the first marker therefore returned "" for every one of them, and
+# `find_final_user_text` answered with an OLDER turn (PR #313 review, finding
+# 1): the scorer and the route hasher were handed a request he did not type
+# this turn. So the invocation is REBUILT from the tags, never enumerated by
+# body: enumerating tags is what failed twice, each round adding the one
+# carrier that just bit, and the next carrier invisible until it does.
 _COMMAND_INJECTION_MARK = re.compile(
     r"<(?:command-name|command-message|command-args|skill-format|"
     r"local-command-stdout)\b",
     re.I,
 )
+_COMMAND_NAME = re.compile(r"<command-name>(.*?)</command-name>", re.I | re.S)
+_COMMAND_ARGS = re.compile(r"<command-args>(.*?)</command-args>", re.I | re.S)
+
+
+def _command_invocation(injected):
+    """What he typed to invoke a slash command, rebuilt from the harness tags.
+
+    His words are the `<command-args>` content. With no arguments the command
+    name itself is the request, so a bare `/q-morning` turn is still his turn
+    and never yields to a stale one. `<command-message>` is the command's own
+    label, never typed, and the skill body after the tags is the machine's.
+    """
+    args = _COMMAND_ARGS.search(injected)
+    if args and args.group(1).strip():
+        return args.group(1).strip()
+    name = _COMMAND_NAME.search(injected)
+    return name.group(1).strip() if name else ""
 
 
 def founder_typed_text(candidate):
     """Strip machine-injected prose from one `user` turn, or reject it entirely.
 
-    A command or skill invocation is a TRUNCATION, not a tag removal: his typed
-    words come first and the injected body follows unwrapped, so everything from
-    the first command marker onward is the machine's text. See the scar note on
-    `_COMMAND_INJECTION_MARK`.
+    A command or skill invocation is a TRUNCATION plus a REBUILD, not a tag
+    removal: anything he typed before the first command marker is his, the
+    invocation is read back out of the tags, and the unwrapped body after them
+    is the machine's. See the scar note on `_COMMAND_INJECTION_MARK`.
     """
     if not candidate:
         return ""
     if _INJECTED_OPENER.search(candidate):
         return ""
-    typed = candidate
-    mark = _COMMAND_INJECTION_MARK.search(typed)
-    if mark:
-        typed = typed[:mark.start()]
-    return _INJECTED_BLOCK.sub(" ", typed).strip()
+    mark = _COMMAND_INJECTION_MARK.search(candidate)
+    if not mark:
+        return _INJECTED_BLOCK.sub(" ", candidate).strip()
+    typed = _INJECTED_BLOCK.sub(" ", candidate[:mark.start()]).strip()
+    return typed or _command_invocation(candidate[mark.start():])
 
 
 def find_final_user_text(transcript_path):
