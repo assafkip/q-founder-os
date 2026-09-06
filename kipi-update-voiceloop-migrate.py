@@ -52,6 +52,14 @@ than an oversight: .json here is config the engine reads (voice-channels.json
 names `voiceloop/validate.py`, a path that genuinely moved), .jsonl is an
 append-only ledger.
 
+Prose is never rewritten. In a .py file a comment or a docstring that names the
+old package is documenting the rename (the engine's own module docstring, the
+exporter's RENAMES note) and must keep the name; Python's tokenizer and parser
+tell that prose from the code and string literals that genuinely migrate. A .py
+file carrying the name that cannot be parsed refuses the instance rather than
+being swapped blind. The other REWRITE_EXTS have no such classifier and keep
+the blanket swap, comments included.
+
 A path the SKELETON ships is never rewritten, whatever its extension: the rsync
 this script runs ahead of delivers the skeleton's copy of it seconds later, so
 the rewrite is churn at best and a refused commit at worst (2026-09-06: the
@@ -62,7 +70,10 @@ that live inside q-system/, do not exist in the skeleton and are migrated.
 from __future__ import annotations
 
 import argparse
+import ast
+import io
 import json
+import tokenize
 import os
 import re
 import shutil
@@ -83,7 +94,8 @@ NEW = "voiceloop"
 # word boundary would miss every one of them. This is the same rule
 # consulting's automation/export_voice_loop.py has applied to its public mirror
 # since 2026-08-20, which is the evidence that a blanket token swap is safe on
-# this corpus.
+# CODE. It is not safe on prose: see rewrite_text, which keeps comments and
+# docstrings out of the swap for .py files (2026-09-06).
 CASE_FORMS = (
     ("voicekit", "voiceloop"),
     ("Voicekit", "Voiceloop"),
@@ -213,6 +225,101 @@ def has_token(text: str) -> bool:
     return any(before in text for before, _ in CASE_FORMS)
 
 
+# PROSE IS NEVER REWRITTEN. A why-comment that documents the rename has to name
+# the old package, or it documents nothing: the engine's own module docstring
+# says "this package was called `voicekit` here and the exporter renamed it to
+# `voiceloop`", and the exporter's RENAMES table carries "the pair (voicekit ->
+# voiceloop) lived here until the rename" as a # comment. The blanket swap
+# turned both into an identity pair described as a rename (2026-09-06, the
+# fleet sync refused on the one instance whose commit gate compares the engine
+# to its public mirror; the same run rewrote and STAGED the exporter's comment
+# in the instance's own automation/ and abandoned the checkout that way).
+#
+# "Skip comments" by regex cannot tell a comment that documents the old name
+# from a string that is a module path, and the module path is exactly what a
+# migration must rewrite. Python's own tokenizer and parser can: a COMMENT
+# token is prose, and a STRING that is the first statement of a module, class
+# or function is a docstring (the rule ast.get_docstring uses). Everything else,
+# NAME tokens (`from voicekit import`), STRING literals (`"voicekit/validate.py"`)
+# and filenames, is code and migrates as before. Only .py gets this: nothing
+# here can classify a shell comment against a shell string, so the other
+# REWRITE_EXTS keep the blanket swap, documented in the module docstring.
+#
+# A .py file that carries the token and cannot be parsed is NOT swapped
+# blindly: that would restore the defect for exactly the file nobody looked at.
+# It is reported and apply() refuses the instance, the same posture the updater
+# takes on a dirty tree (a-gate-that-cannot-run-must-not-pass).
+PROSE_EXTS = {".py"}
+
+
+def _char_col(line: str, byte_col: int) -> int:
+    """ast reports columns in UTF-8 bytes; tokenize and str slicing use
+    characters. Same value on ASCII lines, different after a non-ASCII char."""
+    return len(line.encode("utf-8")[:byte_col].decode("utf-8", "replace"))
+
+
+def _prose_spans(text: str, lines: list[str]) -> list[tuple[int, int, int, int]]:
+    """(start_line, start_col, end_line, end_col), 1-based lines, character
+    columns, end exclusive: every COMMENT token and every docstring."""
+    spans: list[tuple[int, int, int, int]] = []
+    tree = ast.parse(text)
+    holders = [tree] + [n for n in ast.walk(tree)
+                        if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))]
+    for node in holders:
+        body = getattr(node, "body", None)
+        if not body:
+            continue
+        first = body[0]
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) \
+                and isinstance(first.value.value, str):
+            v = first.value
+            spans.append((v.lineno, _char_col(lines[v.lineno - 1], v.col_offset),
+                          v.end_lineno, _char_col(lines[v.end_lineno - 1], v.end_col_offset)))
+    for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+        if tok.type == tokenize.COMMENT:
+            spans.append((tok.start[0], tok.start[1], tok.end[0], tok.end[1]))
+    return spans
+
+
+def _swap_outside(lines: list[str], spans: list[tuple[int, int, int, int]]) -> str:
+    """The token swap applied to every character that is not inside a span."""
+    protected: dict[int, list[tuple[int, int]]] = {}
+    for l1, c1, l2, c2 in spans:
+        for ln in range(l1, l2 + 1):
+            start = c1 if ln == l1 else 0
+            end = c2 if ln == l2 else len(lines[ln - 1])
+            protected.setdefault(ln, []).append((start, end))
+    out = []
+    for i, line in enumerate(lines, start=1):
+        ranges = sorted(protected.get(i, ()))
+        if not ranges:
+            out.append(swap_tokens(line))
+            continue
+        pos, parts = 0, []
+        for start, end in ranges:
+            parts.append(swap_tokens(line[pos:start]))
+            parts.append(line[start:end])
+            pos = max(pos, end)
+        parts.append(swap_tokens(line[pos:]))
+        out.append("".join(parts))
+    return "".join(out)
+
+
+def rewrite_text(text: str, ext: str) -> str:
+    """The migrated text for a file of this extension. Raises ValueError for a
+    prose-aware extension whose file cannot be classified."""
+    if ext not in PROSE_EXTS:
+        return swap_tokens(text)
+    if "\r" in text.replace("\r\n", ""):
+        raise ValueError("lone CR line endings: ast and tokenize would disagree on line numbers")
+    lines = io.StringIO(text).readlines()
+    try:
+        spans = _prose_spans(text, lines)
+    except (SyntaxError, ValueError, tokenize.TokenError) as exc:
+        raise ValueError(f"cannot classify prose from code: {type(exc).__name__}: {exc}") from exc
+    return _swap_outside(lines, spans)
+
+
 def plan(repo: str, skeleton: str | None = None) -> dict:
     """Read-only. What this instance needs, without touching a byte.
 
@@ -234,7 +341,7 @@ def plan(repo: str, skeleton: str | None = None) -> dict:
     else:
         package_action = "absent"
 
-    rewrite, renames, history, shipped = [], [], [], []
+    rewrite, renames, history, shipped, unparseable = [], [], [], [], []
     for path in iter_source_files(repo):
         if _exempt(path):
             continue
@@ -266,8 +373,15 @@ def plan(repo: str, skeleton: str | None = None) -> dict:
             text = open(path, encoding="utf-8", errors="strict").read()
         except (OSError, UnicodeError):
             continue
-        if has_token(text):
-            rewrite.append(rel)
+        if not has_token(text):
+            continue
+        # The same function apply() writes with decides whether there is
+        # anything to write, so plan and apply cannot disagree about prose.
+        try:
+            if rewrite_text(text, ext) != text:
+                rewrite.append(rel)
+        except ValueError as exc:
+            unparseable.append(f"{rel}: {exc}")
 
     # STAGED-BUT-UNCOMMITTED MIGRATION WORK IS UNFINISHED WORK, and reading the
     # disk alone cannot see that. Measured 2026-08-30 on one instance: its own
@@ -322,13 +436,14 @@ def plan(repo: str, skeleton: str | None = None) -> dict:
         "rewrite": sorted(rewrite),
         "renames": sorted(renames),
         "shipped_by_skeleton": sorted(shipped),
+        "unparseable": sorted(unparseable),
         "history_left": sorted(history),
         "staged_migration": staged_migration,
         "staged_rewrites": staged_rewrites,
         # The one line a caller can branch on. `already`/`absent` with nothing to
         # rewrite AND nothing staged is a finished instance.
         "needs_work": (package_action in ("move", "both_present")
-                       or bool(rewrite) or bool(renames)
+                       or bool(rewrite) or bool(renames) or bool(unparseable)
                        or bool(staged_migration) or bool(staged_rewrites)),
     }
 
@@ -400,6 +515,13 @@ def apply(repo: str, commit: bool = True, skeleton: str | None = None) -> dict:
     #
     # Checked ONCE, here, against the PRE-MOVE paths. After `git mv` the package's
     # own files read as staged renames and would false-trip this.
+    if p["unparseable"]:
+        result["errors"].append(
+            "refusing to migrate: %d .py file(s) carry the old name and cannot be "
+            "classified into code and prose; fix the file or move it out of the "
+            "tree and re-run: %s" % (len(p["unparseable"]), "; ".join(p["unparseable"][:3])))
+        result["verified"] = False
+        return result
     blocked = _dirty_tracked(repo, p["rewrite"] + p["renames"])
     if blocked:
         result["errors"].append(
@@ -437,7 +559,11 @@ def apply(repo: str, commit: bool = True, skeleton: str | None = None) -> dict:
         except (OSError, UnicodeError) as exc:
             result["errors"].append(f"read {rel}: {exc}")
             continue
-        new_text = swap_tokens(text)
+        try:
+            new_text = rewrite_text(text, os.path.splitext(rel)[1].lower())
+        except ValueError as exc:
+            result["errors"].append(f"classify {rel}: {exc}")
+            continue
         if new_text == text:
             continue
         # NOTHING RESTORES WHAT WAS NEVER TRACKED. Codex BLOCKER on PR #292:

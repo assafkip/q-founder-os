@@ -81,8 +81,9 @@ class EngineTest(unittest.TestCase):
         (unless it is still on the old package: then the new package must not
         exist yet or the move is a `both_present` refusal), an instance-only
         script INSIDE q-system/, and its own pipeline import."""
-        why = "# why: this package was called `" + OLD + "` here, renamed on export\nVERSION = 2\n"
-        tool = "# " + OLD + " era helper, the skeleton's\n"
+        why = ('"""engine.\n\nwhy the name changed: this package was called `' + OLD
+               + '` here and the\nexporter renamed it on the way out.\n"""\nVERSION = 2\n')
+        tool = "import " + OLD + ".core as core  # the skeleton's own helper, code not prose\n"
         shipped = [("plugins/kipi-core/" + NEW + "/__init__.py", why),
                    ("q-system/.q-system/scripts/tool.py", tool)]
         sk = os.path.join(self.tmp, "skeleton")
@@ -114,25 +115,114 @@ class EngineTest(unittest.TestCase):
         self.assertEqual(sorted(out["rewritten"]), p["rewrite"])
         init = open(os.path.join(r, "plugins/kipi-core", NEW, "__init__.py")).read()
         self.assertIn("called `" + OLD + "` here", init)
-        self.assertIn(OLD, open(os.path.join(r, "q-system/.q-system/scripts/tool.py")).read())
+        self.assertIn("import " + OLD + ".core", open(os.path.join(r, "q-system/.q-system/scripts/tool.py")).read())
         self.assertNotIn(OLD, open(os.path.join(r, "q-system/.q-system/scripts/mine.py")).read())
         self.assertNotIn(OLD, open(os.path.join(r, "q-consult/pipeline/voice.py")).read())
         self.assertFalse(mig.plan(r, skeleton=sk)["needs_work"])
 
-    def test_without_the_skeleton_the_same_comment_is_rewritten(self):
-        """Negative self-test: an empty skeleton ships nothing, and then the
-        why-comment IS rewritten into nonsense. The exemption is what holds the
-        line, not the shape of the comment."""
+    def test_without_the_skeleton_shipped_code_is_rewritten_and_prose_still_survives(self):
+        """Negative self-test for the skeleton rule: an empty skeleton ships
+        nothing, so the skeleton's CODE helper is rewritten like any instance
+        file. The docstring in the init survives on the prose rule alone, which
+        the next test takes away in turn."""
         _, r = self._skeleton_and_instance()
         empty = os.path.join(self.tmp, "empty-skeleton")
         os.makedirs(empty)
         p = mig.plan(r, skeleton=empty)
         self.assertEqual(p["shipped_by_skeleton"], [])
-        self.assertIn("plugins/kipi-core/" + NEW + "/__init__.py", p["rewrite"])
+        self.assertIn("q-system/.q-system/scripts/tool.py", p["rewrite"])
+        self.assertNotIn("plugins/kipi-core/" + NEW + "/__init__.py", p["rewrite"])
         mig.apply(r, commit=False, skeleton=empty)
+        self.assertNotIn(OLD, open(os.path.join(r, "q-system/.q-system/scripts/tool.py")).read())
+        init = open(os.path.join(r, "plugins/kipi-core", NEW, "__init__.py")).read()
+        self.assertIn("called `" + OLD + "` here", init)
+
+    def test_without_the_prose_rule_the_docstring_is_rewritten(self):
+        """Negative self-test for the prose rule: with span detection taken
+        away, the same docstring IS rewritten into an identity rename. The
+        classifier is what holds the line, not the shape of the text."""
+        _, r = self._skeleton_and_instance()
+        empty = os.path.join(self.tmp, "empty-skeleton")
+        os.makedirs(empty)
+        real = mig._prose_spans
+        mig._prose_spans = lambda text, lines: []
+        try:
+            p = mig.plan(r, skeleton=empty)
+            self.assertIn("plugins/kipi-core/" + NEW + "/__init__.py", p["rewrite"])
+            mig.apply(r, commit=False, skeleton=empty)
+        finally:
+            mig._prose_spans = real
         init = open(os.path.join(r, "plugins/kipi-core", NEW, "__init__.py")).read()
         self.assertNotIn(OLD, init)
         self.assertIn("called `" + NEW + "` here", init)
+
+    def test_prose_in_an_instance_file_survives_and_its_code_migrates(self):
+        """The exporter shape from the aborted 2026-09-06 run: a docstring and
+        two # comments that document the rename, next to an import and a path
+        literal that must migrate. Exact text, both directions."""
+        before = ('"""Exporter.\n\nThe pair (' + OLD + ' -> ' + NEW + ') lived here until the rename.\n"""\n'
+                  'import ' + OLD + '.core  # ' + OLD + ' was the name\n'
+                  'RENAMES = [("' + OLD + '/validate.py", "' + NEW + '/validate.py")]\n'
+                  '# test_' + OLD + '.py went with it\n')
+        after = ('"""Exporter.\n\nThe pair (' + OLD + ' -> ' + NEW + ') lived here until the rename.\n"""\n'
+                 'import ' + NEW + '.core  # ' + OLD + ' was the name\n'
+                 'RENAMES = [("' + NEW + '/validate.py", "' + NEW + '/validate.py")]\n'
+                 '# test_' + OLD + '.py went with it\n')
+        r = build_instance(os.path.join(self.tmp, "i"), package=NEW, extra=[
+            ("automation/export.py", before),
+        ])
+        out = mig.apply(r, commit=False, skeleton=os.path.join(self.tmp, "nothing-shipped"))
+        self.assertTrue(out["verified"], out["errors"])
+        self.assertEqual(open(os.path.join(r, "automation/export.py")).read(), after)
+        self.assertFalse(mig.plan(r, skeleton=os.path.join(self.tmp, "nothing-shipped"))["needs_work"])
+
+    def test_a_docstring_only_file_is_not_work(self):
+        """A file whose only mention is prose is not a rewrite candidate, so an
+        already-migrated instance reports needs_work=False and never commits."""
+        r = build_instance(os.path.join(self.tmp, "i"), package=NEW, extra=[
+            ("automation/notes.py", '"""' + OLD + ' was the old name."""\n# and ' + OLD + ' again\nX = 1\n'),
+        ])
+        p = mig.plan(r, skeleton=os.path.join(self.tmp, "nothing-shipped"))
+        self.assertEqual(p["rewrite"], [])
+        self.assertFalse(p["needs_work"])
+
+    def test_columns_survive_non_ascii_text_before_the_docstring_end(self):
+        """ast counts bytes, tokenize counts characters; the conversion is what
+        keeps a docstring ending after a non-ASCII char protected while the code
+        on the next line still migrates."""
+        body = ('"""Résumé: café ' + OLD + ' é"""\n'
+                'from ' + OLD + ' import x  # ' + OLD + '\n')
+        r = build_instance(os.path.join(self.tmp, "i"), package=NEW, extra=[("automation/u.py", body)])
+        mig.apply(r, commit=False, skeleton=os.path.join(self.tmp, "nothing-shipped"))
+        got = open(os.path.join(r, "automation/u.py"), encoding="utf-8").read()
+        self.assertEqual(got, '"""Résumé: café ' + OLD + ' é"""\nfrom ' + NEW + ' import x  # ' + OLD + '\n')
+
+    def test_a_file_that_cannot_be_classified_refuses_the_instance(self):
+        """No blanket fallback: a .py that carries the old name and does not
+        parse is reported, apply refuses, and nothing else is written."""
+        r = build_instance(os.path.join(self.tmp, "i"), package=NEW, extra=[
+            ("automation/broken.py", "x = (" + OLD + "\n"),
+            ("q-consult/pipeline/voice.py", "from " + OLD + " import x\n"),
+        ])
+        p = mig.plan(r, skeleton=os.path.join(self.tmp, "nothing-shipped"))
+        self.assertEqual(len(p["unparseable"]), 1)
+        self.assertTrue(p["unparseable"][0].startswith("automation/broken.py: "))
+        self.assertTrue(p["needs_work"])
+        out = mig.apply(r, commit=False, skeleton=os.path.join(self.tmp, "nothing-shipped"))
+        self.assertFalse(out["verified"])
+        self.assertTrue(any("cannot be classified" in e for e in out["errors"]), out["errors"])
+        self.assertEqual(out["rewritten"], [])
+        self.assertIn(OLD, open(os.path.join(r, "q-consult/pipeline/voice.py")).read())
+
+    def test_non_python_files_keep_the_blanket_swap(self):
+        """Pinned on purpose: nothing here can tell a shell comment from a shell
+        string, so .sh (and the rest of REWRITE_EXTS) still swap everything."""
+        r = build_instance(os.path.join(self.tmp, "i"), package=NEW, extra=[
+            ("automation/run.sh", "# " + OLD + " era\nexport PKG=" + OLD + "\n"),
+        ])
+        mig.apply(r, commit=False, skeleton=os.path.join(self.tmp, "nothing-shipped"))
+        self.assertEqual(open(os.path.join(r, "automation/run.sh")).read(),
+                         "# " + NEW + " era\nexport PKG=" + NEW + "\n")
 
     def test_an_instance_is_never_its_own_skeleton(self):
         """A caller passing the instance as its skeleton would exempt every file
