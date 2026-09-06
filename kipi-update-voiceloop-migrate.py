@@ -881,13 +881,19 @@ def main(argv=None) -> int:
     else:
         name = os.path.basename(os.path.abspath(args.repo))
         if not args.apply:
+            # Every input to needs_work is printed beside it, so a plan that says
+            # work is needed also says WHICH kind: kipi-update.sh --dry pipes
+            # this line through sed, and `unparseable` was the one input it could
+            # not name (PR #312 review round 2).
             print(f"{name}: package={out['package_action']} "
                   f"rewrite={len(out['rewrite'])} rename={len(out['renames'])} "
+                  f"unparseable={len(out['unparseable'])} "
                   f"history_left={len(out['history_left'])} "
                   f"needs_work={out['needs_work']}")
         else:
             print(f"{name}: moved={out['moved']} "
                   f"rewritten={len(out['rewritten'])} renamed={len(out['renamed'])} "
+                  f"unparseable={len(out['unparseable'])} "
                   f"committed={out['committed']} verified={out['verified']}")
             for e in out["errors"]:
                 print("  ERROR: " + e, file=sys.stderr)

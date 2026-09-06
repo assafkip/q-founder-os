@@ -345,6 +345,24 @@ class EngineTest(unittest.TestCase):
         self.assertTrue(any("no path is exempt" in w for w in p["warnings"]), p["warnings"])
         self.assertIn("q-system/.q-system/scripts/tool.py", p["rewrite"])
 
+    def test_the_plan_line_names_every_input_to_needs_work(self):
+        """kipi-update.sh --dry pipes the human-readable plan line through sed,
+        so a plan that says needs_work=True has to say which input made it so;
+        `unparseable` was the one it could not name (PR #312 round 2)."""
+        r = build_instance(os.path.join(self.tmp, "i"), package=NEW, extra=[
+            ("automation/broken.py", "x = (" + OLD + "\n"),
+        ])
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        out = subprocess.run([sys.executable, MIGRATE, "--repo", r], capture_output=True, text=True, env=env)
+        line = out.stdout.strip().splitlines()[-1]
+        self.assertIn("unparseable=1", line)
+        self.assertIn("needs_work=True", line)
+        out = subprocess.run([sys.executable, MIGRATE, "--repo", r, "--apply", "--no-commit"],
+                             capture_output=True, text=True, env=env)
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("unparseable=1", out.stdout)
+        self.assertIn("verified=False", out.stdout)
+
     def test_both_present_never_deletes_either_package(self):
         """A half-synced instance is reported, not resolved by removal.
 
