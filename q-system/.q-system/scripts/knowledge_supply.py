@@ -1259,11 +1259,12 @@ def truncation_of(engine: str | None) -> str | None:
     return None
 
 
-def class_search_state(stopped_cold: bool, truncated: str | None) -> bool | str:
+def class_search_state(stopped_cold: bool, truncated: str | None, present: bool = True) -> bool | str:
     """THE one place that says how far a class was searched: False (never
-    started), "partial" (started and cut short, for any reason), True. A class
-    that is not True never counts toward FULL."""
-    if stopped_cold:
+    started, which includes a class that is absent), "partial" (started and
+    cut short, for any reason), True. A class that is not True never counts
+    toward FULL. PR #308 review round 9: an absent class read searched=True."""
+    if stopped_cold or not present:
         return False
     return "partial" if truncated else True
 
@@ -1695,11 +1696,14 @@ def render_header(bundle: dict) -> str:
         miss = "; ".join(f"{m} ({bundle['coverage']['missing_paths'].get(m, 'absent')})" for m in cov["missing"])
         line = f"[knowledge-supply] COVERAGE: {cov['verdict']}. missing: {miss}."
     line += scope_note(cov)
+    def bounded(names: list[str]) -> str:
+        return ", ".join(names[:6]) + (f" and {len(names) - 6} more" if len(names) > 6 else "")
+
     def suffix(e: dict) -> str:
         if e.get("kind") == "store" and e.get("stores"):
-            return f" [{', '.join(e['stores'])}]"
+            return f" [{bounded(e['stores'])}]"
         if e.get("kind") == "target" and e.get("stores"):
-            return f" [target of {', '.join(e['stores'])}]"
+            return f" [target of {bounded(e['stores'])}]"
         if e.get("kind") == "docs_hit":
             return " [docs]"
         out = ""
@@ -1725,11 +1729,14 @@ def scope_note(cov: dict) -> str:
     word is relative to the scope and the clause says so, because the engine
     cannot tell "in jennica pounds, ..." from an incidental "post it on
     Facebook" matching case-005-facebook (PR #308 review rounds 7 and 8)."""
-    if cov.get("scope"):
-        n = len(cov.get("stores_excluded") or [])
-        return (f" WITHIN SCOPE {', '.join(cov['scope'])} + project only; {n} other store{'s' if n != 1 else ''} "
+    excluded = cov.get("stores_excluded") or []
+    if cov.get("scope") and excluded:
+        scope = cov["scope"]
+        shown = ", ".join(scope[:6]) + (f" and {len(scope) - 6} more" if len(scope) > 6 else "")
+        n = len(excluded)
+        return (f" WITHIN SCOPE {shown} + project only; {n} other store{'s' if n != 1 else ''} "
                 f"not searched (name a different case, or none, to widen).")
-    return ""
+    return ""   # nothing excluded: nothing to disclose, and no budget spent saying so (round 9 minor 2)
 
 
 def render(bundle: dict) -> str:
@@ -1897,7 +1904,13 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
     entities = resolve_entities(scan, index, fire_alone)
     # Naming a sub-store (a 4_points case) scopes every other entity's search to
     # it plus the project level; naming none searches every store.
-    named_stores = {s for e in entities if e.get("kind") in ("store", "target") for s in (e.get("stores") or [])}
+    # A case the founder NAMED is the scope. A target's declaring cases scope the
+    # search only when no case was named: a target shared by 45 cases must not
+    # drag them all back in behind "in subject7, ..." (PR #308 review round 9,
+    # which the round 8 union did).
+    store_named = {s for e in entities if e.get("kind") == "store" for s in (e.get("stores") or [])}
+    target_named = {s for e in entities if e.get("kind") == "target" for s in (e.get("stores") or [])}
+    named_stores = store_named or target_named
     search_stores = [project] + [s for s in substores if not named_stores or s["name"] in named_stores]
     # What the scope left out is a fact on the wire, not only in the receipt:
     # "payment fraud" in a prompt matched case-031-payment-fraud and silently
@@ -2098,7 +2111,7 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
                 cut_reason = docs_meta.get("stop")   # the field, never the display string
             elif deadline_hit and deadline_hit["at_class"] == cls:
                 cut_reason = "deadline"
-        searched_state = class_search_state(stopped_cold, cut_reason)
+        searched_state = class_search_state(stopped_cold, cut_reason, present)
         if searched_state is not True and present and spec.get("required") and cls not in missing:
             missing.append(cls)
             missing_paths[cls] = (f"{path_s or cls} not searched (deadline)" if stopped_cold
@@ -2142,7 +2155,7 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
             "bad_lines": sum(s["bad_lines"].get(cls, 0) for s in search_stores),
             "problem": store_problems,
             "searched": searched_state,
-            "stores_searched": 0 if stopped_cold else len(search_stores), "stores_hit": sorted(stores_hit),
+            "stores_searched": 0 if (stopped_cold or not present) else len(search_stores), "stores_hit": sorted(stores_hit),
         }
         if stopped_cold:
             row["problem"] = "not searched (deadline)"

@@ -1583,6 +1583,60 @@ def test_store_recency_beats_case_number(tmp_path):
     assert heads[0] == "== Satoshi Nakamoto [case-001-alpha] ==", heads
 
 
+# PR #308 review round 9: a named case wins over a shared target; the scope note is bounded; absent = never searched.
+
+def _three_cases_sharing_a_target(q):
+    for name, line in (("case-001-alpha", "Acme wired ALPHA-ONLY to the shell company"),
+                       ("case-002-beta", "Acme wired BETA-ONLY to the shell company"),
+                       ("case-003-gamma", "Acme wired GAMMA-ONLY to the shell company")):
+        s = add_store(q, name, "scope", line)
+        (s / "investigation" / "targets" / "acme.md").write_text("# acme\n")
+
+
+def test_named_case_wins_over_a_target_shared_by_other_cases(tmp_path):
+    root, q = make_instance(tmp_path)
+    _three_cases_sharing_a_target(q)
+    b = run(root, "in beta, what did acme do")
+    assert b["coverage"]["scope"] == ["case-002-beta"], b["coverage"]
+    assert b["coverage"]["stores_excluded"] == ["case-001-alpha", "case-003-gamma"]
+    texts = [i["text"] for i in b["items"]]
+    assert any("BETA-ONLY" in t for t in texts) and not any("ALPHA-ONLY" in t or "GAMMA-ONLY" in t for t in texts), texts
+
+
+def test_target_shared_by_many_cases_scopes_to_all_of_them_when_none_is_named(tmp_path):
+    root, q = make_instance(tmp_path)
+    _three_cases_sharing_a_target(q)
+    b = run(root, "what did acme do")
+    assert b["coverage"]["scope"] == ["case-001-alpha", "case-002-beta", "case-003-gamma"]
+    assert b["coverage"]["stores_excluded"] == []
+    assert "WITHIN SCOPE" not in ks.render(b), "nothing excluded, nothing disclosed, no budget spent"
+    texts = [i["text"] for i in b["items"]]
+    assert all(any(k in t for t in texts) for k in ("ALPHA-ONLY", "BETA-ONLY", "GAMMA-ONLY"))
+
+
+def test_scope_note_is_bounded(tmp_path):
+    root, q = make_instance(tmp_path)
+    for i in range(1, 10):
+        s = add_store(q, f"case-00{i}-thing{i}", "scope", f"Acme in case {i}")
+        if i <= 8:
+            (s / "investigation" / "targets" / "acme.md").write_text("# acme\n")
+    b = run(root, "what did acme do")
+    assert len(b["coverage"]["scope"]) == 8 and b["coverage"]["stores_excluded"] == ["case-009-thing9"]
+    head = ks.render(b).splitlines()[0]
+    assert "and 2 more + project only; 1 other store not searched" in head, head
+    scope_clause = head.split("WITHIN SCOPE", 1)[1].split("+ project", 1)[0]
+    assert scope_clause.count("case-00") == 6, scope_clause
+    assert "[target of case-001-thing1, case-002-thing2, case-003-thing3, case-004-thing4, case-005-thing5, case-006-thing6 and 2 more]" in head, head
+
+
+def test_absent_class_is_never_searched_in_the_receipt(tmp_path):
+    root, q = make_bare_instance(tmp_path)
+    b = run(root, "what did Bluepeak ask for")
+    for cls in ("graph", "commitments", "meetings", "loops"):
+        row = receipt_row(b, cls)
+        assert row["present"] is False and row["searched"] is False and row["stores_searched"] == 0, row
+
+
 # ---------------------------------------------------------------- the hook
 
 def run_hook(root: Path, prompt: str, extra_env: dict | None = None) -> subprocess.CompletedProcess:
