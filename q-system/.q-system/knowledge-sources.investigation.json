@@ -4,6 +4,8 @@
   "_why": "Founder-directed 2026-09-05 (plan knowledge-supply-project-folders-2026-09-05): 4_points had 45 cases and 1,475 markdown files no source class covered, and every receipt there read PARTIAL for absent consulting stores.",
   "ceiling_chars": 8000,
   "doc_max_bytes": 524288,
+  "_skip_dirs_why": "Directories under a docs folder that are never read by the docs class, DECLARED here so the receipt can count them and the header can say so (PR #308 review round 11: a hardcoded skip of raw-collections and exports had no record anywhere under FULL). exports and screenshots are renders of other files; raw-collections is collected evidence, not the founder's writing.",
+  "skip_dirs": ["exports", "screenshots", "raw-collections"],
   "entity_kinds_that_fire_alone": ["store", "target", "noun", "slug", "client"],
   "state_predicates": ["status", "state", "stage", "phase", "works_at", "role", "role_is", "is", "is-a", "located_in", "title", "reports_to", "assigned_to", "controls", "operates", "hosted_at", "registered_to"],
   "stores": [{"name": "case", "glob": "investigations/case-*"}],

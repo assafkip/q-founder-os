@@ -161,7 +161,8 @@ def items_of(bundle, kind=None, entity=None):
     if kind:
         out = [i for i in out if i["kind"] == kind]
     if entity:
-        out = [i for i in out if i["entity"] == entity]
+        # a merged heading ("== A, B ==") carries B in co_entities (round 11)
+        out = [i for i in out if i["entity"] == entity or entity in (i.get("co_entities") or [])]
     return out
 
 
@@ -1116,6 +1117,8 @@ def test_shipped_manifests_declare_project_folders():
     assert any(s["glob"] == "investigations/case-*" for s in m["stores"])
     assert {"output", "investigation", "research"} <= set(m["folders"])
     assert {"targets", "clients"} <= set(m["entity_dirs"])
+    assert {"exports", "screenshots", "raw-collections"} <= set(m["skip_dirs"]), "skips are declared, never hardcoded"
+    assert set(inv_skip := json.loads(INVESTIGATION_MANIFEST.read_text())["skip_dirs"]) >= {"raw-collections"}
     assert {"store", "target", "noun"} <= set(m["entity_kinds_that_fire_alone"])
     for cls, spec in m["classes"].items():
         assert "docs" in spec["sources"], cls
@@ -1688,6 +1691,53 @@ def test_receipts_ledger_is_bounded(tmp_path, monkeypatch):
     assert path.stat().st_size <= 4000 * 2, path.stat().st_size   # one row may land before the trim
     rows = [json.loads(l) for l in path.read_text().splitlines()]
     assert 1 <= len(rows) < 12 and all("sources" in r for r in rows)
+
+
+# PR #308 review round 11: consumed bigram halves; declared skips disclosed; identical blocks collapse.
+
+def test_suppressed_bigram_half_is_never_a_candidate(tmp_path):
+    root, q = make_instance(tmp_path)
+    add_store(q, "case-023-shinyhunters", "scope", "ShinyHunters hit the CRM vendor.")
+    (q / "output" / "others.md").write_text("The Lapsus Crew was dormant all quarter.\nA different Crew filed the takedown request.\n")
+    b = run(root, "what do we know about ShinyHunters Crew")
+    names = [e["name"] for e in b["entities"]]
+    assert "shinyhunters" in names and "Crew" not in names, names
+    assert not any("Lapsus" in i["text"] or "takedown" in i["text"] for i in b["items"]), [i["text"] for i in b["items"]]
+
+
+def test_declared_skips_are_counted_and_disclosed(tmp_path):
+    root, q = make_instance(tmp_path)
+    s = add_store(q, "case-001-foo-bar", "scope", "Dana Okafor briefed the Foo Bar victim list.")
+    (s / "investigation" / "raw-collections").mkdir()
+    (s / "investigation" / "raw-collections" / "dump.md").write_text("Dana Okafor controls the wallet.\n")
+    (q / "output" / "big.md").write_text("Dana Okafor pilot is cancelled\n" + "x" * 600_000)
+    b = run(root, "what do we know about Dana Okafor")
+    row = receipt_row(b, "docs")
+    assert row["files_skipped_oversize"] == 1 and row["dirs_skipped"] == 1
+    assert row["dirs_skipped_sample"] == ["q-fix/investigations/case-001-foo-bar/investigation/raw-collections"]
+    head = ks.render(b).splitlines()[0]
+    assert "SKIPPED (declared): 1 file(s) over doc_max_bytes, 1 dir(s) in skip_dirs; the receipt lists them." in head, head
+    assert b["coverage"]["verdict"] == "FULL", "a declared exclusion is not a truncation"
+    texts = [i["text"] for i in b["items"]]
+    assert not any("controls the wallet" in t or "pilot is cancelled" in t for t in texts)
+    # tooling dirs stay silent
+    (q / "output" / "node_modules").mkdir()
+    (q / "output" / "node_modules" / "n.md").write_text("Dana Okafor node\n")
+    b2 = run(root, "what do we know about Dana Okafor")
+    assert receipt_row(b2, "docs")["dirs_skipped"] == 1
+
+
+def test_identical_blocks_collapse_into_one_heading(tmp_path):
+    root, q = make_instance(tmp_path)
+    _graph(q / "memory" / "graph.jsonl", GRAPH_ROWS + [
+        {"s": "Priya Raman", "p": "met", "o": "Tomas Lind", "t": "2026-08-20", "project": "v"},
+    ])
+    b = run(root, "what do we know about Priya Raman and Tomas Lind")
+    out = ks.render(b)
+    assert "== Priya Raman, Tomas Lind ==" in out, out
+    assert "== Tomas Lind ==" not in out
+    assert out.count("Priya Raman met Tomas Lind") == 1
+    assert [e["name"] for e in b["entities"]] == ["Priya Raman", "Tomas Lind"], "both still resolved"
 
 
 # ---------------------------------------------------------------- the hook

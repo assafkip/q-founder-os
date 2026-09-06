@@ -110,7 +110,12 @@ PROJECT_STORE = "project"
 # A store directory's entity name drops a `case-023-` style prefix: the founder
 # says "shinyhunters", never "case-023-shinyhunters".
 STORE_PREFIX_RE = re.compile(r"^[a-z]+-\d+-", re.IGNORECASE)
-DOC_SKIP_DIRS = {"node_modules", "exports", "screenshots", "__pycache__", "raw-collections"}
+# Never knowledge, never disclosed: tooling dirs. Everything else a store keeps
+# out of the docs class is DECLARED in the manifest (skip_dirs) and counted in
+# the receipt, the way doc_max_bytes skips are (PR #308 review round 11: the
+# hardcoded raw-collections/exports skip had no record anywhere under FULL).
+HARD_SKIP_DIRS = {"node_modules", "__pycache__"}
+DEFAULT_SKIP_DIRS = ["exports", "screenshots", "raw-collections"]
 DOC_MAX_BYTES_DEFAULT = 512 * 1024
 # Python fallback budget when grep is unavailable: past this many bytes the
 # scan stops and the receipt engine says "python (budget)".
@@ -810,16 +815,19 @@ def load_stores(qroot: Path, root: Path, manifest: dict | None = None,
     # its own call, and the project's rglob("*") over 4_points was 57,081
     # entries and 318 ms per prompt (measured 2026-09-05).
     exclude = {path for _, path in discover_stores(qroot, manifest or {})} if name == PROJECT_STORE else set()
+    skip_dirs = set((manifest or {}).get("skip_dirs") if (manifest or {}).get("skip_dirs") is not None else DEFAULT_SKIP_DIRS)
     skipped: list[Path] = []
-    stores["doc_files"] = enumerate_docs(qroot, folders, max_bytes, exclude, skipped) if folders else []
+    skipped_dirs: list[Path] = []
+    stores["doc_files"] = enumerate_docs(qroot, folders, max_bytes, exclude, skipped, skip_dirs, skipped_dirs) if folders else []
     stores["doc_skipped_oversize"] = skipped
+    stores["doc_skipped_dirs"] = skipped_dirs
     # A markdown file directly under a `targets`-style directory names a subject
     # of the work (4_points: investigation/targets/<subject>.md). Its stem is an
     # entity that fires alone; a finding or note file's stem never does.
     target_names = []
     entity_dirs = set((manifest or {}).get("entity_dirs") or [])
     if entity_dirs:
-        for d in walk_dirs(qroot, exclude, ENTITY_DIR_MAX_DEPTH):
+        for d in walk_dirs(qroot, exclude, ENTITY_DIR_MAX_DEPTH, skip_dirs):
             if d.name not in entity_dirs:
                 continue
             for f in sorted(d.glob("*.md")):
@@ -843,36 +851,48 @@ def load_stores(qroot: Path, root: Path, manifest: dict | None = None,
     return stores, problems
 
 
-def walk_dirs(base: Path, exclude: set[Path], max_depth: int):
-    """Pruned directory walk: dot dirs, DOC_SKIP_DIRS and `exclude` (sub-store
-    roots) are never entered, and nothing below max_depth is."""
+def walk_dirs(base: Path, exclude: set[Path], max_depth: int, skip_dirs: set[str] | None = None):
+    """Pruned directory walk: dot dirs, tooling dirs, declared skip dirs and
+    `exclude` (sub-store roots) are never entered, and nothing below max_depth is."""
     base_depth = len(base.parts)
+    skips = HARD_SKIP_DIRS | set(skip_dirs or ())
     for dirpath, dirnames, _ in os.walk(base):
         cur = Path(dirpath)
         if len(cur.parts) - base_depth >= max_depth:
             dirnames[:] = []
         else:
-            dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and d not in DOC_SKIP_DIRS
+            dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and d not in skips
                                  and (cur / d) not in exclude)
         yield cur
 
 
 def enumerate_docs(store_dir: Path, folders: list[str], max_bytes: int,
-                   exclude: set[Path] | None = None, skipped: list[Path] | None = None) -> list[Path]:
+                   exclude: set[Path] | None = None, skipped: list[Path] | None = None,
+                   skip_dirs: set[str] | None = None, skipped_dirs: list[Path] | None = None) -> list[Path]:
     """The markdown files of a store's declared folders, in a stable order. Dot
-    dirs, DOC_SKIP_DIRS, sub-store roots, dot files, files over max_bytes and
-    last-handoff.md (the handoff class owns it) are skipped; the receipt's
-    `files` is this count."""
+    dirs, tooling dirs, sub-store roots, dot files and last-handoff.md (the
+    handoff class owns it) are skipped silently; a DECLARED skip (a manifest
+    skip_dirs name, a file over doc_max_bytes) is recorded in `skipped_dirs` /
+    `skipped` so the receipt and the header can say so."""
     out: list[Path] = []
-    exclude = exclude or set()
+    excl = exclude or set()
+    declared = set(skip_dirs or ())
     for folder in folders:
         base = store_dir / folder
         if not base.is_dir():
             continue
         for dirpath, dirnames, filenames in os.walk(base):
             cur = Path(dirpath)
-            dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and d not in DOC_SKIP_DIRS
-                                 and (cur / d) not in exclude)
+            keep = []
+            for d in sorted(dirnames):
+                if d.startswith(".") or d in HARD_SKIP_DIRS or (cur / d) in excl:
+                    continue
+                if d in declared:
+                    if skipped_dirs is not None:
+                        skipped_dirs.append(cur / d)
+                    continue
+                keep.append(d)
+            dirnames[:] = keep
             for fn in sorted(filenames):
                 if not fn.endswith(".md") or fn.startswith(".") or fn == "last-handoff.md":
                     continue
@@ -1303,6 +1323,7 @@ def doc_candidates(scan: str, entities: list[dict], index: dict[str, Entity]) ->
     first_tokens = {ent.name.split()[0].casefold() for ent in index.values() if ent.name.split()}
     out: list[str] = []
     seen: set[str] = set()
+    consumed: set[str] = set()
     for m in CAP_BIGRAM_RE.finditer(scan):
         a, b = m.group(1), m.group(2)
         if a.casefold() in STOPWORDS or b.casefold() in STOPWORDS or a.casefold() in MISS_OPENERS:
@@ -1310,13 +1331,18 @@ def doc_candidates(scan: str, entities: list[dict], index: dict[str, Entity]) ->
         cand = f"{a} {b}"
         cn = norm(cand)
         if cn in seen or any(cn in r or r in cn for r in resolved):
+            # A bigram the resolver already covers ("ShinyHunters Crew" behind
+            # the store shinyhunters) takes BOTH its halves out of the single-word
+            # pass, or the generic half ("Crew") becomes a subject on its own
+            # and pulls unrelated lines labelled KNOWN (PR #308 review round 11).
+            consumed.update({a.casefold(), b.casefold()})
             continue
         seen.add(cn)
         out.append(cand)
     for m in re.finditer(r"\b([A-Z][a-z]{3,})\b", scan):
         tok = m.group(1)
         tn = tok.casefold()
-        if tn in seen or tn in STOPWORDS or tn in MISS_OPENERS or tn in first_tokens:
+        if tn in seen or tn in consumed or tn in STOPWORDS or tn in MISS_OPENERS or tn in first_tokens:
             continue
         if any(tn in r.split() for r in resolved) or any(tn in s.split() for s in seen):
             continue
@@ -1547,6 +1573,7 @@ def _assemble(items: list[dict], entities: list[dict], ceiling: int, header_len:
             continue
         seen.add(key)
         deduped.append(it)
+    deduped = collapse_identical_blocks(deduped, entities)
     recency = store_recency(deduped)
     deduped.sort(key=item_order(order, recency))  # stable: resolver order survives inside a tier (open commitments first, newest first)
     pinned: set[int] = set()
@@ -1670,7 +1697,36 @@ def item_order(order: dict[str, int], recency: dict[str, str] | None = None):
 
 def block_label(it: dict) -> str:
     store = it.get("store") or PROJECT_STORE
-    return it["entity"] if store == PROJECT_STORE else f"{it['entity']} [{store}]"
+    name = ", ".join([it["entity"], *it.get("co_entities", [])])
+    return name if store == PROJECT_STORE else f"{name} [{store}]"
+
+
+def collapse_identical_blocks(items: list[dict], entities: list[dict]) -> list[dict]:
+    """Two entities whose blocks in one store carry the SAME set of lines are one
+    block under one heading naming both. A line naming two people still renders
+    under each of them when their blocks differ (sp-1b3ef442); only a byte-identical
+    second block is dropped, because it spends the cap twice and reads like two
+    sources corroborating one claim (PR #308 review round 11)."""
+    order = {norm(e["name"]): i for i, e in enumerate(entities)}
+    blocks: dict[tuple[str, str], list[dict]] = {}
+    for it in items:
+        blocks.setdefault((norm(it["entity"]), it.get("store") or PROJECT_STORE), []).append(it)
+    signature: dict[tuple[str, str], tuple] = {k: tuple(sorted((i["kind"], norm(i["text"])) for i in v)) for k, v in blocks.items()}
+    dropped: set[tuple[str, str]] = set()
+    keys = sorted(blocks, key=lambda k: (k[1], order.get(k[0], 99)))
+    for i, a in enumerate(keys):
+        if a in dropped:
+            continue
+        for b in keys[i + 1:]:
+            if b in dropped or b[1] != a[1] or signature[a] != signature[b]:
+                continue
+            dropped.add(b)
+            name_b = blocks[b][0]["entity"]
+            for it in blocks[a]:
+                it.setdefault("co_entities", [])
+                if name_b not in it["co_entities"]:
+                    it["co_entities"].append(name_b)
+    return [it for it in items if (norm(it["entity"]), it.get("store") or PROJECT_STORE) not in dropped]
 
 
 def render_item(it: dict) -> str:
@@ -1696,6 +1752,12 @@ def deadline_note(bundle: dict) -> str:
     cut_stores = (bundle.get("budget") or {}).get("stores_cut") or []
     if cut_stores:
         parts.append(ceiling_note_text(cut_stores))
+    sk = bundle.get("declared_skips") or {}
+    if sk.get("files") or sk.get("dirs"):
+        # A declared exclusion keeps FULL, but the model reads only the header,
+        # so the header says what was never opened (PR #308 review round 11).
+        parts.append(f" SKIPPED (declared): {sk.get('files', 0)} file(s) over doc_max_bytes, "
+                     f"{sk.get('dirs', 0)} dir(s) in skip_dirs; the receipt lists them.")
     return "".join(parts)
 
 
@@ -1988,6 +2050,7 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
         return None
 
     declared = (manifest.get("classes") or {}).get(task_class, {}).get("sources") or {}
+    declared_skips: dict = {"files": 0, "dirs": 0}
     items: list[dict] = []
     conflicts = 0
     source_rows: list[dict] = []
@@ -2185,6 +2248,10 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
             row["files"] = docs_meta.get("files", sum(len(s.get("doc_files") or []) for s in search_stores))
             row["engine"] = docs_meta.get("engine")
             row["files_skipped_oversize"] = sum(len(s.get("doc_skipped_oversize") or []) for s in search_stores)
+            skipped_dirs_all = [rel(d, root) for s in search_stores for d in (s.get("doc_skipped_dirs") or [])]
+            row["dirs_skipped"] = len(skipped_dirs_all)
+            row["dirs_skipped_sample"] = skipped_dirs_all[:6]
+            declared_skips = {"files": row["files_skipped_oversize"], "dirs": row["dirs_skipped"]}
         source_rows.append(row)
 
     verdict = "FULL" if not missing else ("NONE" if all(not r["present"] for r in source_rows) else "PARTIAL")
@@ -2208,6 +2275,7 @@ def supply(root: Path, prompt: str, *, session_id: str, now: dt.date | None = No
     # the fit pays for it; recomputed after, since the fit never drops a pinned
     # line and so never cuts another store whole (PR #308 review round 8).
     bundle["budget"]["stores_cut"] = stores_cut_by_ceiling(items, bundle["items"])
+    bundle["declared_skips"] = declared_skips
     cut, ceiling_hit, overflow = fit_to_ceiling(bundle, ceiling, cut, source_cut, ceiling_hit)
     bundle["budget"]["stores_cut"] = stores_cut_by_ceiling(items, bundle["items"])
     receipt = {

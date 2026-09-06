@@ -10,6 +10,8 @@
   "folders": ["output", "research", "inputs", "investigation", "build", "docs", "notes", "memory"],
   "entity_dirs": ["targets", "clients", "people", "contacts", "entities"],
   "doc_max_bytes": 524288,
+  "_skip_dirs_why": "Directories under a docs folder that are never read by the docs class, DECLARED here so the receipt can count them and the header can say so (PR #308 review round 11: a hardcoded skip of raw-collections and exports had no record anywhere under FULL). exports and screenshots are renders of other files; raw-collections is collected evidence, not the founder's writing.",
+  "skip_dirs": ["exports", "screenshots", "raw-collections"],
   "_state_predicates_why": "Supersession (older triple marked STALE by a newer one with the same subject and predicate) is only true for predicates that describe a STATE. Accumulative predicates (owns, confirmed, discovered) hold many objects at once; measured on the largest instance 2026-09-04, 'owns merging PR #19' wrongly superseded 'owns merged PR #8'. Grouping is per project as well, so the same name in two projects never supersedes itself.",
   "state_predicates": ["status", "state", "stage", "phase", "works_at", "role", "role_is", "is", "is-a", "located_in", "title", "reports_to", "assigned_to"],
   "classes": {
