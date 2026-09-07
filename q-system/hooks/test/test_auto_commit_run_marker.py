@@ -63,6 +63,22 @@ class RunMarker(unittest.TestCase):
     def setUp(self):
         self.repo = tempfile.mkdtemp(prefix="auto-commit-marker-")
         git(self.repo, "init", "-q", "-b", "main")
+        # IDENTITY ON THE REPO, NOT ON OUR OWN `git -c` CALLS.
+        #
+        # `git()` above passes -c user.email/-c user.name, which covers the
+        # commands THIS FILE runs and nothing else. The subject under test is a
+        # subprocess -- run_hook spawns auto-commit.py, which runs its own
+        # `git commit` -- and that inherits whatever identity the RUNNER happens
+        # to have. Measured 2026-09-07: `validate.yml` sets a global identity and
+        # `verify.yml` does not, so the moment this suite was named in
+        # .verify-suites two cases went red in one job and stayed green in the
+        # other, with the failure reading "the hook did not commit" as if the
+        # hook were broken. Writing the identity into the repo config puts it
+        # where the child git will find it, and makes the suite hermetic instead
+        # of dependent on which workflow happens to run it.
+        git(self.repo, "config", "user.email", "t@t.t")
+        git(self.repo, "config", "user.name", "test")
+        git(self.repo, "config", "commit.gpgsign", "false")
         # A path the hook classifies as committable, so the "no marker" and
         # "stale marker" cases have something to commit and the live case has
         # something it must NOT commit.
