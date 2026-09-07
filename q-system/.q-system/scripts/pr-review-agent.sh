@@ -474,6 +474,38 @@ if [ -n "$HEAD_SHA_CONFIRM" ] && [ "$HEAD_SHA_CONFIRM" != "$HEAD_SHA" ]; then
   echo "  Re-run once the branch settles. No review was dispatched and NO status was posted." >&2
   exit 1
 fi
+# A HEAD THAT ALREADY CARRIES A VERDICT IS NOT RE-REVIEWED (sp-fa810306).
+#
+# THE SCAR, exact: on 2026-09-07 round 3 of PR #314 posted APPROVE WITH NITS as a
+# comment at 00:29:47Z on head adc29516, the process died before the commit status
+# landed, and the next session read `gh api statuses adc29516` as empty. Empty
+# looked like "never reviewed", so the same head was re-run at 00:36:54Z -- and
+# that re-run returned REQUEST CHANGES, overturning an approval that had already
+# been earned. Two more rounds and about 90 minutes.
+#
+# THE COMMENT IS THE DURABLE RECORD, NOT THE STATUS, and that is the whole point
+# of checking it here. The status post is the thing that was lost; the comment is
+# the thing that survived. So this asks the question the re-running session should
+# have asked: has a reviewer already published a verdict on THIS EXACT COMMIT?
+# Posting the status BEFORE the comment (further down) closes the other half.
+#
+# FAILS OPEN. A gh outage, a network error, or a PR with no comments all yield
+# zero hits and the review proceeds. Refusing on an unreadable comment list would
+# wedge every review on a GitHub blip, which is worse than one duplicate round --
+# and the duplicate round is what the caller asked for in the first place.
+if [ -n "$HEAD_SHA" ]; then
+  DUP_MARKER="$(review_head_marker "$HEAD_SHA")"
+  DUP_HITS="$(gh pr view "$PR" $KIPI_GH_REPO_ARGS --json comments -q '.comments[].body' 2>/dev/null | grep -F -c -- "$DUP_MARKER" || true)"
+  DUP_HITS="$(printf '%s' "${DUP_HITS:-0}" | tr -dc '0-9')"
+  [ -n "$DUP_HITS" ] || DUP_HITS=0
+  if [ "$DUP_HITS" -gt 0 ] && [ "$FORCE" != "1" ]; then
+    echo "REFUSING: PR #$PR head ${HEAD_SHA:0:8} already carries $DUP_HITS reviewer verdict comment(s). Re-reviewing a head that has already been judged can only overturn a verdict that was already earned (sp-fa810306). No review was dispatched and NO status was posted." >&2
+    echo "  Read the existing verdict on the PR, or pass --force if a second opinion on the same commit is what you actually want." >&2
+    exit 3
+  fi
+  [ "$DUP_HITS" -gt 0 ] && echo "  NOTE: ${HEAD_SHA:0:8} already carries $DUP_HITS verdict comment(s); --force given, reviewing it again."
+fi
+
 [ -n "$ISSUE" ] || ISSUE="$(printf '%s' "$PR_TITLE" | grep -oE 'ASK-[0-9]+' | head -1)"
 
 echo "$(TS) reviewing PR #$PR: $PR_TITLE"
@@ -1195,6 +1227,81 @@ else
 fi
 echo "  verdict: ${VERDICT:-unstated}$DRY_NOTE"
 
+# TWO CONSECUTIVE REQUEST CHANGES ROUNDS THAT SHARE A FILE MEAN THE FIX SHAPE IS
+# WRONG (sp-46726f79).
+#
+# THE SCAR, measured: rounds 1, 2 and 3 of PR #314 each named ANOTHER unwaited
+# index write. Three patches, one class, and nothing in the tooling said so -- the
+# round cap came from the founder at 01:09Z. The same shape burned seven rounds on
+# 2026-09-03. A reviewer that can see it and does not say it is the cheapest
+# possible miss, because it already holds both rounds' findings.
+#
+# WHAT IT COMPARES AND WHY THAT SOURCE. The `.verdict.json` record is ONE file per
+# PR, overwritten every round, so it cannot answer a question about two rounds.
+# The per-round history that does exist is this engine's own review artifacts,
+# `$ENGINE_DIR/<artifact_key>-<stamp>.md`, which is what review_round already
+# counts. Sorted by name is sorted by time: the stamp is %Y%m%d-%H%M%S.
+#
+# THROUGH THE ONE READER. Both findings blocks come from `findings_block`
+# (sp-c0a9dac3), never a fresh sed range here -- a second extractor is how the
+# comment, the gate and this check end up disagreeing about what a review said.
+#
+# ADVISORY, NEVER A BLOCK. It exits 4 AFTER the post completes, so a queue script
+# can stop while the human-readable verdict still reaches the PR. Blocking the
+# post would trade a wrong-shape warning for a lost review, which is the trade
+# this whole file exists to refuse.
+#
+# HONEST BOUNDARY: it matches on the file path a finding cites, so two genuinely
+# different defects in one long file read as the same class, and one defect that
+# moved to a different file reads as two classes. It is a prompt to think, not a
+# proof, which is why it advises and does not gate.
+STRUCTURAL_LINE=""
+FINAL_EXIT=0
+
+# _finding_files <review-file> -> the deduped, sorted file paths its findings cite.
+# Rows are `severity|claim|file:line`; the line number is dropped because a fix
+# that moves a defect down three lines is the same defect.
+_finding_files() {
+  findings_block "${1:-}" \
+    | awk -F'|' 'NF>=3 { loc=$3; sub(/:[0-9-]*$/, "", loc); gsub(/^[ \t]+|[ \t]+$/, "", loc); if (loc != "") print loc }' \
+    | sort -u
+}
+
+case "$VERDICT" in
+  "REQUEST CHANGES"|"BLOCK")
+    PREV_REVIEW=""; PREV_ROUND=0; CUR_ROUND=0; _sr_n=0
+    while IFS= read -r _sr_f; do
+      [ -n "$_sr_f" ] || continue
+      _sr_n=$(( _sr_n + 1 ))
+      if [ "$_sr_f" = "$REVIEW" ]; then CUR_ROUND="$_sr_n"; continue; fi
+      _sr_v="$(resolve_verdict "$(extract_verdict "$_sr_f")" "$(verdict_from_findings "$_sr_f")")"
+      case "$_sr_v" in
+        "REQUEST CHANGES"|"BLOCK") PREV_REVIEW="$_sr_f"; PREV_ROUND="$_sr_n" ;;
+      esac
+    done <<EOF
+$(ls -1 "$ENGINE_DIR/$(artifact_key "$REVIEW_SLUG" "$PR")-"*.md 2>/dev/null | sort)
+EOF
+    if [ -n "$PREV_REVIEW" ]; then
+      _sr_prev="$(mktemp "${TMPDIR:-/tmp}/pr-review-prev.XXXXXX" 2>/dev/null)" || _sr_prev=""
+      _sr_cur="$(mktemp "${TMPDIR:-/tmp}/pr-review-cur.XXXXXX" 2>/dev/null)" || _sr_cur=""
+      if [ -n "$_sr_prev" ] && [ -n "$_sr_cur" ]; then
+        _finding_files "$PREV_REVIEW" > "$_sr_prev"
+        _finding_files "$REVIEW"      > "$_sr_cur"
+        # `comm -12` needs both sides sorted, which _finding_files guarantees.
+        _sr_shared="$(comm -12 "$_sr_prev" "$_sr_cur" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')"
+        command rm -f "$_sr_prev" "$_sr_cur" 2>/dev/null || true
+        if [ -n "$_sr_shared" ]; then
+          STRUCTURAL_LINE="STRUCTURAL: round $CUR_ROUND and round $PREV_ROUND both request changes in the same file(s): $_sr_shared. Two rounds naming one file is a wrong fix SHAPE, not two bugs. Sweep the whole class in one pass or park the PR; a third patch on the same file is the loop this warning exists to stop (sp-46726f79)."
+          FINAL_EXIT=4
+          echo "  $STRUCTURAL_LINE"
+        fi
+      else
+        echo "  WARN: could not create temp files for the structural comparison; skipping it. Two rounds on one file will not be flagged on this run." >&2
+      fi
+    fi
+    ;;
+esac
+
 # Single writer for verdict state. The worker's rework gate reads THIS record,
 # never the review prose. Keyed by PR number, latest round wins; history stays
 # in the timestamped .md files.
@@ -1376,6 +1483,33 @@ post_reviewer_status() {
 
 if [ "$POST" = "1" ]; then
   COMMENT_URL=""
+  # THE STATUS GOES FIRST, BEFORE THE COMMENT (sp-fa810306). This ordering is the
+  # fix, and it is the whole reason this block moved.
+  #
+  # THE SCAR, exact: on 2026-09-07 round 3 of PR #314 posted its APPROVE WITH NITS
+  # comment at 00:29:47Z and the process died before the commit status call. The
+  # approval existed as prose and did not exist as a gate, so the next session read
+  # `gh api statuses adc29516` as empty, re-ran the same head, and the re-run
+  # returned REQUEST CHANGES. An earned approval was overturned by a kill.
+  #
+  # WHICH HALF TO LOSE. A kill can land between any two calls; the only choice is
+  # which one survives it. The comment is 60 KB of prose a human reads later; the
+  # status is the one thing a required check, converge.sh and the next session all
+  # read. Losing prose costs a re-read of the review file on disk. Losing the
+  # status costs a whole re-review that can overturn the verdict. So the status
+  # goes first, unconditionally.
+  #
+  # POSTED TWICE, ON PURPOSE, AND NOT A SECOND WRITER. Commit statuses append and
+  # the latest wins, so the second call below re-posts the SAME context with the
+  # SAME $VERDICT and adds only target_url once the comment URL exists. The value
+  # a gate reads cannot differ between the two calls, because both read $VERDICT,
+  # which was computed once, above. If the run dies between them the first post
+  # stands, missing only its link.
+  if [ -n "$HEAD_SHA" ]; then
+    post_reviewer_status "$HEAD_SHA" "$VERDICT" ""
+  else
+    echo "  no head sha for PR #$PR: posting NO commit status (a status on a guessed sha looks authoritative)"
+  fi
   # POST THE RENDERED REVIEW, NEVER THE RAW FILE (sp-48688b24). `--body-file
   # "$REVIEW"` sent the codex agent's entire stdout. Measured on disk 2026-07-30,
   # four real rounds: 435,280 / 519,377 / 278,439 / 197,279 bytes. Three were
@@ -1410,11 +1544,23 @@ if [ "$POST" = "1" ]; then
   # the raw review unchanged and write nothing, instead of redirecting into the
   # artifact we are trying to read.
   if [ -n "$REVIEW_BODY" ]; then
-    review_comment_body "$REVIEW" "$VERDICT" "$ENGINE" "$DEGRADED" >"$REVIEW_BODY"
+    # THE MARKER LEADS THE BODY, and the position is load-bearing. It is what the
+    # duplicate-run refusal at the top of this script greps for, and
+    # review_comment_body truncates from the END, so a marker appended after the
+    # body would be the first thing a long review dropped -- the guard would then
+    # be silently disarmed on exactly the reviews that run longest.
+    {
+      review_head_marker "$HEAD_SHA"; printf '\n\n'
+      review_comment_body "$REVIEW" "$VERDICT" "$ENGINE" "$DEGRADED"
+      # The structural warning rides INSIDE the comment rather than only in this
+      # log, because the log belongs to whoever ran the reviewer and the PR is
+      # where the next person decides whether to patch again.
+      [ -n "$STRUCTURAL_LINE" ] && printf '\n**%s**\n' "$STRUCTURAL_LINE"
+    } >"$REVIEW_BODY"
     POST_FILE="$REVIEW_BODY"
   else
     POST_FILE="$REVIEW"
-    echo "  WARN: could not create a temp file; posting the RAW review, which GitHub may reject on size" >&2
+    echo "  WARN: could not create a temp file; posting the RAW review, which GitHub may reject on size. The head marker is NOT in this body, so a later run will not see this verdict and may re-review the same head (sp-fa810306)." >&2
   fi
   # Keep the reason. A bare "could not comment" sent the maintainer to guess
   # between a size rejection, an auth failure and a closed PR -- the same
@@ -1428,13 +1574,16 @@ if [ "$POST" = "1" ]; then
     echo "  WARN: the review is on disk at $REVIEW but NO human-readable copy reached the PR" >&2
   fi
   rm -f "$REVIEW_BODY" "$COMMENT_ERR"
-  # No sha, no status. A status on a guessed commit is worse than none because
-  # it looks authoritative -- the same reason ASK-216 captured the sha before
-  # dispatch instead of looking it up afterwards.
-  if [ -n "$HEAD_SHA" ]; then
+  # THE SECOND POST IS AN ENRICHMENT, NOT THE POST. The gate already moved above,
+  # before the comment, so this call exists only to attach target_url to a status
+  # that is already correct. It is skipped when there is no URL to attach: a
+  # re-post carrying nothing new would be two writes for one fact, and the first
+  # one already said everything a gate reads.
+  #
+  # No sha, no status -- the same rule as above. A status on a guessed commit is
+  # worse than none because it looks authoritative (ASK-216).
+  if [ -n "$HEAD_SHA" ] && [ -n "$COMMENT_URL" ]; then
     post_reviewer_status "$HEAD_SHA" "$VERDICT" "$COMMENT_URL"
-  else
-    echo "  no head sha for PR #$PR: posting NO commit status (a status on a guessed sha looks authoritative)"
   fi
   if [ -n "$ISSUE" ]; then
     # THE REVIEWER'S HALF OF THE CONVERSATION (ASK-221, founder directive
@@ -1498,4 +1647,9 @@ Sana: reply to this comment on THIS issue. For each finding, either the file:lin
 fi
 
 echo "$(TS) done$DRY_NOTE"
-exit 0
+# EXIT 4 MEANS "IT ALL WORKED AND THE NEXT PATCH IS THE WRONG MOVE" (sp-46726f79).
+# It is reached only AFTER the post, so a caller that treats non-zero as failure
+# still has its comment and its commit status. Callers that care read the code;
+# callers that do not are no worse off than before, because the outward side
+# effects are identical either way.
+exit "${FINAL_EXIT:-0}"
