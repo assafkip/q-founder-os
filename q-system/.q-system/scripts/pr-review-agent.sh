@@ -34,22 +34,44 @@
 # either stamp `codex-adversarial` (a false record) or skip the stamp and never
 # approve. In a repo whose thesis is receipts, the honest token had to exist first.
 #
-# TWO ENGINES, ONE SCRIPT -- CODEX IS THE ONE THAT GATES (ASK-221)
-# ----------------------------------------------------------------
-# Sana (the PR author) is Claude. A Claude reviewer is a different process with no
-# shared memory, genuinely useful -- but the same lab and the same model family, so
-# the blind spots stay CORRELATED. Fresh context is not an independent mind.
+# TWO ENGINES, ONE SCRIPT -- CLAUDE IS THE ONE THAT GATES (founder-directed 2026-09-06)
+# ---------------------------------------------------------------------------------
+# THIS REVERSES the 2026-07-29 directive recorded below. Founder, 2026-09-06, said
+# twice: "forget codex use claude for fallback" / "forget codex go with the claude
+# fallback". So claude is now THE reviewer: it owns `kipi/reviewer-approved` and
+# writes the ONE verdict record converge.sh and linear-worker.sh gate on. codex keeps
+# the same script but posts an ADVISORY `kipi/codex-approved` out of the gate's way.
 #
-# So codex is THE reviewer, not a second opinion appended to a Claude one:
-# founder directive 2026-07-29, "codex with gpt-5.6 as a sr. staff swe at Meta is
-# the agent that checks sana's work". It owns `kipi/reviewer-approved` and writes
-# the ONE verdict record converge.sh and linear-worker.sh gate on. Claude keeps
-# the same script but posts an ADVISORY `kipi/claude-approved` and writes its
-# record out of the gate's way.
+# THE COST IS REAL AND IS ACCEPTED, not overlooked. Sana (the PR author) is Claude, so
+# a Claude reviewer shares her lab and model family and re-derives her blind spots;
+# fresh context is not an independent mind. That was the whole argument for the
+# 2026-07-29 directive, "codex with gpt-5.6 as a sr. staff swe at Meta is the agent
+# that checks sana's work", and it is still true. What changed is availability, not
+# the argument. Restoring independence is `KIPI_REVIEW_ENGINE=codex
+# KIPI_REVIEW_PRIMARY_ENGINE=codex`, both together, or flipping the two defaults back.
 #
-# The Opus fallback below is what makes this safe: when codex is down, Claude
-# fills the PRIMARY slot and the status says DEGRADED out loud, so an outage
-# degrades the gate's independence instead of wedging every open PR.
+# WHY IT CHANGED, measured 2026-09-06 as three stacked failures each masking the next:
+# ~/.codex/config.toml asked for `gpt-6-astra` when the fleet is on Sol; codex-cli
+# 0.147.0 was too old for that model and returned HTTP 400; and underneath both, the
+# workspace is OUT OF CREDITS, which `gpt-5.6-sol` returns too. `codex exec` exits 0
+# on all three, so two sessions reviewed for a full evening on the Opus fallback and
+# nothing said so. An engine that fails silently cannot hold a required gate.
+#
+# BOTH DEFAULTS MOVE TOGETHER OR THE GATE WEDGES. The branch below posts
+# `kipi/reviewer-approved` only when ENGINE equals PRIMARY_ENGINE. Setting
+# KIPI_REVIEW_ENGINE=claude alone leaves PRIMARY_ENGINE=codex, so every review lands
+# on the advisory context and every open PR waits forever on a status nobody posts.
+#
+# THERE IS NO FALLBACK IN THE NEW DIRECTION, and saying so plainly is the point.
+# The Opus fallback and the whole DEGRADED apparatus hang off the codex branch:
+# codex down -> claude fills the slot -> the status says DEGRADED. With claude
+# PRIMARY that branch is only reachable on an advisory `--engine codex` hand-run,
+# so a claude outage has nothing behind it. That is the SAFE direction and not an
+# oversight: the primary path exits non-zero and posts NO status, and absent is
+# not approved, so a claude outage holds PRs instead of greening them. It is not
+# a second lab either way -- codex is out of credits, so a codex fallback would
+# fail at exit 0, which is the outage this flip exists to end. Restoring a real
+# fallback means restoring codex, which is the same act as restoring independence.
 #
 # It is a FLAG, not a second script, on purpose: sha capture (ASK-216), verdict
 # derivation from labelled severities, the commit-status post (ASK-217) and
@@ -133,7 +155,7 @@ CODEX_MODEL="${KIPI_REVIEW_CODEX_MODEL:-gpt-5.6-sol}"
 # CODEX BY DEFAULT. Env-overridable so a codex outage long enough to matter is a
 # config change (`KIPI_REVIEW_ENGINE=claude`), not an edit to the script that
 # gates every PR in the repo.
-PR=""; ISSUE=""; POST=0; ENGINE="${KIPI_REVIEW_ENGINE:-codex}"; TARGET_REPO_ARG=""
+PR=""; ISSUE=""; POST=0; ENGINE="${KIPI_REVIEW_ENGINE:-claude}"; TARGET_REPO_ARG=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --issue)  shift; ISSUE="${1:-}" ;;
@@ -214,10 +236,18 @@ STATUS_REPO_PATH="{owner}/{repo}"
 #
 #   VERDICT_DIR (the ONE record the loop gates on). converge.sh:36 and
 #   linear-worker.sh:76 both read `$STATE_DIR/pr-reviews/pr-<N>.verdict.json` --
-#   the ROOT, not a subdir. So "codex is the gate" means codex writes THAT path,
-#   and claude's record moves down into $OUT_DIR/claude to get out of its way.
+#   the ROOT, not a subdir. So "claude is the gate" means claude writes THAT path,
+#   and codex's record moves down into $OUT_DIR/codex to get out of its way.
 #   Exactly one engine writes the gating record: single writer, preserved.
-PRIMARY_ENGINE="${KIPI_REVIEW_PRIMARY_ENGINE:-codex}"
+#
+#   THIS SENTENCE READ THE OTHER WAY ROUND UNTIL 2026-09-06 and is the map people
+#   read to understand the contract, so it flips with the defaults rather than
+#   being left as an artifact of the previous direction. Note the asymmetry it
+#   creates: for the PRIMARY engine ENGINE_DIR and VERDICT_DIR are now the SAME
+#   directory ($OUT_DIR). That is safe because review_round globs `pr-<N>-*.md`
+#   and the record is `..._pr-<N>.verdict.json`, so neither ever counts the other
+#   -- measured on the live store, 88 .md at the root and 993 under codex/.
+PRIMARY_ENGINE="${KIPI_REVIEW_PRIMARY_ENGINE:-claude}"
 
 # WHO ASKED FOR THIS REVIEW (sp-53aad86f). The verdict record proved that A CODEX
 # REVIEW RAN; it could not prove THE DISPATCHER RAN ONE UNATTENDED, which is the
@@ -930,7 +960,30 @@ note_degraded_transition() {   # note_degraded_transition <0|1> [reason]
 echo "$(TS) running the $ENGINE reviewer (bounded at ${TIMEOUT_SECONDS}s)..."
 if [ "$ENGINE" != "codex" ]; then
   if run_engine claude "$REVIEW"; then
-    echo "$(TS) review written: $REVIEW"
+    # THE CLAUDE PATH GETS THE SAME PARSEABILITY BAR AS THE OTHER TWO, and this
+    # line is the whole reason it is here (review of PR #319). Until the
+    # 2026-09-06 flip this branch was ADVISORY ONLY, so an unread review landed
+    # on kipi/claude-approved and gated nothing; the bar lived on the codex path
+    # and, after codex found the same hole in it on 2026-07-29, on the Opus
+    # fallback. The flip moved the REQUIRED kipi/reviewer-approved onto the one
+    # path in this script that never asked the question.
+    #
+    # REPRODUCED, not reasoned about, before this line existed: the suite's own
+    # CODEX_TRUNCATED fixture (harness noise, prose "VERDICT: APPROVE", a
+    # FINDINGS: block that is never closed, exit 0) posted
+    #   state=success -f context=kipi/reviewer-approved -f description=APPROVE
+    # on the default path, while the verdict record it wrote beside it said
+    # "usable": false. The identical stream through the codex path correctly
+    # posted state=failure. Nothing paged. An unclosed FINDINGS block parses as
+    # an EMPTY findings list and an empty list derives APPROVE, so exiting 0 is
+    # not evidence the reviewer said anything -- and a green required gate over
+    # a review nobody read is the worst outcome available in this script.
+    if review_is_usable "$REVIEW"; then
+      echo "$(TS) review written: $REVIEW"
+    else
+      REVIEW_UNUSABLE=1
+      echo "$(TS) the $ENGINE reviewer answered with no complete FINDINGS block (empty or truncated); verdict stays UNSTATED. Output kept at: $REVIEW" >&2
+    fi
   else
     rc=$?
     echo "$(TS) reviewer failed or timed out (rc=$rc). Partial output: $REVIEW" >&2
@@ -1047,11 +1100,14 @@ echo "  verdict: ${VERDICT:-unstated}$DRY_NOTE"
 # Both post `state: failure`, and a selector that sees only `failure` sends a
 # never-reviewed PR to REWORK with no findings to work from.
 #
-# ASKED HERE, NOT REUSED FROM $REVIEW_UNUSABLE. That flag is set on the codex and
-# fallback paths only -- the `ENGINE != codex` primary path never evaluates
-# usability at all -- so reading it would record `usable: true` for a path that
-# never checked, which is the fabricated-evidence direction. One call, the same
-# predicate on the same file the verdict came from, covering all three paths.
+# ASKED HERE, NOT REUSED FROM $REVIEW_UNUSABLE. All three dispatch paths now set
+# that flag (the `ENGINE != codex` path joined them in the review of PR #319; it
+# previously never evaluated usability at all, which is what let a truncated
+# claude stream green the required gate once claude became primary). It is still
+# asked again here rather than reused, because $REVIEW_UNUSABLE is the flag the
+# VERDICT was computed from and this key is a claim about the FILE -- deriving one
+# from the other would make the record unable to disagree with the gate, and that
+# disagreement is exactly the signal this key exists to preserve.
 #
 # RECORD-ONLY, DELIBERATELY. This changes no gate. $VERDICT is computed above and
 # is not touched here, so no PR's outcome moves on this commit; the consumer that
