@@ -236,9 +236,17 @@ STATUS_REPO_PATH="{owner}/{repo}"
 #
 #   VERDICT_DIR (the ONE record the loop gates on). converge.sh:36 and
 #   linear-worker.sh:76 both read `$STATE_DIR/pr-reviews/pr-<N>.verdict.json` --
-#   the ROOT, not a subdir. So "codex is the gate" means codex writes THAT path,
-#   and claude's record moves down into $OUT_DIR/claude to get out of its way.
+#   the ROOT, not a subdir. So "claude is the gate" means claude writes THAT path,
+#   and codex's record moves down into $OUT_DIR/codex to get out of its way.
 #   Exactly one engine writes the gating record: single writer, preserved.
+#
+#   THIS SENTENCE READ THE OTHER WAY ROUND UNTIL 2026-09-06 and is the map people
+#   read to understand the contract, so it flips with the defaults rather than
+#   being left as an artifact of the previous direction. Note the asymmetry it
+#   creates: for the PRIMARY engine ENGINE_DIR and VERDICT_DIR are now the SAME
+#   directory ($OUT_DIR). That is safe because review_round globs `pr-<N>-*.md`
+#   and the record is `..._pr-<N>.verdict.json`, so neither ever counts the other
+#   -- measured on the live store, 88 .md at the root and 993 under codex/.
 PRIMARY_ENGINE="${KIPI_REVIEW_PRIMARY_ENGINE:-claude}"
 
 # WHO ASKED FOR THIS REVIEW (sp-53aad86f). The verdict record proved that A CODEX
