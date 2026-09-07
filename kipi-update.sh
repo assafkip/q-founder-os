@@ -1560,6 +1560,15 @@ while IFS='|' read -r name path prefix itype declared; do
   # SNAP would point restore at a torn-down directory.
   CHECKPOINT_TARGET=""
   CHECKPOINT_PREFIX=""
+  # The checkpoint DIRECTORY too, not only the target. restore_instance returns
+  # early on an empty target, so a bail before this instance's checkpoint
+  # already restored nothing; clearing the directory as well makes that
+  # structural rather than dependent on one guard line, and stops the
+  # previous instance's snapshot outliving its iteration (PR #314 round 3).
+  if [ -n "${CHECKPOINT_DIR:-}" ] && [ -d "$CHECKPOINT_DIR" ]; then
+    rm -r -- "$CHECKPOINT_DIR"
+  fi
+  CHECKPOINT_DIR=""
   SNAP=""
   ORIGINAL_PATH="$path"
   ORIGINAL_HEAD=""
@@ -1905,6 +1914,10 @@ PY
         say "           Leaving it. It will be deleted by this sync until it is untracked."
         continue
       fi
+      # This untrack and its reset backouts are index writes too (PR #314
+      # round 3); a lock held past the bound skips this path, with the error
+      # printed, rather than failing the whole instance.
+      wait_for_index_lock "$path" "untrack $sys_path" || continue
       if ! git rm --cached --quiet -- "$sys_path" 2>/dev/null; then
         say "  WARNING: could not untrack $sys_path"
         continue
@@ -2207,21 +2220,24 @@ The file itself is untouched on disk." 2>/dev/null; then
       # judged a local edit, i.e. the case where sweeping would be worst.
       if [ "${#sys_add_paths[@]}" -eq 0 ]; then
         say "  nothing to commit: every dirty system-owned path is a local edit"
-      # The lock wait sits OUTSIDE the substitution: inside it, its progress
-      # lines are captured with the commit's stderr and printed only on failure,
-      # so a two-minute wait was silent (PR #314 round 2).
-      elif ! wait_for_index_lock "$path" "system-state commit"; then
-        echo "  WARNING: the system-state commit could not run (index.lock held); this instance will"
-        echo "  likely be refused below over dirt that is not founder work"
-      elif ! sys_commit_err="$(retry_on_index_lock "$path" "system-state commit" git commit -q -m "chore: commit system-written state before skeleton sync [no-issue: fleet updater system-state commit]
+      else
+        # No command substitution around the commit. Inside one, the lock
+        # wait's progress lines (the first wait AND every retry's) were
+        # captured with the commit's stderr and printed only on failure, so a
+        # two-minute wait was silent (PR #314 rounds 2 and 3). stdout reaches
+        # the terminal as it happens; only stderr is kept for the warning.
+        sys_errf="$(mktemp)"
+        if ! retry_on_index_lock "$path" "system-state commit" git commit -q -m "chore: commit system-written state before skeleton sync [no-issue: fleet updater system-state commit]
 
 These files are written by the fleet itself (sycophancy stamp, integrity
 baseline, hook state, skeleton-shipped plugins). Committing them here keeps the
 updater from being blocked by its own exhaust; founder work is never included
-because this commit is pathspec-limited." -- "${sys_add_paths[@]}" 2>&1)"; then
-        echo "  WARNING: the system-state commit FAILED; this instance will very"
-        echo "  likely be refused below over dirt that is not founder work:"
-        printf '%s\n' "$sys_commit_err" | sed 's/^/    /'
+because this commit is pathspec-limited." -- "${sys_add_paths[@]}" 2>"$sys_errf"; then
+          echo "  WARNING: the system-state commit FAILED; this instance will very"
+          echo "  likely be refused below over dirt that is not founder work:"
+          sed 's/^/    /' "$sys_errf"
+        fi
+        rm -- "$sys_errf"
       fi
     fi
 
