@@ -2207,6 +2207,12 @@ The file itself is untouched on disk." 2>/dev/null; then
       # judged a local edit, i.e. the case where sweeping would be worst.
       if [ "${#sys_add_paths[@]}" -eq 0 ]; then
         say "  nothing to commit: every dirty system-owned path is a local edit"
+      # The lock wait sits OUTSIDE the substitution: inside it, its progress
+      # lines are captured with the commit's stderr and printed only on failure,
+      # so a two-minute wait was silent (PR #314 round 2).
+      elif ! wait_for_index_lock "$path" "system-state commit"; then
+        echo "  WARNING: the system-state commit could not run (index.lock held); this instance will"
+        echo "  likely be refused below over dirt that is not founder work"
       elif ! sys_commit_err="$(retry_on_index_lock "$path" "system-state commit" git commit -q -m "chore: commit system-written state before skeleton sync [no-issue: fleet updater system-state commit]
 
 These files are written by the fleet itself (sycophancy stamp, integrity
@@ -2666,11 +2672,14 @@ print("\n".join(mod.EXTRA_WATCHED))
     # .claude/ and plugins/ permanently dirty in every instance repo.
     if git -C "$path" rev-parse --git-dir >/dev/null 2>&1; then
       if ! ( cd "$path" &&
+        # The untrack below is this block's FIRST index write, so the wait sits
+        # before it, not before the staging that follows (PR #314 round 2).
+        wait_for_index_lock "$path" "config sync staging" &&
         if git ls-files --error-unmatch plugins/memory-lifecycle \
             >/dev/null 2>&1; then
           git rm -r -q --cached plugins/memory-lifecycle
         fi &&
-        { { wait_for_index_lock "$path" "config sync staging" && stage_config_sync "$path"; } ||
+        { stage_config_sync "$path" ||
             { unstage_scope "$path" .claude/ plugins/; false; }; } &&
         # THE COMMIT HALF NEEDS THE SAME UNWIND AS THE STAGING HALF (ASK-797).
         # unstage_scope was wired to stage_config_sync's failure only, so a

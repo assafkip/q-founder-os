@@ -32,8 +32,12 @@ def git(repo, *args):
         cwd=repo, capture_output=True, text=True, check=False)
 
 
-def run_hook(repo):
-    return subprocess.run([sys.executable, HOOK], cwd=repo,
+def run_hook(repo, cwd=None):
+    # The hook resolves its repo through CLAUDE_PROJECT_DIR, the way Claude
+    # Code invokes it; the process cwd is whatever the harness happens to be
+    # in. Both are set here so the two can be pulled apart on purpose.
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=repo)
+    return subprocess.run([sys.executable, HOOK], cwd=cwd or repo, env=env,
                           capture_output=True, text=True, check=False)
 
 
@@ -64,8 +68,11 @@ class RunMarker(unittest.TestCase):
         self.marker = os.path.join(self.repo, ".git", "kipi-update.run")
 
     def test_live_marker_commits_nothing_and_says_so(self):
+        # A fresh stamp, generated now: a fixed date went stale two hours after
+        # it was written and failed this case in CI (PR #314 round 2).
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         with open(self.marker, "w") as fh:
-            fh.write(f"{os.getpid()} 2026-09-06T21:30:00Z\n")
+            fh.write(f"{os.getpid()} {stamp}\n")
         before = head_count(self.repo)
         result = run_hook(self.repo)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -81,6 +88,18 @@ class RunMarker(unittest.TestCase):
         self.assertNotIn("fleet updater run in progress", result.stderr)
         self.assertFalse(os.path.exists(self.marker), "a stale marker survived")
 
+    def test_live_marker_is_seen_when_cwd_is_not_the_project_dir(self):
+        # PR #314 round 2: the marker path was resolved against the process
+        # cwd; with cwd elsewhere the guard found no marker and failed open.
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with open(self.marker, "w") as fh:
+            fh.write(f"{os.getpid()} {stamp}\n")
+        before = head_count(self.repo)
+        result = run_hook(self.repo, cwd=tempfile.gettempdir())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("fleet updater run in progress", result.stderr)
+        self.assertEqual(head_count(self.repo), before, "the guard failed open from a foreign cwd")
+
     def test_live_pid_with_an_old_stamp_is_stale(self):
         # A recycled pid after a crash or reboot is alive and unrelated; the
         # stamp is what says the run is long over (PR #314 review, round 1).
@@ -92,17 +111,6 @@ class RunMarker(unittest.TestCase):
         self.assertNotIn("fleet updater run in progress", result.stderr)
         self.assertFalse(os.path.exists(self.marker), "an old-stamp marker with a live pid survived")
         self.assertEqual(head_count(self.repo), before + 1, "the hook did not proceed past a stale marker")
-
-    def test_a_fresh_marker_with_a_live_pid_is_live_within_the_bound(self):
-        # The stamp check must not turn every marker stale: a fresh stamp and a
-        # live pid is the real in-flight case and still commits nothing.
-        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        with open(self.marker, "w") as fh:
-            fh.write(f"{os.getpid()} {stamp}\n")
-        before = head_count(self.repo)
-        result = run_hook(self.repo)
-        self.assertIn("fleet updater run in progress", result.stderr)
-        self.assertEqual(head_count(self.repo), before)
 
     def test_malformed_marker_is_treated_as_stale(self):
         with open(self.marker, "w") as fh:

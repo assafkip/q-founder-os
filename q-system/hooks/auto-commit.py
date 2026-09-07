@@ -421,9 +421,14 @@ def fleet_update_in_progress():
     r = run(["git", "rev-parse", "--git-common-dir"])
     if r.returncode != 0:
         return None
+    # `git rev-parse --git-common-dir` answers RELATIVE to the cwd it ran in,
+    # and run() executes in PROJ_DIR (CLAUDE_PROJECT_DIR), not in this
+    # process's cwd. Resolving against os.getcwd() pointed at the wrong repo
+    # whenever the two differed, and a missing marker there reads as "no run
+    # in progress": the guard failed open (PR #314 round 2).
     common = r.stdout.strip()
     if not os.path.isabs(common):
-        common = os.path.abspath(common)
+        common = os.path.abspath(os.path.join(PROJ_DIR, common))
     marker = os.path.join(common, "kipi-update.run")
     if not os.path.exists(marker):
         return None

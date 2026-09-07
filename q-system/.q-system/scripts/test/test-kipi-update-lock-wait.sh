@@ -191,8 +191,12 @@ assert_a_live_foreign_marker_refuses_the_run_and_survives_it() {
 assert_a_stale_foreign_marker_is_replaced_and_the_sync_lands() {
   local work sk inst; work="$(mktemp -d)"; sk="$work/skel"; inst="$work/inst"
   build "$work"
-  local dead; dead="$( (sleep 0 &) ; echo $! )"
-  printf '%s %s\n' "${dead:-999999}" "2026-01-01T00:00:00Z" > "$inst/.git/kipi-update.run"
+  # A pid that is dead by construction: our own child, reaped before use.
+  sleep 0 &
+  local dead=$!
+  wait "$dead" 2>/dev/null || true
+  kill -0 "$dead" 2>/dev/null && fail "the dead-pid fixture is still alive; the case would not exercise the dead-pid branch"
+  printf '%s %s\n' "$dead" "2026-01-01T00:00:00Z" > "$inst/.git/kipi-update.run"
   bash "$sk/kipi-update.sh" >"$work/out" 2>&1 || true
   grep -q "Updated: 1" "$work/out" || fail "a stale foreign marker blocked the run: $(tail -n 15 "$work/out")"
   [ ! -f "$inst/.git/kipi-update.run" ] || fail "the stale marker survived a successful run"
