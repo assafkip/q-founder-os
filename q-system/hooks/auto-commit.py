@@ -111,10 +111,20 @@ def get_changed_files():
     if r.stdout.strip():
         files.update(r.stdout.strip().splitlines())
 
-    # Staged but not yet diffed against HEAD (new files)
-    r = run(["git", "diff", "--cached", "--name-only"])
-    if r.stdout.strip():
-        files.update(r.stdout.strip().splitlines())
+    # THE `--cached` READ IS GONE AS REDUNDANCY, AND THAT IS ALL IT WAS.
+    #
+    # MEASURED 2026-09-06 before removing it, because the obvious story was wrong.
+    # It was believed to be the line that swept another session's staged work into
+    # this hook's commit (sp-78728ff1). It is not. `git diff --name-only HEAD` on the
+    # line above ALREADY reports a staged-but-uncommitted new file: in a scratch repo,
+    # `git add b` on a new file makes `git diff --name-only HEAD` print `b`. So this
+    # read added nothing any other probe missed, and deleting it fixes nothing.
+    #
+    # sp-78728ff1 IS THEREFORE STILL OPEN and needs a different fix than deleting a
+    # line. Git cannot tell WHO staged a path, so the only honest lever is to treat
+    # "staged" as "a writer has claimed this" and skip it, reporting it as skipped.
+    # That trades away part of the safety net (work staged at session death would no
+    # longer be committed for you) and is a deliberate design call, not a cleanup.
 
     # Filter out empty strings and gitignored patterns
     return {f for f in files if f and not f.startswith("q-system/output/")}
@@ -460,6 +470,49 @@ def fleet_update_in_progress():
     return f"pid {pid}"
 
 
+def another_commit_in_flight():
+    """A reason string if git's own locks say someone is mid-commit, else None.
+
+    THE THIRD WRITER (sp-4bff1b91, sp-d0ce1966, sp-e06433b8, measured 2026-09-06).
+    `fleet_update_in_progress` above coordinates with the ONE writer that agreed to
+    leave a marker. This hook is the writer nobody can negotiate with: it fires at
+    every turn end in every session on the checkout, and it took no lock at all. Two
+    sessions can hold a ref window perfectly and still lose a commit to it.
+
+    Measured that night in one session: three of five git operations died on
+    `Unable to create '.git/index.lock'`, and EVERY ONE EXITED 0. A commit that
+    reports success while landing nothing is worse than one that refuses.
+
+    WE READ THE LOCKS, WE DO NOT REMOVE THEM. kipi-update.sh:1714 does
+    `rm -f` on HEAD.lock/index.lock with no pid, mtime or age test at all
+    (sp-50119dec), and deleting a lock a live 8-minute pre-commit still owns
+    corrupts that commit's index. Refusing costs one skipped auto-commit; the
+    next turn end picks the work up.
+
+    NO AGE BOUND ON PURPOSE, unlike the run marker. A commit here holds index.lock
+    for the length of its pre-commit, measured tonight at 447-497 seconds, and a
+    bound low enough to be useful against a crashed lock would fire constantly
+    against healthy ones. A truly orphaned lock is rare, visible, and a human's
+    call: "no process holds it AND every live hook's cwd is a worktree" is the test
+    that settled it by hand, and it needs `lsof`, which a Stop hook must not spend.
+    """
+    r = run(["git", "rev-parse", "--git-dir"])
+    if r.returncode != 0:
+        return None
+    git_dir = r.stdout.strip()
+    if not os.path.isabs(git_dir):
+        git_dir = os.path.abspath(os.path.join(PROJ_DIR, git_dir))
+    for name in ("index.lock", "HEAD.lock"):
+        path = os.path.join(git_dir, name)
+        if os.path.exists(path):
+            try:
+                age = int(time.time() - os.path.getmtime(path))
+                return f"{name} held {age}s"
+            except OSError:
+                return name
+    return None
+
+
 def main():
     # Check we're in a git repo
     r = run(["git", "rev-parse", "--is-inside-work-tree"])
@@ -470,6 +523,13 @@ def main():
     if live_run is not None:
         print(f"auto-commit: fleet updater run in progress ({live_run}); "
               "committing nothing", file=sys.stderr)
+        return
+
+    held = another_commit_in_flight()
+    if held is not None:
+        print(f"auto-commit: another commit is in flight ({held}); "
+              "committing nothing. The next turn end picks this work up.",
+              file=sys.stderr)
         return
 
     files = get_changed_files()

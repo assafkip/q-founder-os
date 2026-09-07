@@ -555,3 +555,74 @@ def test_a_binary_file_degrades_instead_of_crashing(tmp_path):
     msg = _last_msg(run)
     assert rel in msg, f"the binary file was dropped from the message\n{msg}"
     assert "binary" in msg, f"the binary file was not marked as such\n{msg}"
+
+
+# --- the third writer (2026-09-06) -------------------------------------------------
+# fleet_update_in_progress coordinates with the one writer that leaves a marker. This
+# hook was the writer nobody could negotiate with: it fires at every turn end in every
+# session on a shared checkout and took no lock at all. Measured in one session that
+# night, three of five git operations died on "Unable to create .git/index.lock" and
+# every one of them EXITED 0.
+
+def test_it_refuses_while_another_commit_holds_index_lock(tmp_path):
+    """sp-4bff1b91. A commit in flight owns index.lock for its whole pre-commit,
+    measured at 447-497s on the consulting checkout. Firing into that either dies at
+    exit 0 or lands a commit nobody asked for."""
+    root, run = _repo(tmp_path)
+    _write(root, "memory/MEMORY.md", "- note\n")
+    lock = os.path.join(root, ".git", "index.lock")
+    with open(lock, "w", encoding="utf-8") as fh:
+        fh.write("")
+    try:
+        out = _fire(root)
+    finally:
+        os.remove(lock)
+    assert "another commit is in flight" in (out.stdout + out.stderr), \
+        "the hook fired into a held index.lock instead of refusing"
+    log = run("git", "log", "--oneline").stdout
+    assert "chore" not in log, "it committed while another writer held the lock"
+
+
+def test_it_refuses_on_head_lock_too(tmp_path):
+    """The ref lock, not the index lock, is the one that killed the prd-os ledger
+    sweep mid pre-commit (sp-d0ce1966). Both doors or neither."""
+    root, run = _repo(tmp_path)
+    _write(root, "memory/MEMORY.md", "- note\n")
+    lock = os.path.join(root, ".git", "HEAD.lock")
+    with open(lock, "w", encoding="utf-8") as fh:
+        fh.write("")
+    try:
+        out = _fire(root)
+    finally:
+        os.remove(lock)
+    assert "another commit is in flight" in (out.stdout + out.stderr)
+
+
+def test_it_does_not_delete_the_lock_it_refuses_on(tmp_path):
+    """THE CONTROL THAT MATTERS MOST. kipi-update.sh:1714 force-deletes these locks
+    with no pid, mtime or age test (sp-50119dec). Removing a lock that a live
+    8-minute pre-commit still owns corrupts that commit's index. Refusing is the
+    whole fix; deleting would be a worse bug wearing the same commit message."""
+    root, _ = _repo(tmp_path)
+    _write(root, "memory/MEMORY.md", "- note\n")
+    lock = os.path.join(root, ".git", "index.lock")
+    with open(lock, "w", encoding="utf-8") as fh:
+        fh.write("sentinel")
+    try:
+        _fire(root)
+        assert os.path.exists(lock), "the hook DELETED a lock it does not own"
+        with open(lock, encoding="utf-8") as fh:
+            assert fh.read() == "sentinel", "the hook rewrote a lock it does not own"
+    finally:
+        if os.path.exists(lock):
+            os.remove(lock)
+
+
+def test_it_still_commits_when_no_lock_is_held(tmp_path):
+    """The negative control. A guard that refuses always is not a guard, it is an
+    outage: the safety net exists so work survives a context loss."""
+    root, run = _repo(tmp_path)
+    _write(root, "memory/MEMORY.md", "- note\n")
+    _fire(root)
+    log = run("git", "log", "--oneline").stdout
+    assert "chore" in log, "the hook refused with no lock held, so it never commits"
