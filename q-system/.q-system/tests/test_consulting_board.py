@@ -558,6 +558,133 @@ class TestRound4:
         b = cb.buckets(NOW, {"mail": (b_rows, None)}, _tree(tmp_path))["inbox"][0]["key"]
         assert a == b, f"a date change minted a new id: {a!r} != {b!r}"
 
+    def test_but_a_bracketed_number_that_is_not_an_age_stays(self, tmp_path):
+        brief = _brief()
+        a = cb.buckets(NOW, {"mail": ([brief.Row("Alice ticket [4021]", "mail:t1")], None)},
+                       _tree(tmp_path))["inbox"][0]["key"]
+        b = cb.buckets(NOW, {"mail": ([brief.Row("Alice ticket [4022]", "mail:t2")], None)},
+                       _tree(tmp_path))["inbox"][0]["key"]
+        assert a != b
+
+    @staticmethod
+    def _fake_db(slow_first_query_s: float):
+        """The database API, just enough of it. Records every call; the first query
+        sleeps past the budget so the worker is abandoned mid-paint."""
+        class Fake:
+            def __init__(self):
+                self.calls = []
+
+            def __call__(self, req, timeout):
+                method, url = req.get_method(), req.full_url
+                if "/databases/" in url and not self.calls:
+                    self.calls.append(("query-slow", timeout))
+                    time.sleep(slow_first_query_s)
+                    return io.BytesIO(b'{"results": [], "has_more": false}')
+                self.calls.append((method, url))
+                if "/databases/" in url:
+                    return io.BytesIO(b'{"results": [], "has_more": false}')
+                return io.BytesIO(b'{"id": "p1"}')
+        return Fake()
+
+    def test_no_write_lands_after_the_timeout_was_reported(self, tmp_path, monkeypatch):
+        """Codex round 4 (major): the guard abandoned the worker and it kept writing.
+        Now the budget is cancelled before the timeout is reported, so the worker's
+        next request refuses and the paint stops where it stood."""
+        (tmp_path / "tok").write_text("t")
+        (tmp_path / "db").write_text("db1")
+        monkeypatch.setattr(board_rows, "LOCK_FILE", tmp_path / "board.lock")
+        buckets = {"top_of_mind": [{"key": "k1", "title": "t", "detail": "d", "scope": "card"}],
+                   "this_week": [], "inbox": [], "healthy_scopes": {"card"}}
+        monkeypatch.setattr(board_rows.consulting_board, "buckets", lambda *a, **k: buckets)
+        fake = self._fake_db(slow_first_query_s=0.15)
+        rows, error = board_rows.collect(NOW, {}, opener=fake, token_file=tmp_path / "tok",
+                                         db_file=tmp_path / "db", budget_s=0.05)
+        assert rows == [] and "timed out" in error and "no further write" in error
+        time.sleep(0.4)                      # let the abandoned worker run on and try
+        writes = [c for c in fake.calls if c[0] in ("POST", "PATCH") and "/pages" in c[1]]
+        assert writes == [], f"writes landed after the timeout: {writes}"
+
+    def test_and_the_in_flight_call_is_capped_to_what_is_left(self, tmp_path, monkeypatch):
+        """A 10s HTTP timeout on a request that starts with 0.02s left would outlive
+        the budget. The request's own timeout is clipped to the remainder."""
+        seen = []
+
+        def opener(req, timeout):
+            seen.append(timeout)
+            return io.BytesIO(b'{"results": [], "has_more": false}')
+        budget = board_rows._Budget(0.05)
+        board_rows.existing_rows("t", "db", opener, budget=budget)
+        assert seen and seen[0] <= 0.05 < board_rows.TIMEOUT_S
+
+    def test_the_boards_own_budget_fires_before_the_briefs_guard(self):
+        """Two bounds, one ordering. If the brief's guard fired first the worker would
+        be abandoned with a live budget, which is exactly the round-4 defect."""
+        assert board_rows.BUDGET_S < _brief().COLLECT_BUDGET_S
+
+    def test_a_worker_that_ran_out_of_time_also_let_go_of_the_lock(self, tmp_path, monkeypatch):
+        (tmp_path / "tok").write_text("t")
+        (tmp_path / "db").write_text("db1")
+        monkeypatch.setattr(board_rows, "LOCK_FILE", tmp_path / "board.lock")
+        buckets = {"top_of_mind": [], "this_week": [], "inbox": [], "healthy_scopes": {"card"}}
+        monkeypatch.setattr(board_rows.consulting_board, "buckets", lambda *a, **k: buckets)
+        fake = self._fake_db(slow_first_query_s=0.15)
+        board_rows.collect(NOW, {}, opener=fake, token_file=tmp_path / "tok",
+                           db_file=tmp_path / "db", budget_s=0.05)
+        time.sleep(0.3)
+        with board_rows.exclusive(tmp_path / "board.lock"):
+            pass                                        # no BoardBusy: it was released
+
+
+class TestTheBoardLooksLikeTheOneHeAsked_For:
+    """Founder, 2026-09-03, with two screenshots of Bloom's board: *"This is what I
+    wanted my board to look like."* The schema already matched. Three things his
+    screenshots carry that this writer did not fill."""
+
+    def test_every_row_carries_a_priority(self, tmp_path):
+        """Bloom's board is scanned by P0-P3. A board that writes no Priority renders
+        an empty column, which is worse than no column: it looks like a field he
+        forgot to fill."""
+        b = cb.buckets(NOW, {"mail": ([_brief().Row("Portant: docs", "mail:t1")], None)},
+                       _tree(tmp_path))
+        rows = b["top_of_mind"] + b["this_week"] + b["inbox"]
+        assert rows, "fixture produced no rows, so this proves nothing"
+        missing = [r["title"] for r in rows if not r.get("priority")]
+        assert not missing, f"rows with no priority: {missing}"
+        assert all(r["priority"] in ("P0", "P1", "P2", "P3") for r in rows)
+
+    def test_priority_is_the_cards_verdict_translated_not_a_second_judgement(self):
+        """The mirror rule: one thing computes urgency. This table only renames it."""
+        assert cb.PRIORITY_BY_HEALTH["🔴"] == "P0"
+        assert cb.PRIORITY_BY_HEALTH["⚪"] == "P3"
+        src = pathlib.Path(cb.__file__).read_text(encoding="utf-8")
+        code = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
+        for invented in ("days_overdue", "score", "urgency"):
+            assert invented not in code, (
+                f"{invented!r} suggests this module started computing urgency itself; "
+                "the state card owns that verdict")
+
+    def test_every_row_carries_a_done_signal(self, tmp_path):
+        b = cb.buckets(NOW, {"mail": ([_brief().Row("Portant: docs", "mail:t1")], None)},
+                       _tree(tmp_path))
+        rows = b["top_of_mind"] + b["this_week"] + b["inbox"]
+        missing = [r["title"] for r in rows if not (r.get("done") or "").strip()]
+        assert not missing, f"rows with no done signal: {missing}"
+
+    def test_the_done_signal_reaches_notion_and_leads_the_note(self):
+        props = board_rows._properties(
+            {"title": "t", "scope": "card", "detail": "d", "done": "you sent it"},
+            "Top of Mind", "kipi-abc", True)
+        note = props["Notes"]["rich_text"][0]["text"]["content"]
+        assert note.startswith("Done signal: you sent it"), note
+        assert "scope=card" in note, "the painter still has to read its scope back"
+
+    def test_domain_is_the_producers_not_a_hardcoded_Consulting(self):
+        gtm = board_rows._properties({"title": "t", "domain": "GTM"}, "Top of Mind", "i", True)
+        assert gtm["Domain"]["multi_select"][0]["name"] == "GTM"
+        bare = board_rows._properties({"title": "t"}, "Top of Mind", "i", True)
+        assert bare["Domain"]["multi_select"][0]["name"] == "Consulting", "safe default"
+
+    def test_size_is_never_invented(self):
         """Bloom's board has XS/S/M. Nothing here knows effort, so the column stays
         empty rather than carrying a number that looks measured and is not."""
         props = board_rows._properties({"title": "t", "priority": "P0"}, "Inbox", "i", True)
