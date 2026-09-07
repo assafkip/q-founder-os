@@ -512,27 +512,56 @@ def _brief():
     return mod
 
 
+class _FakeBoard:
+    def __init__(self, root):
+        self._root = root
+
+    def consulting_root(self):
+        return self._root
+
+
+def _ledger_brief(tmp_path):
+    """A fresh brief whose mail section is rooted at a throwaway instance (ASK-1323):
+    the ledger script exists there, and the runner is injected by each test, so no
+    process runs and nothing under the real home directory is read."""
+    ledger = tmp_path / "q-consult" / "email-watch" / "ledger.py"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text("# stand-in\n", encoding="utf-8")
+    log = tmp_path / "q-consult" / "output" / "mail-sweep.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("mail-sweep: stamped ok at "
+                   + dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                   + "\n", encoding="utf-8")
+    mod = _brief()
+    original = mod._optional_module
+    mod._optional_module = (lambda stem: _FakeBoard(tmp_path)
+                            if "consulting_board" in stem else original(stem))
+    return mod
+
+
 class TestRound4:
     """The first real Codex read after rounds 2 and 3 ran on the Opus fallback. Both
     findings are the same shape: a fix that held for the fixture and not for the
     producer. So these tests drive the PRODUCER (collect_mail, collect) and not a
     hand-typed row."""
 
-    def test_the_real_mail_producers_age_form_is_volatile(self, tmp_path):
-        """collect_mail renders `[2h]`, not "2h ago". Round 2's regex never matched it,
-        so every age change replaced the Notion row and lost his drag."""
-        brief = _brief()
+    def test_the_real_mail_producers_since_form_is_volatile(self, tmp_path):
+        """The ledger-backed collect_mail (ASK-1323) renders `[since YYYY-MM-DD]`. The
+        rendered line moves when the ledger's date or subject moves; the board id is
+        the thread id and does not."""
+        brief = _ledger_brief(tmp_path)
 
-        def runner(age):
-            return lambda p, t: (json.dumps({"threads": [
-                {"from": "Alice", "subject": "Docs", "age_hours": age}]}), None)
+        def runner(since, subject):
+            return lambda argv, t: (json.dumps([
+                {"thread_id": "t-alice", "last_from": "Alice", "subject": subject,
+                 "needs_reply_since": since}]), None)
 
-        a_rows, _ = brief.collect_mail(None, runner(2))
-        b_rows, _ = brief.collect_mail(None, runner(3))
-        assert a_rows != b_rows, "the producer must actually render the age, or this proves nothing"
+        a_rows, _ = brief.collect_mail(None, runner("2026-09-01", "Docs"))
+        b_rows, _ = brief.collect_mail(None, runner("2026-09-03", "Re: Docs"))
+        assert a_rows != b_rows, "the producer must actually render the date, or this proves nothing"
         a = cb.buckets(NOW, {"mail": (a_rows, None)}, _tree(tmp_path))["inbox"][0]["key"]
         b = cb.buckets(NOW, {"mail": (b_rows, None)}, _tree(tmp_path))["inbox"][0]["key"]
-        assert a == b, f"an age change minted a new id: {a!r} != {b!r}"
+        assert a == b, f"a date change minted a new id: {a!r} != {b!r}"
 
     def test_but_a_bracketed_number_that_is_not_an_age_stays(self, tmp_path):
         brief = _brief()
@@ -667,58 +696,38 @@ class TestTheBoardLooksLikeTheOneHeAsked_For:
         assert "Size" not in props
 
 
-class TestTwoThreadsAreNeverOneRow:
-    """Codex, 2026-09-03, on the fix for rounds 1-4: the `sender|subject` fallback
-    (used when the model returns no thread id) collapsed two distinct threads into one
-    Notion row. Read-back still passed, because `wanted` had already lost the second
-    one -- the same shape as the round-3 defect, one layer up."""
+class TestTwoThreadsAreTwoRows:
+    """Codex, 2026-09-03: the `sender|subject` fallback (used when the model returned
+    no thread id) collapsed two distinct threads into one Notion row. The id-less
+    branch retired with the model read (ASK-1323): every ledger row carries the
+    Gmail thread id, and a row without one fails the whole read rather than being
+    keyed by its text (test_morning_brief_mail.py::test_one_bad_row_fails_the_whole_read).
+    What remains to pin is the normal path and the two exits the painter reads."""
 
-    def test_two_indistinguishable_threads_become_one_row_that_SAYS_two(self):
-        brief = _brief()
-        runner = lambda p, t: (json.dumps({"threads": [
-            {"from": "Alice", "subject": "Re: invoice", "age_hours": 2},
-            {"from": "Alice", "subject": "Re: invoice", "age_hours": 9}]}), None)
+    def test_two_ledger_rows_reach_the_board_as_two_keys(self, tmp_path):
+        brief = _ledger_brief(tmp_path)
+        runner = lambda argv, t: (json.dumps([
+            {"thread_id": "t1", "last_from": "Alice", "subject": "Re: invoice"},
+            {"thread_id": "t2", "last_from": "Alice", "subject": "Re: invoice"}]), None)
         rows, err = brief.collect_mail(None, runner)
         assert err is None
-        # ROUND 10 REVERSED THE SHAPE OF THIS FIX, and the harm it was written against
-        # still governs. The first fix numbered duplicates by POSITION, so answering
-        # the first thread renumbered the second onto its key and handed it that row's
-        # Status and the bucket he had dragged it to. A thread wearing another
-        # thread's identity is worse than either outcome the original note weighed.
-        #
-        # With no thread id nothing tells these two apart, so the group is ONE row
-        # that says how many it stands for. The task is not silently gone, which is
-        # what this class exists to prevent: he can see there are two and open both.
-        assert len(rows) == 1
-        assert "2 threads" in str(rows[0]), str(rows[0])
-
-    def test_a_real_thread_id_still_wins_and_stays_stable(self):
-        """The suffix is only for the id-less case. A thread WITH an id must not pick
-        one up, or the age-stability the whole change exists for is undone."""
-        brief = _brief()
-        runner = lambda p, t: (json.dumps({"threads": [
-            {"id": "t1", "from": "Alice", "subject": "Re: invoice", "age_hours": 2},
-            {"id": "t2", "from": "Alice", "subject": "Re: invoice", "age_hours": 9}]}), None)
-        rows, _ = brief.collect_mail(None, runner)
         assert [r.key for r in rows] == ["mail:t1", "mail:t2"]
-
-    def test_both_rows_reach_the_board(self, tmp_path):
-        brief = _brief()
-        runner = lambda p, t: (json.dumps({"threads": [
-            {"from": "Alice", "subject": "Re: invoice", "age_hours": 2},
-            {"from": "Alice", "subject": "Re: invoice", "age_hours": 9}]}), None)
-        rows, _ = brief.collect_mail(None, runner)
         inbox = cb.buckets(NOW, {"mail": (rows, None)}, _tree(tmp_path))["inbox"]
-        assert len(inbox) == 1 and "2 threads" in inbox[0]["title"], inbox
-        # And the id-LESS case is the only one that collapses: with real ids the board
-        # still gets two rows. That is the normal path and it must not regress.
-        keyed = lambda p, t: (json.dumps({"threads": [
-            {"id": "t1", "from": "Alice", "subject": "Re: invoice", "age_hours": 2},
-            {"id": "t2", "from": "Alice", "subject": "Re: invoice", "age_hours": 9}]}),
-            None)
-        rows2, _ = brief.collect_mail(None, keyed)
-        inbox2 = cb.buckets(NOW, {"mail": (rows2, None)}, _tree(tmp_path))["inbox"]
-        assert len({i["key"] for i in inbox2}) == 2, "a real thread id stopped working"
+        assert len({i["key"] for i in inbox}) == 2, "two threads must never share one row"
+
+    def test_an_empty_healthy_mail_answer_lets_the_painter_clear_stale_rows(self, tmp_path):
+        """([], None) is 'nothing needs him': the Gmail scope is healthy, so board_rows
+        archives rows the ledger no longer names. This is the exit ASK-1323 exists for."""
+        res = cb.buckets(NOW, {"mail": ([], None)}, _tree(tmp_path))
+        assert "inbox:Gmail" in res["healthy_scopes"]
+        assert not [i for i in res["inbox"] if i["key"].startswith("mail:")]
+
+    def test_a_mail_error_keeps_the_gmail_scope_unhealthy(self, tmp_path):
+        """([], error) is 'could not read': the scope stays out of healthy_scopes, so
+        the painter keeps every row, and the board carries one row saying so."""
+        res = cb.buckets(NOW, {"mail": ([], "ledger timed out after 60s")}, _tree(tmp_path))
+        assert "inbox:Gmail" not in res["healthy_scopes"]
+        assert len(res["inbox"]) == 1, res["inbox"]
 
 
 class TestHisSideCarriesItsDates:

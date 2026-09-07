@@ -36,9 +36,10 @@ which reads Slack's own answer out of the response body. Never `slack-notify.sh`
 that is the fleet ALERT path, it files a Linear ticket for Sana, it sends nothing
 to Slack, and it exits 0 either way.
 
-## Why two `claude -p` calls and not one
+## Why two `claude -p` calls and not one (dated 2026-08-30; since ASK-1323 only
+## calendar is a `claude -p` call, mail reads the consulting ledger, see section 2)
 
-Calendar and Gmail live behind the `claude_ai_*` connectors, which are MCP
+Calendar (and, until 2026-09-06, Gmail) lives behind the `claude_ai_*` connectors, MCP
 servers attached to the CLI, not an HTTP API a bare Python script can call.
 Measured 2026-08-30 in a stripped environment: a headless `claude -p` DOES reach
 them (`--allowedTools mcp__claude_ai_Google_Calendar__list_events` returned
@@ -61,6 +62,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import threading
@@ -79,7 +81,6 @@ BRIEF_MODEL = os.environ.get("KIPI_BRIEF_MODEL", "claude-opus-5")
 CLAUDE_TIMEOUT = int(os.environ.get("KIPI_BRIEF_CLAUDE_TIMEOUT", "180"))
 
 CAL_TOOL = "mcp__claude_ai_Google_Calendar__list_events"
-MAIL_TOOL = "mcp__claude_ai_Gmail__search_threads"
 
 MAX_ROWS = 15
 
@@ -215,106 +216,160 @@ class Row(str):
         return row
 
 
-#: How far back the mail sweep looks, and it is a CONSTANT because it was a hardcoded
-#: "48 hours" inside the prompt for weeks and nobody could see it.
+#: THE MODEL READ IS GONE (ASK-1323, 2026-09-06). This section used to ask a model to
+#: search Gmail for threads where "a real person wrote and the founder has not replied".
+#: That is the direction-only rule, and the consulting ledger dropped it on 2026-08-18
+#: (rca-crm-evidence-invisible-2026-08-18): direction alone called a thumbs-up, a
+#: CC-only copy and a calendar invitation "waiting on your reply", and the board
+#: repeated it to the founder. On 2026-09-06 his Inbox view carried ten such rows --
+#: case-file forwards, two "Accepted: 30 Min consultation" calendar mails, an intro he
+#: was CC'd on -- while `ledger.py needs-reply --json` printed `[]`, because
+#: `reply_debt` there reads each thread to its end and surfaces only an unanswered ask
+#: FOR HIM. The 30-day window that lived here (measured 2026-09-03 against two client
+#: threads a 48-hour window could not see) went with the prompt: the ledger has no
+#: window, and the label below no longer carries one.
 #:
-#: THE BUG THIS FIXES, measured 2026-09-03. The brief printed "Mail needing an answer:
-#: nothing" on 09-01, 09-02 and 09-03 while two client threads sat unanswered since
-#: 2026-08-11 and 2026-08-13. Both are real, both are named by
-#: `email-watch/ledger.py needs-reply`, and both are 3 weeks old, so a 48-hour window
-#: could not see either one. The section was not empty; it was blind, and it reported
-#: blindness as calm.
+#: So the rows come from that reader, through its own CLI, as a subprocess. The
+#: brief does not import it and does not read the Notion ledger itself (a second
+#: reader of one store is how the v1 CRM died); test_morning_brief_mail.py's
+#: `test_the_brief_holds_no_ledger_import` is the check that keeps it that way. The
+#: subprocess runs under zsh for the same reason the consulting CRM's crm-run.sh is
+#: `#!/bin/zsh -l`: launchd hands this job a bare environment, the ledger refuses
+#: without NOTION_TOKEN_ASK, and the export lives in the founder's ~/.zshenv, which
+#: every zsh reads. Measured 2026-09-06: bare env + zsh prints `[]`; bare env alone
+#: prints the refusal. `-l` is kept to match crm-run.sh, not because it carries the
+#: token: a token moved to ~/.zshrc alone would be invisible here AND to crm-run.sh,
+#: because a non-interactive login shell does not read ~/.zshrc (claude-review,
+#: ASK-1323). `test_run_ledger_goes_through_the_login_shell` pins the shell.
 #:
-#: 30 days because the oldest of the two is 23 days old and a window that only just
-#: covers today's example is a window that will fail next month. The prompt still
-#: excludes automated senders and still requires that HE has not replied, so widening
-#: the window does not widen the noise; it only stops hiding the old ones.
-#:
-#: The deterministic answer is `ledger.py needs-reply`, which has no window at all and
-#: knows which threads are clients. It is not wired here yet: it reads the Notion
-#: ledger live, so it is a cross-repo runtime dependency and its own piece of work.
-MAIL_WINDOW_DAYS = 30
-#: MAIL_ROW_CAP LIVED HERE AND IS DELETED (claude review, 2026-09-04, major).
-#: It trimmed the PRODUCER's rows to 15. Trimmed threads never entered
-#: `buckets["inbox"]`, yet `inbox:Gmail` still reported healthy (every remaining key
-#: was a real thread id), so the painter archived their board rows -- pins included --
-#: inside a healthy scope. An unanswered client thread disappeared off his board, which
-#: is the exact failure this board exists to prevent.
-#:
-#: The cap was also redundant. `_section` already trims DISPLAY to MAX_ROWS and prints
-#: "...and N more", so the Slack message was never going to be 50 lines. One cap for
-#: display, none for data: the brief stays short and the board sees every thread.
-#:
-#: Round 11 fixed this same class inside the painter with its `capped` set, on the
-#: rule that a cap is a write budget and not a statement that the work is finished.
-#: The rule is right; a second cap upstream of the producer routed around it.
+#: EMPTY IS HEALTHY, UNREADABLE IS NOT. board_rows archives inside a scope that
+#: reported healthy, so `([], None)` means "nothing needs him; clear the stale rows",
+#: and every failure -- no instance on this machine, a non-zero exit, a timeout, output
+#: that is not a JSON list, a row with no thread id -- returns `([], error)`, which
+#: prints COULD NOT READ and leaves the board exactly as it was.
 
-MAIL_PROMPT = """Call {tool} to find email threads from the last {days} days where a
-REAL PERSON wrote to the founder and the founder has not replied yet. Exclude
-newsletters, notifications, receipts, calendar invites, automated senders and
-no-reply addresses. Oldest first: a thread waiting three weeks matters more than
-one waiting an hour.
-Reply with ONE JSON object and nothing else, no prose, no code fence:
-{{"threads": [{{"id": "<the thread id the tool returned>", "from": "email or name", "subject": "...", "age_hours": <int>}}]}}
-`id` is the thread's own id from the tool result, copied verbatim. It is what keeps a
-board row stable while its age changes, so never invent or shorten it.
-If the tool call fails, reply with exactly: {{"error": "<what failed>"}}"""
+#: LEDGER_TIMEOUT_S is defined beside FIXED_BUDGET_S below, clamped under it.
+#: The consulting CRM's launchd runner is `#!/bin/zsh -l` for the token reason above.
+#: Same shell, same flag, so the two jobs cannot see two different environments.
+LOGIN_SHELL = ("/bin/zsh", "-l", "-c")
+LEDGER_RELATIVE = Path("q-consult") / "email-watch" / "ledger.py"
+#: EMPTY IS HEALTHY ONLY WHEN THE LEDGER IS FRESH (PR #318 reviewer, round 2, major).
+#: `needs-reply` reads the Notion ledger live, and the hourly consulting mail sweep is
+#: what writes it. A sweep that died leaves a readable ledger that never changes, so
+#: `[]` from it would still archive rows. The sweep's own log ends every successful
+#: run with `mail-sweep: stamped ok at <UTC>` (control.py heartbeat prints it when
+#: mail-sweep.sh stamps the Run Control board, and the log captures it); the last
+#: such line is the witness, read here with no network. Older than
+#: LEDGER_FRESH_HOURS, missing, or never stamped ok: the section
+#: is COULD NOT READ and the board is kept. Three hours because the sweep is hourly:
+#: one missed run does not blank his brief, two make it say so.
+SWEEP_LOG_RELATIVE = Path("q-consult") / "output" / "mail-sweep.log"
+LEDGER_FRESH_HOURS = 3
+_SWEEP_OK = re.compile(r"^mail-sweep: stamped ok at (\S+)\s*$")
+
+
+def run_ledger(argv: list, timeout=None):
+    """(stdout, error). One bounded ledger CLI call under a login shell.
+
+    REFUSES UNDER PYTEST, the same chokepoint posture as the model seam above: a suite must
+    never read the founder's live Notion ledger by accident."""
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return None, "run_ledger refused under pytest; inject a runner"
+    timeout = LEDGER_TIMEOUT_S if timeout is None else timeout
+    command = "exec " + " ".join(shlex.quote(str(a)) for a in argv)
+    try:
+        proc = subprocess.run([*LOGIN_SHELL, command], capture_output=True, text=True,
+                              timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None, f"ledger timed out after {timeout}s"
+    except OSError as exc:
+        return None, f"ledger could not start: {type(exc).__name__}: {str(exc)[:120]}"
+    if proc.returncode != 0:
+        lines = (proc.stderr or proc.stdout or "").strip().splitlines()
+        tail = lines[-1][:140] if lines else "no output"
+        return None, f"ledger exit {proc.returncode}: {tail}"
+    return proc.stdout, None
+
+
+def ledger_script():
+    """(path, error). The consulting instance is located by consulting_board's own
+    `consulting_root()`, so this section and "Your book" can never disagree about
+    where the instance is. No sibling, no location: an error, not a guess."""
+    board = _optional_module("consulting_board")
+    if board is None:
+        return None, "consulting_board.py absent beside this script; the instance cannot be located"
+    script = Path(board.consulting_root()) / LEDGER_RELATIVE
+    if not script.is_file():
+        return None, f"consulting ledger not found at {script} (set KIPI_CONSULTING_ROOT)"
+    return script, None
+
+
+def ledger_freshness(root, now: dt.datetime):
+    """None when the mail sweep stamped ok within LEDGER_FRESH_HOURS of `now`, else
+    the error string the section prints. Reads the sweep log's tail only."""
+    log = Path(root) / SWEEP_LOG_RELATIVE
+    if not log.is_file():
+        return f"no mail-sweep log at {log}; the ledger's freshness cannot be shown"
+    stamped = None
+    for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+        m = _SWEEP_OK.match(line)
+        if m:
+            stamped = m.group(1)
+    if stamped is None:
+        return "mail-sweep has never stamped ok in its log; the ledger's freshness cannot be shown"
+    try:
+        at = dt.datetime.fromisoformat(stamped.replace("Z", "+00:00"))
+    except ValueError:
+        return f"mail-sweep stamp {stamped!r} is not a timestamp"
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=dt.timezone.utc)
+    age = now - at
+    if age > dt.timedelta(hours=LEDGER_FRESH_HOURS):
+        hours = age.total_seconds() / 3600
+        return (f"mail-sweep last stamped ok {hours:.1f}h ago ({stamped}); older than "
+                f"{LEDGER_FRESH_HOURS}h, so an empty ledger cannot be trusted to clear rows")
+    return None
+
+
+def _mail_line(entry: dict) -> str:
+    who = str(entry.get("client") or entry.get("last_from") or "unknown")[:40]
+    subject = str(entry.get("subject") or "")[:70]
+    since = str(entry.get("needs_reply_since") or "")[:10]
+    since_text = f"  [since {since}]" if since else ""
+    return f"{who}  {subject}{since_text}"
 
 
 def collect_mail(now: dt.datetime, runner=None):
-    runner = runner or (lambda p, t: run_claude(p, t))
-    text, error = runner(MAIL_PROMPT.format(tool=MAIL_TOOL, days=MAIL_WINDOW_DAYS),
-                         [MAIL_TOOL])
+    """Threads the consulting ledger says are waiting on HIM: `needs-reply --json`.
+
+    `runner(argv, timeout)` returns (stdout, error). Production runs the CLI; tests
+    inject a fake. Rows keep the `mail:<thread id>` key the board has always used, so
+    a thread that still needs him keeps its row and whatever bucket he dragged it to.
+    `now` dates the freshness check; None means the wall clock."""
+    script, error = ledger_script()
     if error:
         return [], error
-    threads, parse_error = _parse_json_block(text, "threads")
-    if parse_error:
-        return [], parse_error
+    now = now or dt.datetime.now(dt.timezone.utc)
+    error = ledger_freshness(script.parents[2], now)
+    if error:
+        return [], error
+    runner = runner or run_ledger
+    text, error = runner([sys.executable, str(script), "needs-reply", "--json"],
+                         LEDGER_TIMEOUT_S)
+    if error:
+        return [], error
+    try:
+        entries = json.loads(text or "")
+    except ValueError as exc:
+        return [], f"ledger printed something other than JSON: {str(exc)[:100]}"
+    if not isinstance(entries, list):
+        return [], "ledger JSON is not a list"
     rows = []
-    for th in threads:
-        if not isinstance(th, dict):
-            continue
-        age = th.get("age_hours")
-        age_text = f"  [{age}h]" if isinstance(age, int) else ""
-        sender = str(th.get("from", "unknown"))[:40]
-        subject = str(th.get("subject", ""))[:70]
-        # The thread id when the model returned one, else sender+subject. Both are
-        # stable while the AGE changes, which is what was minting new ids. Never the
-        # rendered line: that is the defect rounds 1-4 kept patching.
-        key = str(th.get("id") or "").strip() or f"{sender}|{subject}"
-        rows.append(Row(f"{sender}  {subject}{age_text}", f"mail:{key}"))
-
-    # A COLLAPSE IS NOT A DEDUPE. Codex, 2026-09-03: when the model omits thread ids,
-    # two different threads from one person with one subject ("Re: invoice", twice)
-    # produce one key, the board writes ONE row, and the second task is gone -- while
-    # read-back still says ok, because it compares what was written to what was
-    # wanted and both had already lost it. That is worse than the bug it replaced:
-    # rounds 1-4 lost a DRAG, this loses WORK.
-    #
-    # Nothing stable distinguishes them, so the choice is between dropping a task and
-    # keeping it under an id that may move. Keeping it wins, and it is not close: a
-    # row he never sees cannot be acted on at all, while a row whose id shifts costs
-    # him a position on the board. The suffix is ordinal and deliberately provisional.
-    # THE ORDINAL SUFFIX WAS WITHDRAWN (round 10, major). It numbered duplicates by
-    # POSITION, so when the first of two "Re: invoice" threads was answered and left
-    # the list, the second was renumbered onto the first one's key -- and inherited its
-    # board row, its Status and the bucket he had dragged it to. A thread wearing
-    # another thread's identity is worse than either failure the note above weighed.
-    #
-    # With no thread id there is nothing that tells two identical rows apart, so this
-    # stops pretending there is. The group becomes ONE row that SAYS it is a group.
-    # No task is hidden (the count is on the row), no id is invented, and the key is
-    # stable because it is the thing they have in common.
-    groups = {}
-    for row in rows:
-        groups.setdefault(row.key, []).append(row)
-    rows = []
-    for key, members in groups.items():
-        if len(members) == 1:
-            rows.append(members[0])
-            continue
-        rows.append(Row(f"{members[0]} ({len(members)} threads, same sender and "
-                        "subject)", key))
+    for entry in entries:
+        thread_id = str(entry.get("thread_id") or "").strip() if isinstance(entry, dict) else ""
+        if not thread_id:
+            return [], "a ledger row has no thread id; refusing to paint a row the board cannot key"
+        rows.append(Row(_mail_line(entry), f"mail:{thread_id}"))
     return rows, None
 
 
@@ -557,10 +612,8 @@ def _section(title, rows, error, cap=MAX_ROWS):
 # retire `notion_board`'s only input.
 SECTIONS = (
     ("calendar", "Today"),
-    # The window is INTERPOLATED, never typed. It read "(48h)" while the prompt also
-    # said 48 hours, so when the window was wrong the label agreed with it and the
-    # section looked correct. A number written twice is a number that will disagree.
-    ("mail", f"Mail needing an answer ({MAIL_WINDOW_DAYS}d)"),
+    # No window in the label: the ledger has none (ASK-1323).
+    ("mail", "Mail needing an answer"),
 )
 
 #: Collected, never rendered to him. One line each into Sana's queue, and only when the
@@ -606,10 +659,17 @@ COLLECT_BUDGET_S = 20.0
 # The fixed four are bounded too (PR #294 review, major: `fixed_budget_s=None`
 # meant one hung calendar or mail call held the 07:00 brief, its Slack send and
 # its receipt forever, and the 09:00 deadman was the first thing to notice).
-# Calendar and mail shell `claude -p` under CLAUDE_TIMEOUT, so the thread bound
-# sits one minute above it: the subprocess timeout fires first in the normal
+# Calendar shells `claude -p` under CLAUDE_TIMEOUT and mail shells the ledger under
+# LEDGER_TIMEOUT_S (clamped below it, ASK-1323), so the thread bound sits one minute
+# above the larger of the two: the subprocess timeout fires first in the normal
 # case and this is the backstop for a collector that hangs before or after it.
 FIXED_BUDGET_S = float(CLAUDE_TIMEOUT + 60)
+#: The ledger child's own bound (ASK-1323), clamped under the guard so the section's
+#: error is the ledger's own "ledger timed out after Ns" and the guard does not
+#: abandon the thread while the child runs on. Env-tunable, and the clamp is what a
+#: tuning cannot undo (claude-adversarial F3); test_morning_brief_mail.py pins it.
+LEDGER_TIMEOUT_S = min(int(os.environ.get("KIPI_BRIEF_LEDGER_TIMEOUT", "60")),
+                       int(FIXED_BUDGET_S) - 1)
 
 
 def _optional_module(stem: str):
@@ -769,9 +829,10 @@ def collect_hourly(now: dt.datetime, log_path=None, budget_s: float = COLLECT_BU
 def collect_all(now: dt.datetime, log_path=None, budget_s: float = COLLECT_BUDGET_S,
                 fixed_budget_s: float = None) -> dict:
     """`budget_s` bounds the OPTIONAL sections (the board's Notion round trip,
-    finding-4). The fixed four bound themselves: calendar and mail shell
-    `claude -p` under CLAUDE_TIMEOUT, and the first live dry-run of this code
-    (2026-09-01) showed mail alone needs more than 20s, so a shared 20s bound
+    finding-4). The fixed four bound themselves: calendar shells
+    `claude -p` under CLAUDE_TIMEOUT, mail shells the ledger under LEDGER_TIMEOUT_S
+    (ASK-1323), and the first live dry-run of this code (2026-09-01, when mail was
+    still a model call) showed it alone needs more than 20s, so a shared 20s bound
     would have cost the founder his mail every morning. `fixed_budget_s` exists
     so a test can prove the timeout path without waiting on a real collector."""
     log_path = log_path or ERROR_LOG
