@@ -311,7 +311,7 @@ ok "a single REQUEST CHANGES round exits 0 (nothing to compare against yet)"
 
 set_review "REQUEST CHANGES" "major|second unwaited write in the same file|FILE.txt:42"
 : > "$GH_LOG"
-COMMENT_BODIES="$WORK/posted-bodies.txt"; : > "$COMMENT_BODIES"
+: > "$COMMENTS_FILE"   # see the note above round 1: one fixture sha serves both rounds
 run_reviewer "$WORK/rc2.out" struct --post
 RC_R2=$?
 echo "  [ctx] structural round 2 rc=$RC_R2"
@@ -352,10 +352,12 @@ ok "the structural round still posted its commit status"
 # ===========================================================================
 set_review "REQUEST CHANGES" "major|a different defect elsewhere|OTHER.txt:3"
 : > "$GH_LOG"
+: > "$COMMENTS_FILE"
 run_reviewer "$WORK/rc3.out" disjoint --post
 RC_D1=$?
 set_review "REQUEST CHANGES" "major|another different defect|THIRD.txt:9"
 : > "$GH_LOG"
+: > "$COMMENTS_FILE"
 run_reviewer "$WORK/rc4.out" disjoint --post
 RC_D2=$?
 echo "  [ctx] disjoint rounds rc=$RC_D1 then rc=$RC_D2"
@@ -369,5 +371,106 @@ ok "two rounds on different files print no STRUCTURAL line"
   || fail "the disjoint second round exited $RC_D2, expected 0:
 $(tail -20 "$WORK/rc4.out")"
 ok "the disjoint second round exits 0"
+
+# ===========================================================================
+# CASE 7 -- the same-PR collision the numeric cap cannot see (round 1 major).
+#
+# THE DEFECT the first cut shipped: _live_review_pids skipped the scan entry
+# whose PATH equalled our own pid file. Two runs on ONE PR write that same path,
+# so the one collision that matters most was the one collision the scan was blind
+# to -- and the second run then overwrote the incumbent's pid, silently taking
+# over its slot while both read and re-checked-out the same detached worktree.
+#
+# RED-MAKING INPUT: one live pid file for THIS PR (assafkip_homerepo__pr-1) and
+# nothing else. Against the path-skipping version the run exits 0 and reviews.
+# The numeric cap cannot catch it: one incumbent is under a cap of two.
+# ===========================================================================
+: > "$COMMENTS_FILE"
+PIDDIR2="$WORK/home-samepr/.config/kipi/review-trees"; mkdir -p "$PIDDIR2"
+sleep 120 & SAME_PR_LIVE=$!
+printf '%s' "$SAME_PR_LIVE" > "$PIDDIR2/assafkip_homerepo__pr-1.pid"
+: > "$GH_LOG"
+run_reviewer "$WORK/samepr.out" samepr --post
+RC_SAMEPR=$?
+echo "  [ctx] same-PR incumbent run rc=$RC_SAMEPR (live pid $SAME_PR_LIVE)"
+
+[ "$RC_SAMEPR" = "3" ] \
+  || fail "a second review of PR #1 started while one was already live (rc=$RC_SAMEPR, expected 3). Both share one detached worktree and one pid file, so the second re-checkouts the tree under the first:
+$(tail -20 "$WORK/samepr.out")"
+ok "a live run on the SAME PR refuses a second run with exit 3, below the numeric cap"
+
+grep -q "statuses/$SHA" "$GH_LOG" \
+  && fail "the same-PR refusal still posted a commit status"
+ok "the same-PR refusal posted no commit status"
+
+# The incumbent's pid file must survive untouched. A refusal that clears the
+# file it refused on would hand the slot to the next arrival and defeat itself.
+[ "$(cat "$PIDDIR2/assafkip_homerepo__pr-1.pid" 2>/dev/null)" = "$SAME_PR_LIVE" ] \
+  || fail "the refused run overwrote or removed the incumbent's pid file; the slot was taken over by the run that was supposed to back off"
+ok "the incumbent's pid file is left exactly as it was"
+
+kill "$SAME_PR_LIVE" 2>/dev/null || true
+wait "$SAME_PR_LIVE" 2>/dev/null || true
+
+# ===========================================================================
+# CASE 8 -- an UNUSABLE review must not claim the head (round 1 major).
+#
+# THE DEFECT the first cut shipped: the head marker went into EVERY posted
+# comment. An unusable review posts state=failure and states no verdict, so that
+# head then carried a red required check AND a marker that made every later
+# automated re-review exit 3. Nothing unattended could clear it, because --force
+# is a flag a human types. The guard exists to protect an EARNED verdict; a
+# review nobody could read earned nothing.
+#
+# RED-MAKING INPUT: an engine stream with an unclosed FINDINGS block (exactly
+# what review_is_usable refuses), followed by a second run on the same head.
+# Against the first cut the second run exits 3. It must proceed.
+# ===========================================================================
+: > "$COMMENTS_FILE"
+printf 'VERDICT: APPROVE\nFINDINGS:\n' > "$ENGINE_OUT"   # never closed: unusable
+: > "$GH_LOG"
+run_reviewer "$WORK/unusable1.out" unusable --post
+RC_U1=$?
+echo "  [ctx] unusable review rc=$RC_U1"
+
+grep -q "pr comment" "$GH_LOG" \
+  || fail "the unusable review posted no comment at all, so this case cannot test what the comment carried:
+$(sed 's/^/        /' "$GH_LOG")"
+ok "precondition: the unusable review still posted its comment"
+
+grep -q -- "kipi-reviewer: head=$SHA" "$COMMENTS_FILE" \
+  && fail "an UNUSABLE review stamped the head marker. That head now carries a failing required status AND a marker that makes every automated re-review exit 3 -- a wedge no unattended run can clear:
+$(head -3 "$COMMENTS_FILE")"
+ok "an unusable review posts NO head marker"
+
+: > "$GH_LOG"
+run_reviewer "$WORK/unusable2.out" unusable2 --post
+RC_U2=$?
+echo "  [ctx] re-review after an unusable round rc=$RC_U2"
+[ "$RC_U2" != "3" ] \
+  || fail "a head whose only review was UNUSABLE refused a re-review (rc=3). Nothing unattended could ever clear that PR:
+$(tail -20 "$WORK/unusable2.out")"
+ok "a head whose only review was unusable can still be re-reviewed"
+
+# THE POSITIVE CONTROL for the same mechanism, and it is what makes case 8
+# non-vacuous: without it, "never stamp the marker" would pass this suite. A
+# USABLE review must stamp it, and the next run must then refuse.
+: > "$COMMENTS_FILE"
+set_review "APPROVE WITH NITS" "nit|trailing whitespace|FILE.txt:1"
+: > "$GH_LOG"
+run_reviewer "$WORK/roundtrip1.out" roundtrip --post
+grep -q -- "kipi-reviewer: head=$SHA" "$COMMENTS_FILE" \
+  || fail "a USABLE approving review did not stamp the head marker, so the duplicate guard is disarmed on exactly the verdicts it exists to protect:
+$(head -3 "$COMMENTS_FILE")"
+ok "a usable review DOES stamp the head marker"
+
+: > "$GH_LOG"
+run_reviewer "$WORK/roundtrip2.out" roundtrip2 --post
+RC_RT2=$?
+echo "  [ctx] re-review after a usable round rc=$RC_RT2"
+[ "$RC_RT2" = "3" ] \
+  || fail "the marker written by a real run did not make the next run refuse (rc=$RC_RT2). The writer and the reader disagree about the string:
+$(tail -20 "$WORK/roundtrip2.out")"
+ok "the marker round-trips: a real run's comment refuses the next run on that head"
 
 echo "PASS ($PASS checks) test-review-run-safety.sh"

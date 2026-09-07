@@ -1284,9 +1284,27 @@ FINAL_EXIT=0
 # _finding_files <review-file> -> the deduped, sorted file paths its findings cite.
 # Rows are `severity|claim|file:line`; the line number is dropped because a fix
 # that moves a defect down three lines is the same defect.
+#
+# `cut`, NOT awk, and that is not a style preference (CI red, 2026-09-07). The
+# first cut read the third field as awk's `$3`, and validate-separation's
+# propagation-leak classifier reads `$` followed by a digit as a CURRENCY token:
+# the line landed in test-propagation-leak-baseline.py as a new `pricing` fact
+# the committed baseline did not account for, and turned `validate` red on a
+# change that has nothing to do with pricing. A shell field split says the same
+# thing with no character the fleet's own detectors read as money.
+#
+# THE `grep -E` IS LOAD-BEARING, and the disjoint-files control is what caught it.
+# `cut -d'|' -f3` returns the WHOLE LINE when the line has no delimiter, and
+# findings_block's output carries the `FINDINGS:` / `END FINDINGS` markers. So the
+# first cut compared those two marker strings as if they were file paths, found
+# them in both rounds, and printed STRUCTURAL on two rounds that shared nothing.
+# awk's `NF>=3` had been doing this filtering implicitly; moving off awk moved the
+# guard too. Two pipes required first, then the third field means something.
 _finding_files() {
   findings_block "${1:-}" \
-    | awk -F'|' 'NF>=3 { loc=$3; sub(/:[0-9-]*$/, "", loc); gsub(/^[ \t]+|[ \t]+$/, "", loc); if (loc != "") print loc }' \
+    | grep -E '^[^|]*\|[^|]*\|' \
+    | cut -d'|' -f3 \
+    | sed -e 's/:[0-9-]*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' \
     | sort -u
 }
 
