@@ -47,6 +47,10 @@ UPDATER_HELPERS = (
     "kipi-update-gitignore-block.py",
     "kipi-update-wip-check.py",
     "kipi-update-voiceloop-migrate.py",
+    # The instance-ahead describe helper (PR #316). Arrived on main with the
+    # report and was not added here, so the divergence test below went red on
+    # every PR merged against that main: the exact trap this list documents.
+    "kipi-update-instance-ahead.py",
     "settings-template.json",
 )
 
