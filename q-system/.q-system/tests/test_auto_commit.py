@@ -716,8 +716,14 @@ def test_the_lock_dir_resolves_against_PROJ_DIR_not_the_process_cwd(tmp_path):
     whenever the two differ, no lock is ever found, and the guard FAILS OPEN into
     the exact pre-guard behaviour it was built to remove.
 
-    fleet_update_in_progress carries that scar in its own comment and has no test
-    for it either. Every other test in this file fires with cwd == PROJ_DIR, so
+    fleet_update_in_progress carries that scar in its own comment and IS pinned,
+    but in a DIFFERENT FILE this suite does not run:
+    q-system/hooks/test/test_auto_commit_run_marker.py::
+    test_live_marker_is_seen_when_cwd_is_not_the_project_dir. An earlier draft of
+    this docstring said it had no test either; that was wrong, and missing that
+    second file is also how a channel change here shipped past a green run of
+    this suite and reddened CI. Every other test in THIS file fires with
+    cwd == PROJ_DIR, so
     `os.path.abspath(git_dir)` in place of `os.path.abspath(join(PROJ_DIR, ...))`
     passed all 43 of them. This is the one that can tell them apart.
     """
