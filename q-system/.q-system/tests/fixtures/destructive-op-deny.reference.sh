@@ -489,7 +489,15 @@ if [ "$TOOL_NAME" = "Bash" ] && [ -n "$COMMAND" ]; then
   #
   # Preview stages are skipped through the SAME predicate the block above uses, so
   # the dry-run flag alone in its own tool call still passes.
-  _FLEET_SCRIPT_RE='(^|[;&|][[:space:]]*)([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*[^[:space:]]*kipi-update\.sh([[:space:]]|$)'
+  # A SUBSHELL OR A GROUP OPENS A NEW COMMAND POSITION. The exact shape that ran
+  # unchallenged on 2026-09-07 06:08Z was `cd DIR && ( ./kipi-update.sh --only X
+  # > log 2>&1 & )`: after the `&&` split the stage begins with `(`, which is
+  # neither the anchor nor a path, so every anchored layer above walked past it.
+  # Measured 2026-09-07 by driving both the live hook and this fixture with that
+  # command: ALLOW on both before this line. `([({][[:space:]]*)*` skips any run
+  # of opening parens or braces; the path still has to be the command itself, so
+  # `( cat kipi-update.sh )` stays a read.
+  _FLEET_SCRIPT_RE='(^|[;&|][[:space:]]*)([({][[:space:]]*)*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*[^[:space:]]*kipi-update\.sh([[:space:]]|$)'
   while IFS= read -r _stage; do
     [ -n "$_stage" ] || continue
     fleet_stage_is_preview "$_stage" && continue

@@ -99,6 +99,12 @@ SCRIPT_FORM_REFUSED = [
     "projects/kipi-scheduled/kipi-update.sh --only ASK_AI_consultant",
     "kipi-update.sh --only ASK_AI_consultant",
     "FOO=bar kipi-update.sh --only ASK_AI_consultant",
+    # The shape that ran unchallenged on 2026-09-07 06:08Z, verbatim minus the paths:
+    # a subshell opened after the && split, backgrounded, output redirected.
+    "cd /Users/x/projects/kipi-scheduled && ( ./kipi-update.sh --refuse-instance-ahead --only ASK_AI_consultant > /tmp/x.log 2>&1 & ); sleep 2",
+    "( ./kipi-update.sh --only X )",
+    "{ kipi-update.sh --only X; }",
+    "cd /Users/x/projects/kipi-scheduled && ( ( ./kipi-update.sh --only X ) )",
 ]
 
 # These already worked. They are here as the negative control for the pair above:
@@ -114,6 +120,7 @@ SCRIPT_FORM_ALREADY_REFUSED = [
 # spelling of the script form the layer above now matches.
 DRY_RUN_ALONE = [
     "./kipi-update.sh --dry-run",
+    "cd /Users/x/projects/kipi-scheduled && ( ./kipi-update.sh --dry-run --only X )",
     "kipi-update.sh --dry",
     "projects/kipi-scheduled/kipi-update.sh --dry-run",
     "bash /Users/x/kipi-update.sh --dry",
@@ -123,6 +130,7 @@ DRY_RUN_ALONE = [
 # first attempt blocked a `sed -n` read of this filename and had to be undone.
 READING_IS_NOT_RUNNING = [
     "cat kipi-update.sh",
+    "( cat kipi-update.sh )",
     "grep -n rsync kipi-update.sh",
     "sed -n '1,20p' kipi-update.sh",
     "wc -l projects/kipi-scheduled/kipi-update.sh",
