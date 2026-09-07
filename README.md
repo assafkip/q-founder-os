@@ -313,7 +313,9 @@ cd kipi-system && claude
 
 Setup walks you through who you are, what you work on, how you write, and who you know. Takes about 20 minutes. After that the system runs.
 
-The scheduled jobs are a separate, opt-in step. `./kipi install-jobs` installs the 15 committed launchd jobs on this machine. Without it nothing is scheduled, so no morning brief, no nightly health check, and no autonomous work queue.
+The scheduled jobs are a separate, opt-in step. `./kipi install-jobs` installs 14 launchd jobs on this machine. Without it nothing is scheduled, so no morning brief, no nightly health check, and no autonomous work queue.
+
+Fifteen jobs are committed, not fourteen. The installer globs one directory, `q-system/.q-system/scripts/`, so `automation/com.kipi.voice-refresh.plist` is outside its reach and stays uninstalled. That is a defect in the installer, tracked as `sp-0c48b66c`, not a job you were meant to skip. Until it is fixed, install that one by hand: `bash q-system/.q-system/scripts/install-plist.sh com.kipi.voice-refresh` will not find it either, so copy the plist into `~/Library/LaunchAgents` yourself or leave it off.
 
 ---
 
