@@ -100,7 +100,7 @@ A README that under-claims is a mismatch too. Everything below is real and was i
 |---|---|---|
 | 23 CLI verbs | `grep -cE '^  [a-z][a-z0-9\|_-]*\)' kipi` = 23 | Only the sync verb, and only inside a mermaid edge label at README.md:257. The other 22 appear nowhere: `rollback`, `new`, `dev`, `sync-skills`, `push`, `promote`, `review`, `converge`, `jobs`, `work`, `install-jobs`, `dor`, `alert-triage`, `health`, `judgment`, `linear`, `check`, `migrate`, `cluster`, `list`, `lessons-run`, `home` |
 | 73 MCP tools | `grep -c '@mcp.tool' plugins/kipi-core/kipi-mcp/src/kipi_mcp/server.py` = 73 | No. README.md:152 says "a local tool server" with no name and no count |
-| 22 registered slash commands | `find plugins -path '*/commands/*.md' \| wc -l` = 22 | One, and under the wrong name (`/wiring-check`; the live name is `/kipi-core:wiring-check`). The nine `/prd-os:*` and six `/kipi-dsse:*` commands, which are the whole "Architect for itself" role at README.md:287, were absent |
+| 21 registered slash commands | `find plugins/*/commands -name '*.md' \| wc -l` = 21. My first pass used `find plugins -path '*/commands/*.md'` and got 22 by counting a nested skill example; see section 7 | One, and under the wrong name (`/wiring-check`; the live name is `/kipi-core:wiring-check`). The nine `/prd-os:*` and six `/kipi-dsse:*` commands, which are the whole "Architect for itself" role at README.md:287, were absent |
 | 65 hook entries + 7 in plugin `hooks.json` | `grep -o '"command": "[^"]*"' settings-template.json \| wc -l` = 65; `grep -c '"command"' plugins/*/hooks/hooks.json` sums to 14, two per hook, so 7 | No count anywhere |
 | 6 plugins | `ls -d plugins/*/ \| wc -l` = 6 | None named. `.claude-plugin/marketplace.json` lists all six |
 | 15 launchd jobs and the verb that installs them | `find . -name '*.plist' ... \| wc -l` = 15; `kipi:120` is the `install-jobs` arm | The jobs are described at README.md:153 as a capability. The command that makes them exist was not mentioned, so a reader following Install gets none of them |
@@ -138,10 +138,10 @@ Every sentence changed above, re-checked by running the executable it now names.
 | A budget truncation does not move the verdict | `sed -n '2196,2201p'` and `sed -n '2245,2257p'` of the same file | `missing.append(cls)` is gated on `spec.get("required")`; `docs` is `required: false` at `knowledge-sources.json:28` |
 | Nine Bash denials in `settings-template.json` `permissions.deny` | `grep -n -A14 '"deny"' settings-template.json` | lines 57-65: the two recursive-remove globs, `sudo*`, `git push --force*`, `git reset --hard*`, `git rebase*`, `chmod 777*`, `curl * \| bash*`, `wget * \| bash*` |
 | The reference fixture is non-executable and no installer writes it | `find . -name 'destructive-op-deny*' -not -path '*/.git/*' -exec ls -la {} \;` then `grep -n 'HOOK=\|hook not found' plugins/kipi-core/scripts/install-capability-token.sh` | one file, `-rw-r--r--`; installer `:19` points at a path under the user's home and `:51` prints "hook not found ... left unpatched" |
-| `find plugins -path '*/commands/*.md'` lists 22 | that command, piped to `wc -l` | 22 |
+| `find plugins/*/commands -name '*.md'` lists 21 | that command, piped to `wc -l` | 21. Superseded my first figure of 22; see section 7 |
 | Nine `/prd-os:*` and six `/kipi-dsse:*` | `find plugins/prd-os/commands plugins/kipi-dsse/commands -name '*.md'` | 9 and 6 (prd-os also carries a `.gitkeep`, not counted) |
 | `com.kipi.morning-brief` fires at 07:40 | `grep -n -A3 'StartCalendarInterval' q-system/.q-system/scripts/com.kipi.morning-brief.plist` | `:56 Hour 7 Minute 40` |
-| `./kipi install-jobs` exists and 15 plists are committed | `grep -nE '^  install-jobs\)' kipi` and `find . -name '*.plist' -not -path '*/.wt-*' -not -path '*/.git/*' \| wc -l` | `kipi:120`; 15 |
+| `./kipi install-jobs` exists; 15 plists committed but only 14 installable | `grep -nE '^  install-jobs\)' kipi`, `find . -name '*.plist' -not -path '*/.wt-*' -not -path '*/.git/*' \| wc -l`, `ls q-system/.q-system/scripts/com.kipi.*.plist \| wc -l` | `kipi:120`; 15 committed; 14 reachable by the installer's glob. Full re-measure in section 7; captured as `sp-0c48b66c` |
 | 23 CLI verbs | `grep -cE '^  [a-z][a-z0-9\|_-]*\)' kipi` | 23 |
 | 73 MCP tools | `grep -c '@mcp.tool' plugins/kipi-core/kipi-mcp/src/kipi_mcp/server.py` | 73 |
 | 65 hook entries, plus 7 in the plugins | `grep -o '"command": "[^"]*"' settings-template.json \| wc -l`; `grep -c '"command"' plugins/*/hooks/hooks.json` | 65; 4+2+4+4 = 14 occurrences at two per hook = 7 |
@@ -151,7 +151,38 @@ One honest gap in the new prose: claim 19 (the destructive hook refuses the flee
 
 ---
 
-## 7. Spillover notes on README.md surfaced during this work
+## 7. PR 324 round 1: two of my own numbers were wrong
+
+The reviewer returned REQUEST CHANGES at 23:24:24Z on head `64b5b889`, and both findings are the same class this audit exists to catch: a README number the tool does not deliver. Re-measured rather than reasoned about.
+
+### Round 1 major: `./kipi install-jobs` installs 14, not 15. This is a tool defect.
+
+`kipi:120` runs `install-plist.sh --all`. `install-plist.sh:72` is `for _p in "$SCRIPT_DIR"/com.kipi.*.plist`, one directory, and `:28` uses the same glob for its label list. A committed plist outside `q-system/.q-system/scripts/` is unreachable.
+
+| Measure | Command | Result |
+|---|---|---|
+| Committed plists | `find . -name 'com.kipi.*.plist' -not -path '*/.wt-*' -not -path '*/.git/*' \| wc -l` | **15** |
+| What the installer's glob reaches | `ls q-system/.q-system/scripts/com.kipi.*.plist \| wc -l` | **14** |
+| Negative self-test: can the glob possibly see the odd one? | `ls q-system/.q-system/scripts/com.kipi.voice-refresh.plist` | `No such file or directory`. The file is at `automation/com.kipi.voice-refresh.plist`, so the answer is no, not "usually no" |
+| Does the by-hand single-label path rescue it? | `bash q-system/.q-system/scripts/install-plist.sh com.kipi.voice-refresh` | exit **2**, `ERROR: no plist template for label 'com.kipi.voice-refresh' at .../scripts/com.kipi.voice-refresh.plist`, then a 14-label list. It does not |
+| Does the gap show in production? | `launchctl list \| grep -i 'voice-refresh'` and `launchctl list \| grep -o 'com\.kipi\.[a-z-]*' \| sort \| wc -l` | `NOT LOADED`, and **14** kipi labels loaded. The one job the glob cannot reach is the one job not running |
+
+`kipi:22` advertises the verb as "Install every committed launchd job on this machine." It installs every committed job in one directory. That is the tool being wrong, not the README, so the README now states 14 and names the gap, and the defect is captured as **`sp-0c48b66c`** with the fix shape: enumerate templates from a declared list of roots or from `git ls-files`, and add a test that fails when a committed `com.kipi.*.plist` sits outside every enumerated root.
+
+### Round 1 minor: 21 registered slash commands, not 22. My grep scope was the defect.
+
+My first command was `find plugins -path '*/commands/*.md'`, which returns **22** because it walks every directory named `commands` anywhere under `plugins/`, including `plugins/kipi-core/skills/research-mode/commands/q-research.md`. That file sits inside a skill, carries no frontmatter description, and does not appear in the session's loaded command list. Section 3, claim 24 of this audit says so in its own words and then counted it anyway.
+
+| Measure | Command | Result |
+|---|---|---|
+| Scope matching the claim ("registered slash commands") | `find plugins/*/commands -name '*.md' \| wc -l` | **21**: six `kipi-core`, six `kipi-dsse`, nine `prd-os` |
+| My original, over-broad scope | `find plugins -path '*/commands/*.md' \| wc -l` | **22**, one of which is not a registered command |
+
+The claim was "registered", the command was "any file under any commands dir", and the two do not have the same scope. README corrected to 21 in both places it appeared, and the command it names is now the one that returns 21. The reverse-list row in section 4 keeps the same correction.
+
+---
+
+## 8. Spillover notes on README.md surfaced during this work
 
 The ratchet raised three open notes when README.md was first edited. Addresses, not fixes:
 

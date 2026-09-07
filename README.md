@@ -325,9 +325,9 @@ The pages above are the knowledge half. The rest of the repo:
 
 - **A CLI with 23 verbs.** `./kipi help` prints them. `check` runs the validation harness. `list` shows every copy. `health` finds dark or failing jobs, double schedules and open spillover. `work` and `converge` take a ready issue to an approved pull request. `judgment` freezes the context behind a triage decision so it can be replayed.
 - **A local MCP server with 73 tools** in `plugins/kipi-core/kipi-mcp/`: deterministic linters and scorers, morning-routine step logging, follow-up loop tracking, backup, export, import.
-- **22 namespaced slash commands** across six plugins, listed above.
+- **21 namespaced slash commands**, listed above. Three of the six plugins ship them: six in `kipi-core`, six in `kipi-dsse`, nine in `prd-os`.
 - **65 hook entries** wired in `settings-template.json`, plus seven more in the plugins' own `hooks.json`. Every copy gets the same switches, because they ship as one file.
-- **15 launchd jobs**, committed as plists next to the scripts they run.
+- **15 launchd jobs** committed as plists: 14 in `q-system/.q-system/scripts/` and one in `automation/`. `./kipi install-jobs` reaches the 14, for the reason given under Install.
 
 ---
 
@@ -347,7 +347,7 @@ Two kinds, and the difference matters when you type one. The `/q-*` names are **
 | `/q-wrap` | End-of-day health check |
 | `/q-handoff` | Save context for next session |
 
-The **registered** slash commands ship inside the plugins and are namespaced. `find plugins -path '*/commands/*.md'` lists all 22.
+The **registered** slash commands ship inside the plugins and are namespaced. `find plugins/*/commands -name '*.md'` lists all 21, across three of the six plugins.
 
 | Command | What it does |
 |---|---|
