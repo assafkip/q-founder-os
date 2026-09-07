@@ -653,7 +653,10 @@ def request_is_current(transcript_path):
     check, refusing every such reply until he typed again. Measured there: 579
     of 837 user text records in 60 session logs are machine turns answered by
     the assistant. A non-draft reply to machine text is not a completion of his
-    request, so the short path asks this first.
+    request, so the short path asks this first, together with
+    `reply_carries_a_draft`: a DRAFT after machine text (a bare fence written
+    after the gate's own feedback, round 4 of the same review) is still a
+    completion of his routed request and keeps its receipt check.
 
     Shape rules, from the records the harness writes: a tool result carries no
     text and is neither his nor a trigger; a flagged record right after his own
@@ -680,6 +683,15 @@ def request_is_current(transcript_path):
         current = bool(founder_typed_text(text))
         assistant_spoke = False
     return current
+
+
+def reply_carries_a_draft(text):
+    """True when the assistant's reply contains draft-shaped content: a set-off
+    prose fence or blockquote, a `=== DRAFT ===` section, or a route receipt.
+    Such a reply is a completion of a routed request whatever triggered it, so
+    the receipt check applies; plain prose is not."""
+    return ("=== ROUTE RECEIPT ===" in text or "=== DRAFT ===" in text
+            or bool(extract_setoff_draft(text)))
 
 
 # A MISSING CHECK IS NOT A PASS. This returned (0, "") when its script was
@@ -1019,12 +1031,14 @@ def main():
         # that never reached the scorer. The lint's scope is unchanged; the
         # measurement no longer rides on it.
         #
-        # Only when HE just asked. A non-draft reply to machine text (a
-        # notification, a peer message, a hook's feedback) is an answer to the
-        # machine, not a completion of his routed request; see
-        # `request_is_current`. The framed-draft path below keeps its check
-        # whatever triggered it: a draft of a routed request needs its receipt.
-        if request_is_current(transcript_path):
+        # When HE just asked, or when the reply IS a draft. A prose reply to
+        # machine text (a notification, a peer message, a hook's feedback) is
+        # an answer to the machine, not a completion of his routed request; a
+        # draft after machine text still is one (a bare fence written after the
+        # gate's own feedback would otherwise complete with no receipt). See
+        # `request_is_current` and `reply_carries_a_draft`. The framed-draft
+        # path below keeps its check whatever triggered it, for the same reason.
+        if request_is_current(transcript_path) or reply_carries_a_draft(text):
             try:
                 enforce_route_receipt(request, text)
             except RouteBoundaryError as exc:

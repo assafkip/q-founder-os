@@ -436,6 +436,35 @@ def test_request_is_current_reads_who_spoke_last(transcript, records, expected):
     assert vsg.request_is_current(transcript(records)) is expected
 
 
+@pytest.mark.parametrize("text, expected", [
+    ("Noted, three files landed.", False),
+    ("```\n" + DRAFT + "\n```", True),
+    ("> " + DRAFT, True),
+    ("=== DRAFT ===\n" + DRAFT, True),
+    ('=== ROUTE RECEIPT ===\n{"surface": "x"}\n=== DRAFT ===\n' + DRAFT, True),
+], ids=["prose", "bare-fence", "blockquote", "draft-section", "receipt-block"])
+def test_reply_carries_a_draft_reads_the_shape_not_the_trigger(text, expected):
+    assert vsg.reply_carries_a_draft(text) is expected
+
+
+def test_main_holds_a_bare_fenced_draft_after_the_gates_own_feedback(lane_root, transcript, monkeypatch):
+    """Round 4's major: the gate refused a draft (exit 2, its feedback lands as
+    an isMeta user record), the assistant answered that MACHINE record with the
+    same routed draft in a bare fence and no framing, and a who-spoke-last rule
+    alone let it complete with no receipt consumed."""
+    _fake_lane(lane_root, owner=True, route_on="linkedin post")
+    fenced = "```\n" + DRAFT + "\n```"
+    records = [
+        _record(REQUEST),
+        _record(fenced, role="assistant"),
+        _record("Stop hook feedback:\nvoice-stop-gate: routed completion has no route receipt",
+                isMeta=True),
+        _record(fenced, role="assistant"),
+    ]
+    code, err = _run_main(monkeypatch, transcript(records), fenced)
+    assert code == 2 and "has no route receipt" in err
+
+
 def test_main_does_not_rerun_his_old_request_on_a_machine_turn(lane_root, transcript, monkeypatch):
     """The reviewer's five-turn reproducer, driven through main() on one growing
     transcript with a lane that routes on the words of the request. Before the
