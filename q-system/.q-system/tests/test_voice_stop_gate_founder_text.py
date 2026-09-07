@@ -17,10 +17,18 @@ Round 2 (PR #313 review): the slash-command and hook-opener cases use record
 text lifted verbatim from this fleet's own session logs (a `/goal` turn with his
 words in `<command-args>`, a plugin command with `<command-message>` first), and
 the receipt cases run against a fake `route_contract` that hashes with the
-producer's exact envelope, so each of the five verification branches in
-`enforce_route_receipt` is killed by at least one case (mutation-checked).
+producer's exact envelope.
+
+Round 3: a lane that RAISES (not ImportError) holds the turn instead of exiting
+the hook with 1, the audit-only refusal is reached through a fake route that
+matches, and `main()` itself is driven on both paths (short draft, linted
+draft) so deleting either `enforce_route_receipt` call site goes red. The
+mutation harness beside this file (scratchpad, not shipped) replaces each of
+the five receipt checks, the two audit-only branches, the exception guard and
+each call site with a no-op; every mutant fails at least one case here.
 """
 import importlib.util
+import io
 import json
 import pathlib
 import textwrap
@@ -257,7 +265,15 @@ def verify_and_consume(identity, *, draft=None, **_):
 '''
 
 
-def _fake_lane(root, broken=False, status="NOT_ROUTED", owner=False):
+def _fake_lane(root, broken=False, status="NOT_ROUTED", owner=False,
+               raises=False, audit_surface=None):
+    """A q-consult/pipeline package with the four modules the gate imports.
+
+    `raises`: classify() raises RuntimeError, the shape of a lane whose store
+    or classifier is broken at call time rather than at import time.
+    `audit_surface`: audit_only_routes.routes() lists one audit-only route on
+    that surface (channel "linkedin"), and deny() refuses it by name.
+    """
     pkg = root / "q-consult" / "pipeline"
     pkg.mkdir(parents=True)
     (pkg / "__init__.py").write_text("")
@@ -272,14 +288,22 @@ def _fake_lane(root, broken=False, status="NOT_ROUTED", owner=False):
         ROUTE = "ROUTE"
         Result = collections.namedtuple("Result", "status surface channel reason")
         def classify(request):
+            if {raises!r}:
+                raise RuntimeError("classifier store is unreadable")
             return Result({status!r}, "linkedin_post", "linkedin", "fixture")
     """))
     (pkg / "route_contract.py").write_text(FAKE_CONTRACT)
-    (pkg / "audit_only_routes.py").write_text(textwrap.dedent("""
+    (pkg / "audit_only_routes.py").write_text(textwrap.dedent(f"""
+        import collections
+        Route = collections.namedtuple("Route", "surface channel route_id")
         class AuditOnlyRouteError(Exception):
             pass
         def routes():
-            return []
+            surface = {audit_surface!r}
+            return [Route(surface, "linkedin", "audit-1")] if surface else []
+        def deny(route):
+            raise AuditOnlyRouteError(
+                f"{{route.surface}} is audit-only; file the follow-up issue instead")
     """))
     (pkg / "route_registry.py").write_text(textwrap.dedent(f"""
         class RouteRegistryError(Exception):
@@ -329,6 +353,67 @@ def test_a_routed_request_with_no_owner_is_refused(lane_root):
     _fake_lane(lane_root, status="ROUTE")
     with pytest.raises(vsg.RouteBoundaryError, match="no single registered active owner"):
         vsg.enforce_route_receipt("write me a linkedin post", "a draft")
+
+
+def test_a_lane_that_raises_at_call_time_holds_the_turn(lane_root):
+    """Not an ImportError: the lane imports and then its classifier raises. An
+    uncaught exception exits the Stop hook with 1, which does not block, so the
+    routed turn would complete with no receipt consumed."""
+    _fake_lane(lane_root, status="ROUTE", raises=True)
+    with pytest.raises(vsg.RouteBoundaryError, match="raised RuntimeError"):
+        vsg.enforce_route_receipt("write me a linkedin post", "a draft")
+
+
+def test_an_audit_only_surface_is_refused_by_name(lane_root):
+    """No owner in the registry AND exactly one audit-only route on the
+    requested surface: the refusal names the audit-only rule, not the owner."""
+    _fake_lane(lane_root, status="ROUTE", audit_surface="linkedin_post")
+    with pytest.raises(vsg.RouteBoundaryError, match="is audit-only"):
+        vsg.enforce_route_receipt("write me a linkedin post", "a draft")
+
+
+def test_an_audit_only_route_on_another_surface_does_not_apply(lane_root):
+    _fake_lane(lane_root, status="ROUTE", audit_surface="reddit_post")
+    with pytest.raises(vsg.RouteBoundaryError, match="no single registered active owner"):
+        vsg.enforce_route_receipt("write me a linkedin post", "a draft")
+
+
+# --- the wiring: main() reaches the receipt check on both of its paths -----
+
+def _run_main(monkeypatch, transcript, assistant_text):
+    monkeypatch.setattr("sys.argv", ["voice-stop-gate.py"])
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"transcript_path": transcript})))
+    err = io.StringIO()
+    monkeypatch.setattr("sys.stderr", err)
+    with pytest.raises(SystemExit) as exit_info:
+        vsg.main()
+    return exit_info.value.code, err.getvalue()
+
+
+def test_main_holds_a_short_routed_reply_with_no_receipt(lane_root, transcript, monkeypatch):
+    """The first call site: the founder's most common turn shape is a post in a
+    fence with no framing sentence, which the lint declines to grade and which
+    used to return before any check. Deleting this call leaves every unit test
+    above green; only driving main() sees it."""
+    _fake_lane(lane_root, status="ROUTE", owner=True)
+    path = transcript([_record(REQUEST), _record("short reply", role="assistant")])
+    code, err = _run_main(monkeypatch, path, "short reply")
+    assert code == 2
+    assert "has no route receipt" in err
+
+
+def test_main_holds_a_linted_routed_draft_with_no_receipt(lane_root, transcript, monkeypatch):
+    """The second call site, after the voice lints. The lints are stubbed to
+    pass (run_check returns 0) and the draft is long enough to be graded, so
+    the only thing that can hold the turn is the receipt check."""
+    _fake_lane(lane_root, status="ROUTE", owner=True)
+    long_draft = "A graded draft. " * 12
+    monkeypatch.setattr(vsg, "extract_publishable", lambda text: long_draft)
+    monkeypatch.setattr(vsg, "run_check", lambda *args, **kwargs: (0, ""))
+    path = transcript([_record(REQUEST), _record(long_draft, role="assistant")])
+    code, err = _run_main(monkeypatch, path, long_draft)
+    assert code == 2
+    assert "has no route receipt" in err
 
 
 def test_a_receipt_block_must_be_json():

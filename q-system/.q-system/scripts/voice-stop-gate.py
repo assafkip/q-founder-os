@@ -110,10 +110,28 @@ def enforce_route_receipt(request, assistant_text):
 
     None when this instance has no route lane, or the request is not routed.
     Raises RouteBoundaryError to hold the turn.
+
+    ANY other exception out of the lane is also a hold. The lane is a verifier
+    (classifier, registry, receipt store), and a verifier that raises has not
+    verified: an uncaught error here exits the Stop hook with 1, which Claude
+    Code treats as a non-blocking failure, so the routed turn completed with
+    no receipt consumed (PR #313 review, round 2). Only the two callers in
+    main() catch RouteBoundaryError, so the conversion happens here, once.
     """
     context = _route_context()
     if context is None:
         return None
+    try:
+        return _verify_route_receipt(context, request, assistant_text)
+    except RouteBoundaryError:
+        raise
+    except Exception as exc:
+        raise RouteBoundaryError(
+            f"route lane raised {type(exc).__name__} instead of verifying: {exc}"
+        ) from exc
+
+
+def _verify_route_receipt(context, request, assistant_text):
     classifier, contract, audit_only, registry = context
     result = classifier.classify(request)
     if result.status == classifier.NOT_ROUTED:
