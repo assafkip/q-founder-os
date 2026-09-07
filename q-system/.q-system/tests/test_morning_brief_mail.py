@@ -19,6 +19,7 @@ refusal, so no test here can read the founder's real Notion ledger by accident.
 """
 from __future__ import annotations
 
+import datetime as dt
 import importlib.util
 import json
 import os
@@ -63,6 +64,11 @@ def instance(tmp_path, monkeypatch, brief):
     ledger = tmp_path / "q-consult" / "email-watch" / "ledger.py"
     ledger.parent.mkdir(parents=True)
     ledger.write_text("# stand-in; the runner is injected\n", encoding="utf-8")
+    log = tmp_path / "q-consult" / "output" / "mail-sweep.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("mail-sweep: stamped ok at "
+                   + dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                   + "\n", encoding="utf-8")
     original = brief._optional_module
 
     def swapped(stem):
@@ -143,6 +149,60 @@ def test_every_unreadable_shape_keeps_the_board(brief, instance, stdout, error, 
     rows, err = brief.collect_mail(None, runner=_runner(stdout, error))
     assert rows == []
     assert err and expect in err
+
+
+def _stamp(instance, when: str) -> None:
+    (instance / "q-consult" / "output" / "mail-sweep.log").write_text(
+        "=== 2026-09-07T01:25:01Z mail-sweep ===\nfiled 0\n"
+        f"mail-sweep: stamped ok at {when}\nmail-sweep: done\n", encoding="utf-8")
+
+
+NOW = dt.datetime(2026, 9, 7, 14, 0, tzinfo=dt.timezone.utc)
+
+
+def test_a_fresh_sweep_stamp_lets_an_empty_answer_be_healthy(brief, instance):
+    _stamp(instance, "2026-09-07T13:31:10Z")
+    rows, error = brief.collect_mail(NOW, runner=_runner("[]"))
+    assert (rows, error) == ([], None)
+
+
+def test_a_stale_sweep_stamp_keeps_the_board_and_never_runs_the_ledger(brief, instance):
+    """PR #318 reviewer, round 2: a sweep that died leaves a readable ledger that never
+    changes, and an empty answer from it would archive rows. Three hours is the line."""
+    _stamp(instance, "2026-09-07T10:31:10Z")
+    run = _runner("[]")
+    rows, error = brief.collect_mail(NOW, runner=run)
+    assert rows == []
+    assert "3.5h ago" in error and "older than 3h" in error
+    assert run.calls == [], "a stale ledger is not even asked"
+
+
+def test_the_last_stamp_counts_and_a_failed_run_after_it_does_not_refresh(brief, instance):
+    (instance / "q-consult" / "output" / "mail-sweep.log").write_text(
+        "mail-sweep: stamped ok at 2026-09-07T09:31:10Z\n"
+        "=== 2026-09-07T13:25:01Z mail-sweep ===\nmail-sweep: stamped failed at 2026-09-07T13:26:00Z\n",
+        encoding="utf-8")
+    rows, error = brief.collect_mail(NOW, runner=_runner("[]"))
+    assert rows == [] and "older than 3h" in error
+
+
+@pytest.mark.parametrize("log_text, expect", [
+    (None, "no mail-sweep log"),
+    ("=== 2026-09-07T13:25:01Z mail-sweep ===\nmail-sweep: done\n", "never stamped ok"),
+    ("mail-sweep: stamped ok at yesterday\n", "not a timestamp"),
+])
+def test_no_witness_is_an_error_not_a_quiet_empty(brief, instance, log_text, expect):
+    log = instance / "q-consult" / "output" / "mail-sweep.log"
+    if log_text is None:
+        log.unlink()
+    else:
+        log.write_text(log_text, encoding="utf-8")
+    rows, error = brief.collect_mail(NOW, runner=_runner("[]"))
+    assert rows == [] and expect in error
+
+
+def test_the_freshness_window_matches_an_hourly_sweep(brief):
+    assert brief.LEDGER_FRESH_HOURS == 3
 
 
 def test_one_bad_row_fails_the_whole_read(brief, instance):

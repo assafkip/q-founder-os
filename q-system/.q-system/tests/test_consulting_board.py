@@ -527,6 +527,11 @@ def _ledger_brief(tmp_path):
     ledger = tmp_path / "q-consult" / "email-watch" / "ledger.py"
     ledger.parent.mkdir(parents=True, exist_ok=True)
     ledger.write_text("# stand-in\n", encoding="utf-8")
+    log = tmp_path / "q-consult" / "output" / "mail-sweep.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("mail-sweep: stamped ok at "
+                   + dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                   + "\n", encoding="utf-8")
     mod = _brief()
     original = mod._optional_module
     mod._optional_module = (lambda stem: _FakeBoard(tmp_path)

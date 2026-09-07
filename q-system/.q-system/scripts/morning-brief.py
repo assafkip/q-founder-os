@@ -253,6 +253,19 @@ class Row(str):
 #: Same shell, same flag, so the two jobs cannot see two different environments.
 LOGIN_SHELL = ("/bin/zsh", "-l", "-c")
 LEDGER_RELATIVE = Path("q-consult") / "email-watch" / "ledger.py"
+#: EMPTY IS HEALTHY ONLY WHEN THE LEDGER IS FRESH (PR #318 reviewer, round 2, major).
+#: `needs-reply` reads the Notion ledger live, and the hourly consulting mail sweep is
+#: what writes it. A sweep that died leaves a readable ledger that never changes, so
+#: `[]` from it would still archive rows. The sweep's own log ends every successful
+#: run with `mail-sweep: stamped ok at <UTC>` (control.py heartbeat prints it when
+#: mail-sweep.sh stamps the Run Control board, and the log captures it); the last
+#: such line is the witness, read here with no network. Older than
+#: LEDGER_FRESH_HOURS, missing, or never stamped ok: the section
+#: is COULD NOT READ and the board is kept. Three hours because the sweep is hourly:
+#: one missed run does not blank his brief, two make it say so.
+SWEEP_LOG_RELATIVE = Path("q-consult") / "output" / "mail-sweep.log"
+LEDGER_FRESH_HOURS = 3
+_SWEEP_OK = re.compile(r"^mail-sweep: stamped ok at (\S+)\s*$")
 
 
 def run_ledger(argv: list, timeout=None):
@@ -291,6 +304,33 @@ def ledger_script():
     return script, None
 
 
+def ledger_freshness(root, now: dt.datetime):
+    """None when the mail sweep stamped ok within LEDGER_FRESH_HOURS of `now`, else
+    the error string the section prints. Reads the sweep log's tail only."""
+    log = Path(root) / SWEEP_LOG_RELATIVE
+    if not log.is_file():
+        return f"no mail-sweep log at {log}; the ledger's freshness cannot be shown"
+    stamped = None
+    for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+        m = _SWEEP_OK.match(line)
+        if m:
+            stamped = m.group(1)
+    if stamped is None:
+        return "mail-sweep has never stamped ok in its log; the ledger's freshness cannot be shown"
+    try:
+        at = dt.datetime.fromisoformat(stamped.replace("Z", "+00:00"))
+    except ValueError:
+        return f"mail-sweep stamp {stamped!r} is not a timestamp"
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=dt.timezone.utc)
+    age = now - at
+    if age > dt.timedelta(hours=LEDGER_FRESH_HOURS):
+        hours = age.total_seconds() / 3600
+        return (f"mail-sweep last stamped ok {hours:.1f}h ago ({stamped}); older than "
+                f"{LEDGER_FRESH_HOURS}h, so an empty ledger cannot be trusted to clear rows")
+    return None
+
+
 def _mail_line(entry: dict) -> str:
     who = str(entry.get("client") or entry.get("last_from") or "unknown")[:40]
     subject = str(entry.get("subject") or "")[:70]
@@ -305,8 +345,12 @@ def collect_mail(now: dt.datetime, runner=None):
     `runner(argv, timeout)` returns (stdout, error). Production runs the CLI; tests
     inject a fake. Rows keep the `mail:<thread id>` key the board has always used, so
     a thread that still needs him keeps its row and whatever bucket he dragged it to.
-    `now` is unused and kept so every fixed collector has one signature."""
+    `now` dates the freshness check; None means the wall clock."""
     script, error = ledger_script()
+    if error:
+        return [], error
+    now = now or dt.datetime.now(dt.timezone.utc)
+    error = ledger_freshness(script.parents[2], now)
     if error:
         return [], error
     runner = runner or run_ledger
