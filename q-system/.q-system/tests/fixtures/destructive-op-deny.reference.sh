@@ -455,6 +455,163 @@ if [ "$TOOL_NAME" = "Bash" ] && [ -n "$COMMAND" ]; then
       done
       ;;
   esac
+
+  # ==================================================================== sp-37c08fb1
+  # THE FLEET UPDATER AS A SCRIPT FILE, WITH ANY PATH PREFIX OR NONE.
+  #
+  # FLEET_DENY entry 3 is `[./~][^[:space:]]*kipi-update\.sh`: it requires the path
+  # to START with a dot, a slash or a tilde. Measured 2026-09-07 by DRIVING this
+  # hook, not by reading it -- the ledger item said the CLI phrase was the only
+  # fleet pattern and that was already stale, PR #269 had closed two of the four
+  # shapes. Re-measuring is what found the two that were left:
+  #
+  #   cd DIR && ./kipi-update.sh --only X       DENY   (entry 3)
+  #   bash /abs/path/kipi-update.sh             DENY   (entry 2)
+  #   /abs/path/kipi-update.sh                  DENY   (entry 3)
+  #   projects/kipi-scheduled/kipi-update.sh    ALLOW  <- unmatched, real fleet sync
+  #   kipi-update.sh --only X                   ALLOW  <- unmatched
+  #   FOO=bar kipi-update.sh --only X           ALLOW  <- unmatched
+  #
+  # APPENDED RATHER THAN MERGED INTO ENTRY 3, for two independent reasons. The only
+  # write path an agent has into ~/.claude is apply-claude-changes, whose `replace`
+  # op is pinned to rule TEXT, so an in-place predicate edit cannot reach the live
+  # hook at all -- it would land in the repo and never install. And
+  # test_destructive_op_deny_anchor.py asserts FLEET_DENY holds exactly four
+  # entries, three of them anchored; a fifth entry turns a passing guard test red
+  # for a reason that has nothing to do with the guard.
+  #
+  # STILL ANCHORED AT COMMAND POSITION. The comment above FLEET_DENY records that an
+  # unanchored first attempt blocked a `sed -n` read of this same filename, and
+  # reading a file is not running it. `cat kipi-update.sh` stays allowed.
+  #
+  # kipi-update-instance-ahead.py is read-only and ends in .py, so a basename match
+  # on kipi-update.sh cannot reach it in any of its three call shapes.
+  #
+  # Preview stages are skipped through the SAME predicate the block above uses, so
+  # the dry-run flag alone in its own tool call still passes.
+  _FLEET_SCRIPT_RE='(^|[;&|][[:space:]]*)([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*[^[:space:]]*kipi-update\.sh([[:space:]]|$)'
+  while IFS= read -r _stage; do
+    [ -n "$_stage" ] || continue
+    fleet_stage_is_preview "$_stage" && continue
+    # ";" prepended for the same reason as the block above: a stage whose boundary
+    # was consumed by the split matches neither `^` nor `[;&|]` without it.
+    if echo ";$_stage" | grep -Eq "$_FLEET_SCRIPT_RE"; then
+      emit_deny "fleet-wide delete: this stage runs kipi-update.sh directly. Matching the CLI phrase alone missed the script form with a bare or non-dot-prefixed path, which is how a real sync ran unchallenged on 2026-09-07 (sp-37c08fb1). Preview it first with --dry-run IN ITS OWN TOOL CALL and read what will be REMOVED, not only what changes."
+    fi
+  done < <(printf '%s\n' "$COMMAND" | tr ';|&' '\n\n\n')
+
+  # ==================================================================== sp-dc76e644
+  # A WRAPPER SCRIPT IS A DESTRUCTIVE OP WEARING A FILENAME.
+  #
+  # THE SCAR, measured 2026-09-06 14:55 PDT. ~/.config/kipi/consulting-sync-run.sh
+  # set the founder bypass INSIDE ITS OWN TEXT. So the Bash command string this hook
+  # sees was `bash ~/.config/kipi/consulting-sync-run.sh --verify-only`, which
+  # carries no destructive pattern of any kind, every layer above it passed, and a
+  # real fleet sync ran on consulting and reverted a deliberate instance commit four
+  # minutes after it landed. The bypass is supposed to require conscious action in
+  # the founder's own shell; a script that assigns it hands that action to whoever
+  # types the script's name.
+  #
+  # So the target of a script invocation is READ, bounded, before it runs.
+  #
+  # TWO RULES, NOT ONE, and the split is the whole design:
+  #
+  #   a bypass ASSIGNMENT denies unconditionally. A --dry-run on the wrapper says
+  #   nothing about whether the wrapper arms the bypass for what it calls.
+  #
+  #   a FLEET_DENY pattern in the body follows the same preview exemption as a
+  #   direct match, so `bash kipi-update.sh --dry` keeps passing.
+  #
+  # COMMENT LINES ARE DROPPED FIRST, and that is not the prose-versus-invocation
+  # distinction this file refused in 2026-08-07. That refusal was about the COMMAND
+  # STRING, where `bash <<'EOF'` executes its own body and any parser deciding "this
+  # is only prose" becomes a bypass surface. Here the subject is a FILE, `#` is the
+  # shell's own comment marker, and a commented line cannot execute. Measured over
+  # the 212 tracked .sh files in this repo: without the drop the fleet rule refuses
+  # 16 ordinary scripts and the bypass rule refuses this hook's own deny message;
+  # with it the fleet rule refuses 6, and all 6 genuinely invoke the fleet updater
+  # (they are its own test suite). A gate red on 8% of its population gets switched
+  # off, and a gate that is off protects nothing.
+  #
+  # ACCEPTED COST, stated rather than discovered later: those 6 updater tests now
+  # need `kipi-approve` to be run through the Bash tool. That is the fail-closed
+  # side, and the out-of-band approval already exists for exactly this.
+  #
+  # `bash -n FILE` is a SYNTAX CHECK, not a run, so it is skipped -- same reason the
+  # patterns above are anchored at command position. Blocking a read gets the gate
+  # switched off.
+  _BYPASS_ASSIGN_RE='(^|[^A-Za-z0-9_])(export[[:space:]]+)?ALLOW_DESTRUCTIVE[[:space:]]*='
+
+  # Echoes the path of the script a stage RUNS, rc 0. rc 1 means "this stage runs no
+  # readable script file", which is the overwhelmingly common case and must be cheap.
+  _fleet_script_target() {
+    local stage="$1"
+    set -f
+    local -a w=( "" $stage )
+    set +f
+    w=( "${w[@]:1}" )
+    [ "${#w[@]}" -gt 0 ] || return 1
+    # Same transparent-prefix list as argv_deny_reason above. Not shared with it
+    # because that function answers a different question and returning two values
+    # from one bash function is worse than repeating six words.
+    while [ "${#w[@]}" -gt 0 ]; do
+      case "${w[0]}" in
+        *=*)                             w=( "" "${w[@]:1}" ); w=( "${w[@]:1}" ) ;;
+        sudo|command|nohup|nice|time|env) w=( "" "${w[@]:1}" ); w=( "${w[@]:1}" ) ;;
+        *) break ;;
+      esac
+    done
+    [ "${#w[@]}" -gt 0 ] || return 1
+    local prog="${w[0]##*/}" cand="" tok
+    case "$prog" in
+      bash|sh|zsh|ksh|dash|source|.)
+        # Seeded with "" for the bash 3.2 set -u reason documented above.
+        local -a r=( "" "${w[@]:1}" )
+        for tok in "${r[@]}"; do
+          [ -n "$tok" ] || continue
+          case "$tok" in
+            -*n*)
+              case "$tok" in
+                --*) continue ;;   # --norc contains an n and is not noexec
+                *) return 1 ;;     # -n really is "read, do not execute"
+              esac ;;
+            -*) continue ;;
+          esac
+          cand="$tok"; break
+        done ;;
+      *.sh) cand="${w[0]}" ;;
+    esac
+    [ -n "$cand" ] || return 1
+    case "$cand" in
+      "~") return 1 ;;
+      "~"/*) cand="$HOME/${cand#\~/}" ;;
+    esac
+    case "$cand" in
+      /*) : ;;
+      *) [ -n "$CWD" ] && cand="$CWD/$cand" ;;
+    esac
+    [ -f "$cand" ] && [ -r "$cand" ] || return 1
+    printf '%s' "$cand"
+    return 0
+  }
+
+  while IFS= read -r _stage; do
+    [ -n "$_stage" ] || continue
+    _target="$(_fleet_script_target "$_stage")" || continue
+    # Bounded on purpose: the updater itself is 145 KB and this runs on every Bash
+    # tool call. 64 KB is far past where a wrapper declares its environment.
+    _body="$(head -c 65536 "$_target" 2>/dev/null | grep -v '^[[:space:]]*#')"
+    [ -n "$_body" ] || continue
+    if printf '%s\n' "$_body" | grep -Eq "$_BYPASS_ASSIGN_RE"; then
+      emit_deny "wrapper script arms the founder bypass in its own text: $_target. The bypass exists to require conscious action in the founder's own shell, and an agent cannot set it for itself; a script that assigns it hands that action to whoever types the script's name. On 2026-09-06 exactly this ran a real fleet sync on consulting and reverted a deliberate commit (sp-dc76e644). Fix the script to REFUSE unless the bypass comes from the calling shell."
+    fi
+    fleet_stage_is_preview "$_stage" && continue
+    for pat in "${FLEET_DENY[@]}"; do
+      if printf '%s\n' "$_body" | grep -Eq "$pat"; then
+        emit_deny "wrapper script runs the fleet updater: $_target matches $pat in its own text, so this command rsyncs the skeleton into EVERY registered instance with a delete flag while the command line itself looks harmless (sp-dc76e644). Preview it first with --dry-run IN ITS OWN TOOL CALL and read what will be REMOVED, not only what changes."
+      fi
+    done
+  done < <(printf '%s\n' "$COMMAND" | tr ';|&' '\n\n\n')
 fi
 
 # ---- MCP destructive tool denials ----
