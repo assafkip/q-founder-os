@@ -1222,7 +1222,13 @@ SH
 # lock (add, commit) first waits for the lock to be absent, bounded, and a
 # commit that still dies on that exact error is retried a bounded number of
 # times. Any other failure is returned unchanged on the first attempt.
-LOCK_WAIT_S="${KIPI_UPDATE_LOCK_WAIT_S:-120}"
+# The default has to outlast the LONGEST known instance hold, not a typical
+# one. On the same 2026-09-06 run the consulting instance's own Stop-hook
+# auto-commit held the index lock through its 445 s pre-commit verify. A 120 s
+# bound refuses that instance and leaves its tree half-delivered for manual
+# repair, which is the failure this whole change exists to remove. 600 s
+# clears 445 s with room. The tests set their own bound through the env var.
+LOCK_WAIT_S="${KIPI_UPDATE_LOCK_WAIT_S:-600}"
 LOCK_RETRY_MAX=3
 
 index_lock_path() {

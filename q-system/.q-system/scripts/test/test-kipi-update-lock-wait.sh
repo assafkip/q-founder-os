@@ -113,8 +113,17 @@ assert_a_live_lock_is_waited_out_and_the_sync_lands() {
     fail "the sync did not land after the lock cleared: $(tail -n 20 "$work/out")"
   # The q-system commit is followed by the config+plugins commit in this
   # fixture, so the sync commit is in the log, not necessarily at HEAD.
-  G -C "$inst" log --format=%s | grep -q "sync q-system from skeleton" || \
-    fail "the q-system sync commit is not in the instance history: $(G -C "$inst" log --format=%s)"
+  #
+  # Read the log into a variable and match the VARIABLE, never `git log |
+  # grep -q`. Under this file's `set -euo pipefail`, grep -q exits on the
+  # first match and closes its stdin, git log dies of SIGPIPE, and pipefail
+  # makes the whole pipeline non-zero although the match happened. Measured
+  # at about 1 failure in 11 runs (PR #314 review round 4).
+  local subjects; subjects="$(G -C "$inst" log --format=%s)"
+  case "$subjects" in
+    *"sync q-system from skeleton"*) ;;
+    *) fail "the q-system sync commit is not in the instance history: $subjects" ;;
+  esac
   [ ! -f "$inst/.git/kipi-update.run" ] || fail "the run marker survived a successful run"
   [ ! -f "$inst/.git/index.lock" ] || fail "index.lock survived the run"
   echo "PASS: a live index.lock is waited out, the step is named, and the sync lands"
