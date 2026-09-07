@@ -4,6 +4,7 @@
 Runs on Stop (async). Creates one commit per area with conventional commit messages.
 Never pushes. Skips if no uncommitted changes.
 """
+import calendar
 import hashlib
 import json
 import subprocess
@@ -398,10 +399,77 @@ def commit_group(commit_type, message, files):
         print(f"  skipped: {header} - {r.stderr.strip()[:80]}")
 
 
+# One instance apply runs minutes, never hours; a marker older than this is a
+# crashed run whatever its pid says (pids get recycled).
+RUN_MARKER_MAX_AGE_S = int(os.environ.get("KIPI_UPDATE_RUN_MARKER_MAX_AGE_S", "7200"))
+
+
+def fleet_update_in_progress():
+    """The fleet updater's run marker, or None when no live run owns this checkout.
+
+    kipi-update.sh writes <git-common-dir>/kipi-update.run ("<pid> <start>") for
+    the duration of one instance apply. This hook fires at every turn end of
+    every session sitting in the checkout, so on 2026-09-06 it committed the
+    updater's half-delivered rules, settings and plugins under its own generic
+    messages while the sync was still running, and its pre-commit held
+    index.lock for the whole verify (sp-9306036e). A live marker means the
+    updater owns the index right now: commit nothing. A marker whose pid is
+    dead is a crashed run's leftover: remove it and proceed, so a crash cannot
+    silence this safety net forever. The common dir, not the worktree git dir,
+    so a linked worktree of the same checkout reads the same marker.
+    """
+    r = run(["git", "rev-parse", "--git-common-dir"])
+    if r.returncode != 0:
+        return None
+    # `git rev-parse --git-common-dir` answers RELATIVE to the cwd it ran in,
+    # and run() executes in PROJ_DIR (CLAUDE_PROJECT_DIR), not in this
+    # process's cwd. Resolving against os.getcwd() pointed at the wrong repo
+    # whenever the two differed, and a missing marker there reads as "no run
+    # in progress": the guard failed open (PR #314 round 2).
+    common = r.stdout.strip()
+    if not os.path.isabs(common):
+        common = os.path.abspath(os.path.join(PROJ_DIR, common))
+    marker = os.path.join(common, "kipi-update.run")
+    if not os.path.exists(marker):
+        return None
+    # Two facts have to agree before the marker counts as live: the pid is
+    # alive AND the start stamp is younger than RUN_MARKER_MAX_AGE_S. Pid
+    # liveness alone is not enough: a marker that survived SIGKILL or a reboot
+    # can point at a recycled pid that is some unrelated process, and this
+    # hook would then commit nothing on that checkout forever (PR #314
+    # review, round 1). A fleet apply of one instance runs minutes, never
+    # hours, so an old stamp is a crashed run whatever the pid says.
+    try:
+        with open(marker, encoding="utf-8") as fh:
+            fields = fh.read().split()
+        pid = int(fields[0])
+        started = time.strptime(fields[1], "%Y-%m-%dT%H:%M:%SZ")
+        age_s = time.time() - calendar.timegm(started)
+        if age_s > RUN_MARKER_MAX_AGE_S:
+            raise ProcessLookupError("marker older than the run bound")
+        os.kill(pid, 0)
+    except (ValueError, IndexError, ProcessLookupError, FileNotFoundError, OverflowError):
+        try:
+            os.remove(marker)
+        except OSError:
+            pass
+        return None
+    except PermissionError:
+        # Alive, owned by another user: still a live writer.
+        return f"pid {pid}"
+    return f"pid {pid}"
+
+
 def main():
     # Check we're in a git repo
     r = run(["git", "rev-parse", "--is-inside-work-tree"])
     if r.returncode != 0:
+        return
+
+    live_run = fleet_update_in_progress()
+    if live_run is not None:
+        print(f"auto-commit: fleet updater run in progress ({live_run}); "
+              "committing nothing", file=sys.stderr)
         return
 
     files = get_changed_files()

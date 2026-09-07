@@ -824,6 +824,7 @@ cleanup_updater_temps() {
     rm -r -- "$CHECKPOINT_DIR"
     CHECKPOINT_DIR=""
   fi
+  clear_run_marker
   cleanup_dry_model
 }
 
@@ -972,6 +973,18 @@ restore_instance() {
   # passes it legitimately -- and an unscoped checkout here would then delete
   # exactly the work the scoping was meant to stop blocking on. The two must
   # move together; the pathspec below is the same one the guard uses.
+  # The restore itself takes index.lock (reset, checkout). An abandon caused
+  # by a lock held past the bound would otherwise run these two silently into
+  # the same lock, restore nothing, and leave this run's writes uncommitted:
+  # dirty forever, refused by every later run (PR #314 review, round 1).
+  # Wait the same bound again; if the writer is still there, say exactly what
+  # was left behind instead of pretending the checkpoint was restored.
+  if ! wait_for_index_lock "$target" "restore"; then
+    echo "  ERROR: restore could NOT run: index.lock still held after ${LOCK_WAIT_S}s;" \
+      "this instance keeps this run's uncommitted writes under $CHECKPOINT_PREFIX/, .claude/ and plugins/" \
+      "until the lock clears and the tree is restored by hand" >&2
+    return 1
+  fi
   git -C "$target" reset -q HEAD -- "$CHECKPOINT_PREFIX/" .claude/ plugins/ \
     $(pathspec_owned_excludes "$CHECKPOINT_PREFIX") 2>/dev/null || true
   # `git checkout -- A B C` is ALL-OR-NOTHING. If ANY pathspec matches nothing
@@ -1051,6 +1064,7 @@ abandon_instance() {
   local message="${1:-}"
   [ -n "$message" ] && echo "$message"
   restore_instance
+  clear_run_marker
   if [ -n "${ARCHIVE_TMP:-}" ] && [ -d "$ARCHIVE_TMP" ]; then
     rm -r -- "$ARCHIVE_TMP"
     ARCHIVE_TMP=""
@@ -1296,6 +1310,152 @@ SH
   return "$rc"
 }
 
+# A LIVE index.lock is another writer, not debris, and the answer is to wait.
+#
+# 2026-09-06 14:30, consulting: the q-system commit landed, then the config
+# commit died seconds later on "Unable to create '.git/index.lock': File
+# exists" and the whole instance was abandoned half-delivered (q-system
+# committed, .claude/ written but uncommitted, plugins/ copied but never
+# added or deleted). The holder was a peer session's `git status`, which
+# refreshes the index under that lock for a fraction of a second. The stale
+# lock deletion at the top of the instance loop covers a crashed writer that
+# left a lock behind; it cannot cover a writer that is alive right now, and
+# deleting THAT lock is how two writers corrupt one index. Captured as
+# sp-523c1a25. So: every git command this run makes that takes the index
+# lock (add, commit) first waits for the lock to be absent, bounded, and a
+# commit that still dies on that exact error is retried a bounded number of
+# times. Any other failure is returned unchanged on the first attempt.
+# The default has to outlast the LONGEST known instance hold, not a typical
+# one. On the same 2026-09-06 run the consulting instance's own Stop-hook
+# auto-commit held the index lock through its 445 s pre-commit verify. A 120 s
+# bound refuses that instance and leaves its tree half-delivered for manual
+# repair, which is the failure this whole change exists to remove. 600 s
+# clears 445 s with room. The tests set their own bound through the env var.
+LOCK_WAIT_S="${KIPI_UPDATE_LOCK_WAIT_S:-600}"
+LOCK_RETRY_MAX=3
+
+index_lock_path() {
+  local target="$1" lock
+  lock="$(git -C "$target" rev-parse --path-format=absolute --git-path index.lock 2>/dev/null)" \
+    || lock="$target/.git/index.lock"
+  printf '%s\n' "$lock"
+}
+
+# $1 = instance path, $2 = the step name the log and the failure carry.
+# Returns 1 only when the lock outlived the bound; a missing lock returns 0
+# at once, so calling this before every index write costs nothing when the
+# checkout is quiet.
+wait_for_index_lock() {
+  local target="$1" step="$2" lock waited=0
+  lock="$(index_lock_path "$target")"
+  while [ -e "$lock" ]; do
+    if [ "$waited" -ge "$LOCK_WAIT_S" ]; then
+      echo "  ERROR: index.lock held past ${LOCK_WAIT_S}s at $step; another git writer owns this checkout" >&2
+      return 1
+    fi
+    if [ "$waited" -eq 0 ] || [ $((waited % 10)) -eq 0 ]; then
+      echo "  waiting for index.lock at $step (${waited}s of ${LOCK_WAIT_S}s)"
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 0
+}
+
+# $1 = instance path, $2 = step name, $3.. = the commit command to run.
+# Retries ONLY on the live-lock error text; every other failure returns on
+# attempt 1 with its stderr intact, because a pre-commit refusal or a bad
+# pathspec is not something waiting fixes (self-healing-retry.md rule 5).
+retry_on_index_lock() {
+  local target="$1" step="$2"
+  shift 2
+  local attempt=1 rc errf
+  errf="$(mktemp)"
+  while :; do
+    if ! wait_for_index_lock "$target" "$step"; then
+      rm -- "$errf"
+      return 1
+    fi
+    if "$@" 2>"$errf"; then
+      rc=0
+    else
+      rc=$?
+    fi
+    if [ "$rc" -eq 0 ]; then
+      cat "$errf" >&2
+      rm -- "$errf"
+      return 0
+    fi
+    if [ "$attempt" -lt "$LOCK_RETRY_MAX" ] &&
+        grep -qE "index\.lock': File exists|Unable to create .*index\.lock" "$errf"; then
+      echo "  commit at $step hit a live index.lock (attempt $attempt of $LOCK_RETRY_MAX); waiting and retrying"
+      attempt=$((attempt + 1))
+      sleep 1
+      continue
+    fi
+    cat "$errf" >&2
+    rm -- "$errf"
+    return "$rc"
+  done
+}
+
+# The run marker: while one instance apply is in flight, <git-common-dir>/
+# kipi-update.run holds this pid and the start time. The instance's own
+# Stop-hook auto-commit (q-system/hooks/auto-commit.py) refuses to commit
+# while a LIVE marker exists, so the updater's half-delivered files are not
+# swept into the hook's generic commits mid-run (2026-09-06 14:33, consulting:
+# "chore: update rules (10 files)" was the skeleton's rules, committed by the
+# hook under its own name while the updater was still delivering; sp-9306036e).
+# The common dir, not the worktree's git dir, so a linked worktree of the
+# same checkout reads the same marker. Cleared on every exit path.
+RUN_MARKER=""
+RUN_MARKER_MAX_AGE_S="${KIPI_UPDATE_RUN_MARKER_MAX_AGE_S:-7200}"
+
+# The marker is also the one-run-per-instance lock. A marker whose pid is
+# alive and whose stamp is younger than the bound belongs to ANOTHER updater
+# still applying this instance; writing over it would let two runs interleave
+# on one index and let the first run's clear_run_marker strip the second's
+# protection (PR #314 review, round 1). Returns 1 in that case; the caller
+# abandons the instance. A dead pid or an old stamp is a crashed run's
+# leftover and is replaced.
+run_marker_is_live_foreign() {
+  local marker="$1" pid stamp age
+  [ -f "$marker" ] || return 1
+  read -r pid stamp < "$marker" || return 1
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$pid" != "$$" ] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  age="$(python3 -c 'import calendar,sys,time
+try:
+    print(int(time.time() - calendar.timegm(time.strptime(sys.argv[1], "%Y-%m-%dT%H:%M:%SZ"))))
+except Exception:
+    print(-1)' "${stamp:-}" 2>/dev/null)" || age=-1
+  [ "$age" -ge 0 ] && [ "$age" -le "$RUN_MARKER_MAX_AGE_S" ]
+}
+write_run_marker() {
+  local target="$1" common
+  common="$(git -C "$target" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+    || return 0
+  if run_marker_is_live_foreign "$common/kipi-update.run"; then
+    echo "  ERROR: another fleet update is applying this instance right now (pid $(cut -d' ' -f1 "$common/kipi-update.run")); refusing to run two at once" >&2
+    return 1
+  fi
+  RUN_MARKER="$common/kipi-update.run"
+  printf '%s %s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUN_MARKER"
+}
+# Only this run's own marker is ever removed: the first field is the pid that
+# wrote it, and a marker carrying any other pid is left for its owner.
+clear_run_marker() {
+  local owner
+  if [ -n "${RUN_MARKER:-}" ] && [ -f "$RUN_MARKER" ]; then
+    owner="$(cut -d' ' -f1 "$RUN_MARKER" 2>/dev/null || true)"
+    if [ "$owner" = "$$" ]; then
+      rm -- "$RUN_MARKER"
+    fi
+  fi
+  RUN_MARKER=""
+}
+
 # One answer to "is this untracked file the founder's work, or this sync's own
 # debris?". Two guards ask it -- the .claude/+plugins/ collision scan and the
 # q-system collision scan -- and each used to answer with its own carve-out,
@@ -1509,6 +1669,15 @@ while IFS='|' read -r name path prefix itype declared; do
   # SNAP would point restore at a torn-down directory.
   CHECKPOINT_TARGET=""
   CHECKPOINT_PREFIX=""
+  # The checkpoint DIRECTORY too, not only the target. restore_instance returns
+  # early on an empty target, so a bail before this instance's checkpoint
+  # already restored nothing; clearing the directory as well makes that
+  # structural rather than dependent on one guard line, and stops the
+  # previous instance's snapshot outliving its iteration (PR #314 round 3).
+  if [ -n "${CHECKPOINT_DIR:-}" ] && [ -d "$CHECKPOINT_DIR" ]; then
+    rm -r -- "$CHECKPOINT_DIR"
+  fi
+  CHECKPOINT_DIR=""
   SNAP=""
   ORIGINAL_PATH="$path"
   ORIGINAL_HEAD=""
@@ -1749,6 +1918,9 @@ PY
         rm -f "$lockfile"
       fi
     done
+    if ! write_run_marker "$path"; then
+      abandon_instance "  ERROR: refusing to overlap another fleet update on this instance" && continue
+    fi
 
     # Abort any zombie rebase/merge/cherry-pick
     if [ -d "$path/.git/rebase-merge" ] || [ -d "$path/.git/rebase-apply" ]; then
@@ -1851,6 +2023,10 @@ PY
         say "           Leaving it. It will be deleted by this sync until it is untracked."
         continue
       fi
+      # This untrack and its reset backouts are index writes too (PR #314
+      # round 3); a lock held past the bound skips this path, with the error
+      # printed, rather than failing the whole instance.
+      wait_for_index_lock "$path" "untrack $sys_path" || continue
       if ! git rm --cached --quiet -- "$sys_path" 2>/dev/null; then
         say "  WARNING: could not untrack $sys_path"
         continue
@@ -1861,7 +2037,7 @@ PY
         git reset --quiet -q -- "$sys_path" >/dev/null 2>&1 || true
         continue
       fi
-      if git commit -q -m "chore: untrack instance-local $sys_path [no-issue: fleet updater instance-local untrack]
+      if wait_for_index_lock "$path" "untrack commit" && git commit -q -m "chore: untrack instance-local $sys_path [no-issue: fleet updater instance-local untrack]
 
 This file is instance-local (ASK-282) and gitignored by policy. While it was
 tracked, the skeleton sync deleted it -- the skeleton once tracked the path and
@@ -2162,15 +2338,24 @@ The file itself is untouched on disk." 2>/dev/null; then
       # judged a local edit, i.e. the case where sweeping would be worst.
       if [ "${#sys_add_paths[@]}" -eq 0 ]; then
         say "  nothing to commit: every dirty system-owned path is a local edit"
-      elif ! sys_commit_err="$(git commit -q -m "chore: commit system-written state before skeleton sync [no-issue: fleet updater system-state commit]
+      else
+        # No command substitution around the commit. Inside one, the lock
+        # wait's progress lines (the first wait AND every retry's) were
+        # captured with the commit's stderr and printed only on failure, so a
+        # two-minute wait was silent (PR #314 rounds 2 and 3). stdout reaches
+        # the terminal as it happens; only stderr is kept for the warning.
+        sys_errf="$(mktemp)"
+        if ! retry_on_index_lock "$path" "system-state commit" git commit -q -m "chore: commit system-written state before skeleton sync [no-issue: fleet updater system-state commit]
 
 These files are written by the fleet itself (sycophancy stamp, integrity
 baseline, hook state, skeleton-shipped plugins). Committing them here keeps the
 updater from being blocked by its own exhaust; founder work is never included
-because this commit is pathspec-limited." -- "${sys_add_paths[@]}" 2>&1)"; then
-        echo "  WARNING: the system-state commit FAILED; this instance will very"
-        echo "  likely be refused below over dirt that is not founder work:"
-        printf '%s\n' "$sys_commit_err" | sed 's/^/    /'
+because this commit is pathspec-limited." -- "${sys_add_paths[@]}" 2>"$sys_errf"; then
+          echo "  WARNING: the system-state commit FAILED; this instance will very"
+          echo "  likely be refused below over dirt that is not founder work:"
+          sed 's/^/    /' "$sys_errf"
+        fi
+        rm -- "$sys_errf"
       fi
     fi
 
@@ -2419,13 +2604,14 @@ PY
         rm -r -- "$ARCHIVE_TMP"
         ARCHIVE_TMP=""
         cd "$path"
-        if ! stage_q_system_sync "$path" "$prefix" 2>/dev/null; then
+        if ! wait_for_index_lock "$path" "q-system sync staging" ||
+            ! stage_q_system_sync "$path" "$prefix" 2>/dev/null; then
           unstage_scope "$path" "$prefix/"
           abandon_instance "  ERROR: could not stage q-system sync" && continue
         fi
         CHANGES=$(git diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
         if [ "$CHANGES" != "0" ]; then
-          if ! guarded_commit "$path" \
+          if ! retry_on_index_lock "$path" "q-system sync commit" guarded_commit "$path" \
               "chore: sync q-system from skeleton $(date +%Y-%m-%d) [no-issue: fleet updater skeleton sync]"; then
             abandon_instance "  ERROR: could not commit q-system sync" && continue
           fi
@@ -2620,11 +2806,15 @@ print("\n".join(mod.EXTRA_WATCHED))
     # .claude/ and plugins/ permanently dirty in every instance repo.
     if git -C "$path" rev-parse --git-dir >/dev/null 2>&1; then
       if ! ( cd "$path" &&
+        # The untrack below is this block's FIRST index write, so the wait sits
+        # before it, not before the staging that follows (PR #314 round 2).
+        wait_for_index_lock "$path" "config sync staging" &&
         if git ls-files --error-unmatch plugins/memory-lifecycle \
             >/dev/null 2>&1; then
           git rm -r -q --cached plugins/memory-lifecycle
         fi &&
-        { stage_config_sync "$path" || { unstage_scope "$path" .claude/ plugins/; false; }; } &&
+        { stage_config_sync "$path" ||
+            { unstage_scope "$path" .claude/ plugins/; false; }; } &&
         # THE COMMIT HALF NEEDS THE SAME UNWIND AS THE STAGING HALF (ASK-797).
         # unstage_scope was wired to stage_config_sync's failure only, so a
         # staging error unwound cleanly and a COMMIT error did not -- it left the
@@ -2639,7 +2829,7 @@ print("\n".join(mod.EXTRA_WATCHED))
         # shape, and no later run could clear it -- a worktree checkout does not
         # touch the index, so it looked like founder work forever.
         { if ! git diff --cached --quiet 2>/dev/null; then
-            guarded_commit "$path" \
+            retry_on_index_lock "$path" "config sync commit" guarded_commit "$path" \
               "chore: sync .claude config + plugins from skeleton $(date +%Y-%m-%d) [no-issue: fleet updater skeleton sync]" ||
               { unstage_scope "$path" .claude/ plugins/; false; }
           fi; }
@@ -2655,6 +2845,7 @@ print("\n".join(mod.EXTRA_WATCHED))
     fi
 
     echo "  Config synced"
+    clear_run_marker
   fi
 
   # Post-sync capability gate (structure/wiring/data diff, no test execution —
