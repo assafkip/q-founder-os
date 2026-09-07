@@ -9,7 +9,15 @@ and did nothing (sp-9306036e). The updater now writes
 <git-common-dir>/kipi-update.run for the duration of one instance apply; this
 pins the hook's half of the handshake:
 
-  live marker  (pid alive)  -> exit 0, one stderr line, no commit, marker kept
+  live marker  (pid alive)  -> exit 0, one STDOUT line, no commit, marker kept
+
+  THE CHANNEL IS STDOUT, NOT STDERR (PR #321 review round 2, major). This file
+  asserted stderr, and it was the only thing pinning that. settings-template.json
+  wires the hook as `... auto-commit.py 2>/dev/null || true` (line 395), so the
+  copy the fleet updater installs on every instance THROWS STDERR AWAY. A refusal
+  nobody can see turns the safety net off in silence, which is the whole defect
+  PR #321 exists to remove. The positive assertions now read stdout; the negative
+  ones read BOTH channels, so they cannot pass merely because a message moved.
   stale marker (pid dead)   -> marker removed, hook proceeds as before
   no marker                 -> unchanged behaviour
 
@@ -55,6 +63,22 @@ class RunMarker(unittest.TestCase):
     def setUp(self):
         self.repo = tempfile.mkdtemp(prefix="auto-commit-marker-")
         git(self.repo, "init", "-q", "-b", "main")
+        # IDENTITY ON THE REPO, NOT ON OUR OWN `git -c` CALLS.
+        #
+        # `git()` above passes -c user.email/-c user.name, which covers the
+        # commands THIS FILE runs and nothing else. The subject under test is a
+        # subprocess -- run_hook spawns auto-commit.py, which runs its own
+        # `git commit` -- and that inherits whatever identity the RUNNER happens
+        # to have. Measured 2026-09-07: `validate.yml` sets a global identity and
+        # `verify.yml` does not, so the moment this suite was named in
+        # .verify-suites two cases went red in one job and stayed green in the
+        # other, with the failure reading "the hook did not commit" as if the
+        # hook were broken. Writing the identity into the repo config puts it
+        # where the child git will find it, and makes the suite hermetic instead
+        # of dependent on which workflow happens to run it.
+        git(self.repo, "config", "user.email", "t@t.t")
+        git(self.repo, "config", "user.name", "test")
+        git(self.repo, "config", "commit.gpgsign", "false")
         # A path the hook classifies as committable, so the "no marker" and
         # "stale marker" cases have something to commit and the live case has
         # something it must NOT commit.
@@ -76,7 +100,7 @@ class RunMarker(unittest.TestCase):
         before = head_count(self.repo)
         result = run_hook(self.repo)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("fleet updater run in progress", result.stderr)
+        self.assertIn("fleet updater run in progress", result.stdout)
         self.assertEqual(head_count(self.repo), before, "the hook committed under a live marker")
         self.assertTrue(os.path.exists(self.marker), "the hook removed a LIVE marker")
 
@@ -85,7 +109,8 @@ class RunMarker(unittest.TestCase):
             fh.write(f"{dead_pid()} 2026-09-06T21:30:00Z\n")
         result = run_hook(self.repo)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn("fleet updater run in progress", result.stderr)
+        self.assertNotIn("fleet updater run in progress",
+                            result.stdout + result.stderr)
         self.assertFalse(os.path.exists(self.marker), "a stale marker survived")
 
     def test_live_marker_is_seen_when_cwd_is_not_the_project_dir(self):
@@ -97,7 +122,7 @@ class RunMarker(unittest.TestCase):
         before = head_count(self.repo)
         result = run_hook(self.repo, cwd=tempfile.gettempdir())
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("fleet updater run in progress", result.stderr)
+        self.assertIn("fleet updater run in progress", result.stdout)
         self.assertEqual(head_count(self.repo), before, "the guard failed open from a foreign cwd")
 
     def test_live_pid_with_an_old_stamp_is_stale(self):
@@ -108,7 +133,8 @@ class RunMarker(unittest.TestCase):
         before = head_count(self.repo)
         result = run_hook(self.repo)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn("fleet updater run in progress", result.stderr)
+        self.assertNotIn("fleet updater run in progress",
+                            result.stdout + result.stderr)
         self.assertFalse(os.path.exists(self.marker), "an old-stamp marker with a live pid survived")
         self.assertEqual(head_count(self.repo), before + 1, "the hook did not proceed past a stale marker")
 
@@ -117,14 +143,16 @@ class RunMarker(unittest.TestCase):
             fh.write("not-a-pid\n")
         result = run_hook(self.repo)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn("fleet updater run in progress", result.stderr)
+        self.assertNotIn("fleet updater run in progress",
+                            result.stdout + result.stderr)
         self.assertFalse(os.path.exists(self.marker))
 
     def test_no_marker_is_the_old_behaviour(self):
         before = head_count(self.repo)
         result = run_hook(self.repo)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn("fleet updater run in progress", result.stderr)
+        self.assertNotIn("fleet updater run in progress",
+                            result.stdout + result.stderr)
         # The floor that makes the live case meaningful: without a marker the
         # same dirty file DOES get committed, so "no commit" above is the marker's
         # doing and not the classifier's.
