@@ -63,6 +63,10 @@ SHA="$(git -C "$WORK/skel" rev-parse HEAD)"
 # COMMENTS_FILE lets a case seed the PR's existing comments; absent means none.
 GH_LOG="$WORK/gh-calls.txt"; : > "$GH_LOG"
 COMMENTS_FILE="$WORK/pr-comments.txt"; : > "$COMMENTS_FILE"
+# THE STUB APPENDS EVERY POSTED BODY TO COMMENTS_FILE, so the head marker really
+# round-trips writer to reader: what the reviewer writes into a comment is what
+# the next run reads back. A hand-seeded marker only tests the reader's parser;
+# this tests that the two halves agree about the string.
 cat > "$STUB/gh" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >> "$GH_LOG"
@@ -70,7 +74,11 @@ case "\$*" in
   *"pr view"*"headRefOid"*) printf '%s\t%s\n' "$SHA" "a PR title" ;;
   *"pr view"*"comments"*)   cat "$COMMENTS_FILE" ;;
   *"pr diff"*)              echo "diff --git a/FILE.txt b/FILE.txt" ;;
-  *"pr comment"*)           echo "https://github.com/assafkip/homerepo/pull/1#issuecomment-1" ;;
+  *"pr comment"*)
+    bf=""; prev=""
+    for a in "\$@"; do [ "\$prev" = "--body-file" ] && bf="\$a"; prev="\$a"; done
+    [ -n "\$bf" ] && [ -f "\$bf" ] && cat "\$bf" >> "$COMMENTS_FILE"
+    echo "https://github.com/assafkip/homerepo/pull/1#issuecomment-1" ;;
   *"api"*)                  echo '{}' ;;
 esac
 exit 0
@@ -228,6 +236,9 @@ ok "a non-verdict comment naming the sha does not trigger the refusal"
 # ===========================================================================
 : > "$COMMENTS_FILE"
 PIDDIR="$WORK/home-conc/.config/kipi/review-trees"; mkdir -p "$PIDDIR"
+# NOT THIS PR'S OWN FILE. pr-7 and pr-8 are OTHER PRs, so this case measures the
+# numeric cap. The same-PR collision is its own case further down, because the cap
+# cannot express it: one incumbent on this PR is under the cap and still fatal.
 sleep 120 & LIVE1=$!
 sleep 120 & LIVE2=$!
 printf '%s' "$LIVE1" > "$PIDDIR/assafkip_homerepo__pr-7.pid"
@@ -282,6 +293,11 @@ ok "the stale-pid run really did review and post"
 # THE POST IS NOT BLOCKED, and that half is asserted too: a warning that costs
 # the review its comment would be a worse trade than the loop it warns about.
 # ===========================================================================
+# CLEARED BETWEEN ROUNDS, and the reason is a fixture limit worth naming. This
+# repo has one commit, so both "rounds" run against the SAME head sha -- while a
+# real round 2 reviews a new head the author just pushed. Left uncleared, round 2
+# would hit the duplicate-head refusal (correctly), and this case would measure
+# that guard instead of the structural one.
 : > "$COMMENTS_FILE"
 set_review "REQUEST CHANGES" "major|first unwaited write|FILE.txt:10"
 : > "$GH_LOG"

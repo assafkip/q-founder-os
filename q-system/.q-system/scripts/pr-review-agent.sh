@@ -273,26 +273,35 @@ REVIEW_PID_WRITTEN=0
 REVIEW_CONCURRENCY_CAP="${KIPI_REVIEW_CONCURRENCY_CAP:-2}"
 REVIEW_QUEUE_SECONDS="${KIPI_REVIEW_QUEUE_SECONDS:-900}"
 
+_pid_in_file() { tr -dc '0-9' < "${1:-}" 2>/dev/null | head -c 12; }
+
 _review_pid_release() {
   # ONLY OUR OWN. Removing a pid file whose contents are someone else's pid would
   # release THEIR slot, which is the concurrent-reviewer defect wearing a cleanup
   # costume -- the same reasoning release_wt_lock already carries below.
   [ "$REVIEW_PID_WRITTEN" = "1" ] || return 0
-  if [ "$(tr -dc '0-9' < "$REVIEW_PID_FILE" 2>/dev/null | head -c 12)" = "$$" ]; then
+  if [ "$(_pid_in_file "$REVIEW_PID_FILE")" = "$$" ]; then
     command rm -f "$REVIEW_PID_FILE" 2>/dev/null || true
   fi
   REVIEW_PID_WRITTEN=0
 }
 
-# _live_review_pids -> one "<pidfile> <pid>" line per LIVE run other than ours.
+# _live_review_pids -> one "<pidfile> <pid>" line per LIVE run that is not US.
 # Reaps stale files as it goes: the scan is the only thing that ever runs after a
 # killed reviewer, so if it does not clean up, nothing does.
+#
+# SKIPS BY PID, NEVER BY PATH (round 1 major, 2026-09-07). The first cut skipped
+# `$REVIEW_PID_FILE` by name, which is exactly the file a SECOND RUN ON THE SAME
+# PR writes -- so the one collision that matters most was the one collision the
+# scan could not see, and the second run then overwrote the incumbent's pid,
+# silently taking over its slot while both read the same detached worktree.
+# Identity is the pid, so that is what the skip compares.
 _live_review_pids() {
   local f pid
   for f in "$REVIEW_PID_DIR"/*.pid; do
     [ -f "$f" ] || continue
-    [ "$f" = "$REVIEW_PID_FILE" ] && continue
-    pid="$(tr -dc '0-9' < "$f" 2>/dev/null | head -c 12)"
+    pid="$(_pid_in_file "$f")"
+    [ "$pid" = "$$" ] && continue
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
       printf '%s %s\n' "$f" "$pid"
     else
@@ -305,22 +314,36 @@ _live_review_pids() {
 mkdir -p "$REVIEW_PID_DIR" 2>/dev/null || true
 _REVIEW_WAITED=0
 while :; do
+  # The scan runs first because it is what reclaims stale files, including this
+  # PR's own -- so anything still on disk afterwards holds a pid that is alive.
   _LIVE="$(_live_review_pids)"
   _LIVE_N="$(printf '%s' "$_LIVE" | grep -c . || true)"
-  [ "${_LIVE_N:-0}" -lt "$REVIEW_CONCURRENCY_CAP" ] && break
+  _MINE="$(_pid_in_file "$REVIEW_PID_FILE")"
+  _BLOCK=""
+  if [ -n "$_MINE" ] && [ "$_MINE" != "$$" ]; then
+    # A SECOND RUN ON THE SAME PR IS REFUSED BELOW THE CAP, and that is not the
+    # cap being strict. Two runs on one PR share ONE detached review tree and ONE
+    # pid file: the second re-checkouts the tree while the first is reading files
+    # out of it, and both stamp verdicts with the sha they think they read. The
+    # numeric cap cannot express that, because one incumbent is under it.
+    _BLOCK="a review of PR #$PR is already live (pid $_MINE). Two runs on one PR share one detached worktree and one pid file, so the second would re-checkout that tree under the first."
+  elif [ "${_LIVE_N:-0}" -ge "$REVIEW_CONCURRENCY_CAP" ]; then
+    _BLOCK="$_LIVE_N reviews are already live (cap $REVIEW_CONCURRENCY_CAP)."
+  fi
+  [ -z "$_BLOCK" ] && break
   if [ "$QUEUE" != "1" ]; then
-    echo "REFUSING: $_LIVE_N reviews are already live (cap $REVIEW_CONCURRENCY_CAP). No review was dispatched and NO status was posted." >&2
+    echo "REFUSING: $_BLOCK No review was dispatched and NO status was posted." >&2
     printf '%s\n' "$_LIVE" | sed 's/^/  live: /' >&2
-    echo "  Wait for one to finish, or re-run with --queue to wait up to ${REVIEW_QUEUE_SECONDS}s for a slot." >&2
+    echo "  Wait for it to finish, or re-run with --queue to wait up to ${REVIEW_QUEUE_SECONDS}s for a slot." >&2
     exit 3
   fi
   # BOUNDED WAIT, NOT AN OPEN ONE. An unbounded queue turns a stuck reviewer into
   # a pile of blocked reviewers that all wake at once when it dies.
   if [ "$_REVIEW_WAITED" -ge "$REVIEW_QUEUE_SECONDS" ]; then
-    echo "REFUSING: waited ${_REVIEW_WAITED}s for a slot and $_LIVE_N reviews are still live (cap $REVIEW_CONCURRENCY_CAP). No review was dispatched and NO status was posted." >&2
+    echo "REFUSING: waited ${_REVIEW_WAITED}s for a slot and it is still blocked: $_BLOCK No review was dispatched and NO status was posted." >&2
     exit 3
   fi
-  [ "$_REVIEW_WAITED" = "0" ] && echo "$_LIVE_N reviews live (cap $REVIEW_CONCURRENCY_CAP); --queue given, waiting up to ${REVIEW_QUEUE_SECONDS}s for a slot..."
+  [ "$_REVIEW_WAITED" = "0" ] && echo "blocked: $_BLOCK --queue given, waiting up to ${REVIEW_QUEUE_SECONDS}s for a slot..."
   sleep 10
   _REVIEW_WAITED=$(( _REVIEW_WAITED + 10 ))
 done
@@ -1543,6 +1566,18 @@ if [ "$POST" = "1" ]; then
   # them separate is what makes the degraded path safe: with no temp file we post
   # the raw review unchanged and write nothing, instead of redirecting into the
   # artifact we are trying to read.
+  # THE MARKER MEANS "A VERDICT WAS PUBLISHED ON THIS HEAD", NOT "A RUN HAPPENED"
+  # (round 1 major, 2026-09-07). The first cut stamped it on every posted comment,
+  # UNUSABLE reviews included. An unusable review posts state=failure and states no
+  # verdict, so that head then carried a red required check AND a marker that made
+  # every automated re-review exit 3 -- a wedge no unattended path could clear,
+  # because --force is a hand-typed flag. The guard exists to stop a re-review from
+  # overturning an EARNED verdict; a review nobody could read earned nothing, so it
+  # must not claim the head.
+  MARK_HEAD=0
+  if [ "$REVIEW_USABLE" = "1" ] && [ -n "$VERDICT" ]; then MARK_HEAD=1; fi
+  [ "$MARK_HEAD" = "1" ] \
+    || echo "  NOTE: this review is unusable or states no verdict, so the comment carries NO head marker and a later run may re-review ${HEAD_SHA:0:8} without --force."
   if [ -n "$REVIEW_BODY" ]; then
     # THE MARKER LEADS THE BODY, and the position is load-bearing. It is what the
     # duplicate-run refusal at the top of this script greps for, and
@@ -1550,7 +1585,7 @@ if [ "$POST" = "1" ]; then
     # body would be the first thing a long review dropped -- the guard would then
     # be silently disarmed on exactly the reviews that run longest.
     {
-      review_head_marker "$HEAD_SHA"; printf '\n\n'
+      [ "$MARK_HEAD" = "1" ] && { review_head_marker "$HEAD_SHA"; printf '\n\n'; }
       review_comment_body "$REVIEW" "$VERDICT" "$ENGINE" "$DEGRADED"
       # The structural warning rides INSIDE the comment rather than only in this
       # log, because the log belongs to whoever ran the reviewer and the PR is
@@ -1560,7 +1595,7 @@ if [ "$POST" = "1" ]; then
     POST_FILE="$REVIEW_BODY"
   else
     POST_FILE="$REVIEW"
-    echo "  WARN: could not create a temp file; posting the RAW review, which GitHub may reject on size. The head marker is NOT in this body, so a later run will not see this verdict and may re-review the same head (sp-fa810306)." >&2
+    echo "  WARN: could not create a temp file; posting the RAW review, which GitHub may reject on size. The head marker is NOT in this body, so a later run will not see this verdict and may re-review the same head (sp-fa810306). Erring toward a duplicate round is the safe direction here: the other way is a wedge no unattended run can clear." >&2
   fi
   # Keep the reason. A bare "could not comment" sent the maintainer to guess
   # between a size rejection, an auth failure and a closed PR -- the same
