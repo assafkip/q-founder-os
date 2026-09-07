@@ -239,9 +239,9 @@ PY
 ANY_RECEIPT="$(printf '%s\n' "$RECEIPT" | sed -n 's/^ANY|//p')"
 WORKER_RECEIPT="$(printf '%s\n' "$RECEIPT" | sed -n 's/^WORKER|//p')"
 if [ -n "$ANY_RECEIPT" ]; then
-  info "RECEIPT FOUND: a codex-engine review really ran -- $ANY_RECEIPT"
+  info "RECEIPT FOUND: a review by the PRIMARY engine (claude) really ran -- $ANY_RECEIPT"
 else
-  info "NO RECEIPT YET: no pr-*.verdict.json under $STATE_DIR/pr-reviews carries engine=codex. Wiring is green; a real run has not been observed."
+  info "NO RECEIPT YET: no pr-*.verdict.json under $STATE_DIR/pr-reviews carries engine=claude. Wiring is green; a real run has not been observed."
 fi
 # THE PROOF THE FOUNDER IS ACTUALLY WAITING ON. Reported as its own line because
 # "a codex review ran" and "the dispatcher ran one unattended" are different

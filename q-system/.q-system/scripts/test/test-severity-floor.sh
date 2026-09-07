@@ -2178,9 +2178,18 @@ ok "recovery pages once on the way out of degraded mode, then goes quiet"
 # that was never meant to gate satisfies the gate.
 #
 # WHICH ENGINE IS ADVISORY FLIPPED 2026-09-06 (founder: "forget codex go with the
-# claude fallback"). codex is advisory now, so this drives `--engine codex` and
-# asserts it lands on kipi/codex-approved and never on the required context. The
-# codex stub is `ok` so we test codex's OWN path rather than the fallback.
+# claude fallback"), AND THIS CASE CHANGED SUBJECT WHEN IT DID. It drives
+# `--engine claude`, which is now the PRIMARY engine, so what it actually pins is
+# the other half of the same one-engine-one-slot rule: the primary posts the
+# required context and does NOT also post the advisory one. The codex stub is
+# `fail` so a green here cannot have come from codex.
+#
+# THE DIRECTION-FREE INVARIANT ABOVE IS STILL HELD, just not here -- Q1 asserts
+# the advisory engine lands on kipi/codex-approved, and a mutant that makes the
+# advisory branch post kipi/reviewer-approved is killed by Q1, verified by
+# running it. Saying so rather than deleting the sentence: the invariant is the
+# reason both cases exist, and a comment that names the wrong guard sends the
+# next reader to a case that no longer checks it.
 Q7="$W2/eng-claude"
 mk_engine_stubs "$Q7" "$SHA_A" fail ""      # codex would FAIL if it were consulted
 run_engine_reviewer "$Q7" --post --engine claude
@@ -2282,6 +2291,46 @@ sys.exit(0 if r.get("usable") is False else
          "record says usable=%r for a truncated stream" % (r.get("usable"),))
 PY
 ok "the truncated-primary run records usable=false, so the record and the gate tell one story"
+
+# --- Q7F. the PRIMARY engine going DOWN holds the gate, it does not green it ---
+# THE PROPERTY THIS PR'S HEADER NOW ASSERTS, previously unpinned. Before the
+# 2026-09-06 flip a primary outage had the Opus fallback behind it and the whole
+# DEGRADED apparatus to announce itself. That apparatus hangs off the codex
+# branch, so with claude PRIMARY there is nothing behind it: the path exits
+# non-zero and posts NO status. That is the SAFE direction -- absent is not
+# approved, and reviewer-floor.sh turns an absent verdict into a red required
+# context -- but "safe by construction" is the kind of claim that stops being
+# true quietly, and a comment asserting it is not a test.
+#
+# NO fallback may fire either. A codex fallback under a claude outage would be
+# the two-writers defect wearing an outage as a costume, and codex is out of
+# credits, so it would fail at exit 0 and fill the gate with nothing.
+Q7F="$W2/eng-primary-down"
+mk_engine_stubs "$Q7F" "$SHA_A" fail ""
+# The harness has no claude-mode, so the stub is replaced in place rather than
+# growing a 6th positional every case would have to carry.
+cat > "$Q7F/bin/claude" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$Q7F/claude-calls.log"
+echo "claude: stream disconnected before first token" >&2
+exit 1
+EOF
+chmod +x "$Q7F/bin/claude"
+run_engine_reviewer "$Q7F" --post
+[ -s "$Q7F/claude-calls.log" ] \
+  || fail "the primary-outage case never reached claude, so it is testing nothing"
+[ "$RC" != "0" ] \
+  || fail "THE DEFECT: the PRIMARY engine failed and the reviewer still exited 0. A caller that
+      branches on the exit code reads a total outage as a completed review."
+CALL_DOWN="$(status_call "$Q7F")"
+printf '%s' "$CALL_DOWN" | grep -q 'state=success' \
+  && fail "THE DEFECT: the PRIMARY engine was DOWN and a green status was posted anyway. There is
+      no fallback in this direction, so nothing reviewed anything. Call was: $CALL_DOWN"
+[ ! -s "$Q7F/codex-calls.log" ] \
+  || fail "a claude outage fell through to codex. There is no fallback in this direction by
+      design, and codex is out of credits (it fails at EXIT 0), so this would fill the required
+      gate with an unreviewed green. codex saw: $(cat "$Q7F/codex-calls.log")"
+ok "a PRIMARY-engine outage exits non-zero, posts no green, and never falls through to codex"
 
 # --- Q7E. MOVED OUT (codex review round 1 of PR #34, minor) -------------------
 # This case used to build its non-ancestor fixture with
