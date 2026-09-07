@@ -316,18 +316,42 @@ def test_calendar_empty_is_empty_not_an_error(brief):
     assert error is None
 
 
-def test_mail_collector_reports_a_model_failure(brief):
-    rows, error = brief.collect_mail(NOW, runner=lambda p, t: (None, "timeout"))
+class _FakeBoard:
+    def __init__(self, root):
+        self._root = root
+
+    def consulting_root(self):
+        return self._root
+
+
+@pytest.fixture
+def mail_instance(tmp_path, monkeypatch, brief):
+    """A throwaway consulting instance for the ledger-backed mail collector
+    (ASK-1323). The contract itself lives in test_morning_brief_mail.py; these
+    cases only keep the section's two exits visible from the engine suite."""
+    ledger = tmp_path / "q-consult" / "email-watch" / "ledger.py"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text("# stand-in\n", encoding="utf-8")
+    original = brief._optional_module
+    monkeypatch.setattr(brief, "_optional_module",
+                        lambda stem: _FakeBoard(tmp_path)
+                        if "consulting_board" in stem else original(stem))
+    return tmp_path
+
+
+def test_mail_collector_reports_a_ledger_failure(brief, mail_instance):
+    rows, error = brief.collect_mail(NOW, runner=lambda argv, t: (None, "ledger timed out"))
     assert rows == []
-    assert "timeout" in error
+    assert "timed out" in error
 
 
-def test_mail_collector_parses_threads(brief):
-    payload = json.dumps({"threads": [
-        {"from": "chris@pi.com", "subject": "SOW", "age_hours": 20}]})
-    rows, error = brief.collect_mail(NOW, runner=lambda p, t: (payload, None))
+def test_mail_collector_paints_the_ledgers_rows(brief, mail_instance):
+    payload = json.dumps([{"thread_id": "t1", "client": "all-points",
+                           "last_from": "chris@pi.com", "subject": "SOW",
+                           "needs_reply_since": "2026-08-13"}])
+    rows, error = brief.collect_mail(NOW, runner=lambda argv, t: (payload, None))
     assert error is None
-    assert any("chris@pi.com" in r for r in rows)
+    assert any("all-points" in r and "SOW" in r for r in rows)
 
 
 def test_owed_reports_a_linear_failure_without_hiding_the_loops(brief, tmp_path):
@@ -1045,25 +1069,25 @@ class TestNoCapUpstreamOfTheBoard:
     not a statement that the work is finished). A second cap upstream of the producer
     routed around that rule. Display is capped by `_section`; data is not capped."""
 
-    def test_every_thread_the_model_returns_reaches_the_caller(self, brief):
+    def test_every_thread_the_ledger_returns_reaches_the_caller(self, brief, mail_instance):
         n = 40
-        payload = json.dumps({"threads": [
-            {"id": f"t{i}", "from": f"p{i}@x.com", "subject": f"s{i}", "age_hours": i}
-            for i in range(n)]})
-        rows, error = brief.collect_mail(None, lambda p, t: (payload, None))
+        payload = json.dumps([
+            {"thread_id": f"t{i}", "last_from": f"p{i}@x.com", "subject": f"s{i}"}
+            for i in range(n)])
+        rows, error = brief.collect_mail(None, lambda argv, t: (payload, None))
         assert error is None
         assert len(rows) == n, (
             f"the producer dropped {n - len(rows)} threads; their board rows would be "
             "archived inside a healthy scope")
         assert len({r.key for r in rows}) == n
 
-    def test_no_synthetic_overflow_row_is_minted(self, brief):
+    def test_no_synthetic_overflow_row_is_minted(self, brief, mail_instance):
         """An overflow row needs a stable id and a scope. Inventing one puts a row on
         the board that no thread corresponds to."""
-        payload = json.dumps({"threads": [
-            {"id": f"t{i}", "from": "p@x.com", "subject": "s", "age_hours": 1}
-            for i in range(30)]})
-        rows, _ = brief.collect_mail(None, lambda p, t: (payload, None))
+        payload = json.dumps([
+            {"thread_id": f"t{i}", "last_from": "p@x.com", "subject": "s"}
+            for i in range(30)])
+        rows, _ = brief.collect_mail(None, lambda argv, t: (payload, None))
         assert not any("more unanswered" in str(r) for r in rows)
         assert all(getattr(r, "key", "").startswith("mail:t") for r in rows)
 
