@@ -1924,17 +1924,27 @@ CODEX_TRUNCATED='hook: Stop
 FINDINGS:
 '
 
-# mk_engine_stubs <dir> <headRefOid> <codex-mode> <codex-body>
+# mk_engine_stubs <dir> <headRefOid> <codex-mode> <codex-body> [claude-body]
 #   codex-mode: ok | fail (non-zero exit) | empty (exit 0, no output)
-# The claude stub always emits $APPROVE_REVIEW, so a `success` status on a codex
+# The claude stub DEFAULTS to $APPROVE_REVIEW, so a `success` status on a codex
 # run can only have come from the Opus fallback -- which is what makes the
 # degraded cases readable at all.
+#
+# THE 5TH ARG EXISTS BECAUSE ITS ABSENCE HID A REAL DEFECT (review of PR #319).
+# The claude body was HARD-CODED to a well-formed review, so this harness was
+# structurally incapable of expressing "claude answered and said nothing
+# parseable" -- and on the day the 2026-09-06 flip made claude the PRIMARY
+# engine, that unexpressible case was the one that posted a green
+# kipi/reviewer-approved over an unread review. 198/198 stayed green throughout.
+# A stub that can only produce good output is a stub that certifies the happy
+# path and calls it coverage. It is a TRAILING OPTIONAL with a default, so every
+# existing 4-arg call site is unchanged (`set -u` is on; the `:-` is load-bearing).
 mk_engine_stubs() {
-  local d="$1" oid="$2" mode="$3" body="$4"
+  local d="$1" oid="$2" mode="$3" body="$4" clbody="${5:-$APPROVE_REVIEW}"
   mkdir -p "$d/bin" "$d/home"
   : > "$d/gh-calls.log"; : > "$d/codex-calls.log"; : > "$d/claude-calls.log"
   printf '%s' "$body" > "$d/codex-body.txt"
-  printf '%s' "$APPROVE_REVIEW" > "$d/claude-body.txt"
+  printf '%s' "$clbody" > "$d/claude-body.txt"
   cat > "$d/bin/python3" <<EOF
 #!/usr/bin/env bash
 exec "$REAL_PY" "\$@"
@@ -2219,6 +2229,59 @@ printf '%s' "$CALL_DEFAULT" | grep -q 'state=success' \
 printf '%s' "$CALL_DEFAULT" | grep -qi 'degraded' \
   && fail "the default engine's status is marked degraded even though claude answered: $CALL_DEFAULT"
 ok "the default engine is claude and still posts $STATUS_CONTEXT=success (branch protection intact)"
+
+# --- Q7U. an UNUSABLE answer from the PRIMARY engine never greens the gate -----
+# THE DEFECT THIS CASE WAS WRITTEN FROM (review of PR #319, reproduced before the
+# fix): the 2026-09-06 flip moved the REQUIRED kipi/reviewer-approved onto the
+# `ENGINE != codex` branch, which was the only one of the script's three dispatch
+# paths that never called review_is_usable. The codex path had the bar; the Opus
+# fallback got it after codex found the same hole there on 2026-07-29 (major).
+# The claude path did not, because until the flip it was ADVISORY and could only
+# green kipi/claude-approved, which gates nothing.
+#
+# Fed the IDENTICAL $CODEX_TRUNCATED stream Q4B already feeds codex -- harness
+# noise, a prose "VERDICT: APPROVE", and a FINDINGS: block that is never closed,
+# at exit 0 -- the default path posted:
+#     state=success -f context=kipi/reviewer-approved -f description=APPROVE
+# while the verdict record it wrote beside it recorded "usable": false. Same
+# stream through codex correctly posted state=failure. Nothing paged. An unclosed
+# FINDINGS block parses as an EMPTY findings list and an empty list derives
+# APPROVE, so exiting 0 is not evidence the reviewer said anything.
+#
+# THE FIXTURE IS REUSED ON PURPOSE, not renamed: the whole force of the finding is
+# that ONE byte-identical stream was refused on one path and laundered into a green
+# required gate on another. A separate constant would let the two drift apart and
+# hide exactly that comparison. The shape belongs to "an engine exited 0 without
+# reviewing", which is engine-independent -- it is the codex outage's own shape,
+# and claude reaches it the same way.
+Q7U="$W2/eng-default-truncated"
+mk_engine_stubs "$Q7U" "$SHA_A" fail "" "$CODEX_TRUNCATED"
+run_engine_reviewer "$Q7U" --post
+CALL_TRUNC="$(status_call "$Q7U")"
+printf '%s' "$CALL_TRUNC" | grep -q "context=$STATUS_CONTEXT" \
+  || fail "the truncated-primary case posted no '$STATUS_CONTEXT' at all. This case is about the
+      STATE on that context, so a missing context means the case is testing nothing.
+      Call was: $CALL_TRUNC"
+printf '%s' "$CALL_TRUNC" | grep -q 'state=success' \
+  && fail "THE DEFECT: the PRIMARY engine exited 0 with a truncated, unclosed FINDINGS block and
+      the REQUIRED context '$STATUS_CONTEXT' went GREEN. A green required gate over a review
+      nobody read is the worst outcome available in this script, and it releases the PR to
+      merge. Exiting 0 is not evidence the reviewer said anything. Call was: $CALL_TRUNC"
+ok "an unusable PRIMARY-engine answer leaves $STATUS_CONTEXT non-green (unread is never approved)"
+
+# THE RECORD MUST AGREE WITH THE GATE. Asserting only the status would pass on the
+# day the gate is held closed for some unrelated reason while the record still
+# claims a usable review happened -- and review-redrive.py selects on that key.
+python3 - "$Q7U/home/.config/kipi/pr-reviews" <<'PY' || fail "the truncated-primary run's verdict record does not report the review as unusable, so every consumer reading \`usable\` is told a review happened that did not"
+import glob, json, sys
+recs = glob.glob(sys.argv[1] + "/*.verdict.json")
+if not recs:
+    sys.exit("no verdict record written at the pr-reviews ROOT")
+r = json.load(open(recs[0]))
+sys.exit(0 if r.get("usable") is False else
+         "record says usable=%r for a truncated stream" % (r.get("usable"),))
+PY
+ok "the truncated-primary run records usable=false, so the record and the gate tell one story"
 
 # --- Q7E. MOVED OUT (codex review round 1 of PR #34, minor) -------------------
 # This case used to build its non-ancestor fixture with

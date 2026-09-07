@@ -62,7 +62,16 @@
 # KIPI_REVIEW_ENGINE=claude alone leaves PRIMARY_ENGINE=codex, so every review lands
 # on the advisory context and every open PR waits forever on a status nobody posts.
 #
-# The fallback still works in the new direction and still says DEGRADED out loud.
+# THERE IS NO FALLBACK IN THE NEW DIRECTION, and saying so plainly is the point.
+# The Opus fallback and the whole DEGRADED apparatus hang off the codex branch:
+# codex down -> claude fills the slot -> the status says DEGRADED. With claude
+# PRIMARY that branch is only reachable on an advisory `--engine codex` hand-run,
+# so a claude outage has nothing behind it. That is the SAFE direction and not an
+# oversight: the primary path exits non-zero and posts NO status, and absent is
+# not approved, so a claude outage holds PRs instead of greening them. It is not
+# a second lab either way -- codex is out of credits, so a codex fallback would
+# fail at exit 0, which is the outage this flip exists to end. Restoring a real
+# fallback means restoring codex, which is the same act as restoring independence.
 #
 # It is a FLAG, not a second script, on purpose: sha capture (ASK-216), verdict
 # derivation from labelled severities, the commit-status post (ASK-217) and
@@ -943,7 +952,30 @@ note_degraded_transition() {   # note_degraded_transition <0|1> [reason]
 echo "$(TS) running the $ENGINE reviewer (bounded at ${TIMEOUT_SECONDS}s)..."
 if [ "$ENGINE" != "codex" ]; then
   if run_engine claude "$REVIEW"; then
-    echo "$(TS) review written: $REVIEW"
+    # THE CLAUDE PATH GETS THE SAME PARSEABILITY BAR AS THE OTHER TWO, and this
+    # line is the whole reason it is here (review of PR #319). Until the
+    # 2026-09-06 flip this branch was ADVISORY ONLY, so an unread review landed
+    # on kipi/claude-approved and gated nothing; the bar lived on the codex path
+    # and, after codex found the same hole in it on 2026-07-29, on the Opus
+    # fallback. The flip moved the REQUIRED kipi/reviewer-approved onto the one
+    # path in this script that never asked the question.
+    #
+    # REPRODUCED, not reasoned about, before this line existed: the suite's own
+    # CODEX_TRUNCATED fixture (harness noise, prose "VERDICT: APPROVE", a
+    # FINDINGS: block that is never closed, exit 0) posted
+    #   state=success -f context=kipi/reviewer-approved -f description=APPROVE
+    # on the default path, while the verdict record it wrote beside it said
+    # "usable": false. The identical stream through the codex path correctly
+    # posted state=failure. Nothing paged. An unclosed FINDINGS block parses as
+    # an EMPTY findings list and an empty list derives APPROVE, so exiting 0 is
+    # not evidence the reviewer said anything -- and a green required gate over
+    # a review nobody read is the worst outcome available in this script.
+    if review_is_usable "$REVIEW"; then
+      echo "$(TS) review written: $REVIEW"
+    else
+      REVIEW_UNUSABLE=1
+      echo "$(TS) the $ENGINE reviewer answered with no complete FINDINGS block (empty or truncated); verdict stays UNSTATED. Output kept at: $REVIEW" >&2
+    fi
   else
     rc=$?
     echo "$(TS) reviewer failed or timed out (rc=$rc). Partial output: $REVIEW" >&2
@@ -1060,11 +1092,14 @@ echo "  verdict: ${VERDICT:-unstated}$DRY_NOTE"
 # Both post `state: failure`, and a selector that sees only `failure` sends a
 # never-reviewed PR to REWORK with no findings to work from.
 #
-# ASKED HERE, NOT REUSED FROM $REVIEW_UNUSABLE. That flag is set on the codex and
-# fallback paths only -- the `ENGINE != codex` primary path never evaluates
-# usability at all -- so reading it would record `usable: true` for a path that
-# never checked, which is the fabricated-evidence direction. One call, the same
-# predicate on the same file the verdict came from, covering all three paths.
+# ASKED HERE, NOT REUSED FROM $REVIEW_UNUSABLE. All three dispatch paths now set
+# that flag (the `ENGINE != codex` path joined them in the review of PR #319; it
+# previously never evaluated usability at all, which is what let a truncated
+# claude stream green the required gate once claude became primary). It is still
+# asked again here rather than reused, because $REVIEW_UNUSABLE is the flag the
+# VERDICT was computed from and this key is a claim about the FILE -- deriving one
+# from the other would make the record unable to disagree with the gate, and that
+# disagreement is exactly the signal this key exists to preserve.
 #
 # RECORD-ONLY, DELIBERATELY. This changes no gate. $VERDICT is computed above and
 # is not touched here, so no PR's outcome moves on this commit; the consumer that
