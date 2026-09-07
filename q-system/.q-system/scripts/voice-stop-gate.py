@@ -642,6 +642,46 @@ def find_final_user_text(transcript_path):
     return text
 
 
+def request_is_current(transcript_path):
+    """True when the newest text put in front of the assistant was typed by HIM.
+
+    `find_final_user_text` walks back to his last words on purpose (a skill body
+    or a hook's feedback is never his request). The walk-back has a second edge
+    (PR #313 review, round 3): after a routed draft, a machine turn (a task
+    notification, a peer message, a command's stdout) made the assistant answer
+    the MACHINE, and the gate re-ran his previous request through the receipt
+    check, refusing every such reply until he typed again. Measured there: 579
+    of 837 user text records in 60 session logs are machine turns answered by
+    the assistant. A non-draft reply to machine text is not a completion of his
+    request, so the short path asks this first.
+
+    Shape rules, from the records the harness writes: a tool result carries no
+    text and is neither his nor a trigger; a flagged record right after his own
+    (a skill body) is a companion of his turn; a flagged record after the
+    assistant spoke (a Stop hook's feedback) is the machine's; unflagged machine
+    text (a notification, a peer message) is the machine's.
+    """
+    current = False
+    assistant_spoke = False
+    for record, message in _walk_transcript(transcript_path, want_record=True):
+        role = message.get("role")
+        if role == "assistant":
+            assistant_spoke = True
+            continue
+        if role != "user":
+            continue
+        text = _message_text(message)
+        if not text:
+            continue
+        if any(record.get(flag) is True for flag in _META_FLAGS):
+            if assistant_spoke:
+                current = False
+            continue
+        current = bool(founder_typed_text(text))
+        assistant_spoke = False
+    return current
+
+
 # A MISSING CHECK IS NOT A PASS. This returned (0, "") when its script was
 # absent, and 0 is the same value a clean draft produces, so a run on a machine
 # where voice-lint.py had moved was byte-for-byte indistinguishable from a run
@@ -978,11 +1018,18 @@ def main():
         # returned here -- so the ONE turn shape he uses most was the one shape
         # that never reached the scorer. The lint's scope is unchanged; the
         # measurement no longer rides on it.
-        try:
-            enforce_route_receipt(request, text)
-        except RouteBoundaryError as exc:
-            sys.stderr.write(f"voice-stop-gate: {exc}\n")
-            sys.exit(2)
+        #
+        # Only when HE just asked. A non-draft reply to machine text (a
+        # notification, a peer message, a hook's feedback) is an answer to the
+        # machine, not a completion of his routed request; see
+        # `request_is_current`. The framed-draft path below keeps its check
+        # whatever triggered it: a draft of a routed request needs its receipt.
+        if request_is_current(transcript_path):
+            try:
+                enforce_route_receipt(request, text)
+            except RouteBoundaryError as exc:
+                sys.stderr.write(f"voice-stop-gate: {exc}\n")
+                sys.exit(2)
         authorship_spool(extract_setoff_draft(text), text, request)
         finish_ok()
     # WHICH RULEBOOK. An instance with no registry resolves to None here and the two

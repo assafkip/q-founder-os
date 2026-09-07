@@ -76,6 +76,8 @@ PLUGIN_COMMAND_TURN = (
     "<command-message>kipi-core:wiring-check</command-message>\n"
     "<command-name>/kipi-core:wiring-check</command-name>"
 )
+REQUEST = "write me a linkedin post about the audit"
+DRAFT = "The audit found the gate green and the test never ran."
 
 
 def _record(text, role="user", **flags):
@@ -266,13 +268,15 @@ def verify_and_consume(identity, *, draft=None, **_):
 
 
 def _fake_lane(root, broken=False, status="NOT_ROUTED", owner=False,
-               raises=False, audit_surface=None):
+               raises=False, audit_surface=None, route_on=None):
     """A q-consult/pipeline package with the four modules the gate imports.
 
     `raises`: classify() raises RuntimeError, the shape of a lane whose store
     or classifier is broken at call time rather than at import time.
     `audit_surface`: audit_only_routes.routes() lists one audit-only route on
     that surface (channel "linkedin"), and deny() refuses it by name.
+    `route_on`: classify() routes only when this phrase is in the request, the
+    way the reviewer's reproducer classified on the words of the request.
     """
     pkg = root / "q-consult" / "pipeline"
     pkg.mkdir(parents=True)
@@ -290,7 +294,11 @@ def _fake_lane(root, broken=False, status="NOT_ROUTED", owner=False,
         def classify(request):
             if {raises!r}:
                 raise RuntimeError("classifier store is unreadable")
-            return Result({status!r}, "linkedin_post", "linkedin", "fixture")
+            status = {status!r}
+            route_on = {route_on!r}
+            if route_on is not None:
+                status = ROUTE if route_on in request.lower() else NOT_ROUTED
+            return Result(status, "linkedin_post", "linkedin", "fixture")
     """))
     (pkg / "route_contract.py").write_text(FAKE_CONTRACT)
     (pkg / "audit_only_routes.py").write_text(textwrap.dedent(f"""
@@ -402,6 +410,58 @@ def test_main_holds_a_short_routed_reply_with_no_receipt(lane_root, transcript, 
     assert "has no route receipt" in err
 
 
+# --- whose turn is it: the request must belong to THIS turn ---------------
+
+NOTIFICATION = "<task-notification>agent finished: 3 files</task-notification>"
+TOOL_RESULT = {
+    "type": "user", "isSidechain": False, "userType": "external",
+    "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]},
+}
+
+
+@pytest.mark.parametrize("records, expected", [
+    ([_record(REQUEST)], True),
+    ([_record(REQUEST), _record(SKILL_BODY, isMeta=True, turnCompanion=True)], True),
+    ([_record(REQUEST), _record("a draft", role="assistant"), TOOL_RESULT,
+      _record("done", role="assistant")], True),
+    ([_record(REQUEST), _record("a draft", role="assistant"),
+      _record("Stop hook feedback:\nvoice violations", isMeta=True)], False),
+    ([_record(REQUEST), _record("a draft", role="assistant"), _record(PEER)], False),
+    ([_record(REQUEST), _record("a draft", role="assistant"), _record(NOTIFICATION)], False),
+    ([_record(REQUEST), _record("a draft", role="assistant"), _record(NOTIFICATION),
+      _record("noted", role="assistant"), _record("thanks, park it")], True),
+], ids=["his-turn", "skill-body-companion", "tool-result-mid-turn", "hook-feedback",
+        "peer-message", "notification", "he-types-again"])
+def test_request_is_current_reads_who_spoke_last(transcript, records, expected):
+    assert vsg.request_is_current(transcript(records)) is expected
+
+
+def test_main_does_not_rerun_his_old_request_on_a_machine_turn(lane_root, transcript, monkeypatch):
+    """The reviewer's five-turn reproducer, driven through main() on one growing
+    transcript with a lane that routes on the words of the request. Before the
+    fix, turn 2 exited 2 ("has no route receipt") and so did every redraft after
+    it, until he typed again."""
+    _fake_lane(lane_root, owner=True, route_on="linkedin post")
+    contract = vsg._route_context()[1]
+    monkeypatch.setattr(vsg, "authorship_spool", lambda *args, **kwargs: None)
+    monkeypatch.setattr(vsg, "finish_ok", lambda: (_ for _ in ()).throw(SystemExit(0)))
+    monkeypatch.setattr(vsg, "run_check", lambda *args, **kwargs: (0, ""))
+    receipt = contract.create_receipt(REQUEST, DRAFT, surface="linkedin_post", channel="linkedin")
+    records = [_record(REQUEST), _record(_assistant(receipt), role="assistant")]
+    code, err = _run_main(monkeypatch, transcript(records), _assistant(receipt))
+    assert code == 0, err                                     # turn 1: routed draft + receipt
+    records += [_record(NOTIFICATION), _record("Noted, three files landed.", role="assistant")]
+    code, err = _run_main(monkeypatch, transcript(records), "Noted, three files landed.")
+    assert code == 0, err                                     # turn 2: prose reply to the machine
+    records += [_record("thanks, park it"), _record("Parked.", role="assistant")]
+    code, err = _run_main(monkeypatch, transcript(records), "Parked.")
+    assert code == 0, err                                     # turn 3: he types, not routed
+    records += [_record("write me a linkedin post about the audit, again"),
+                _record("Here it is.", role="assistant")]
+    code, err = _run_main(monkeypatch, transcript(records), "Here it is.")
+    assert code == 2 and "has no route receipt" in err        # turn 4: he asks, no receipt
+
+
 def test_main_holds_a_linted_routed_draft_with_no_receipt(lane_root, transcript, monkeypatch):
     """The second call site, after the voice lints. The lints are stubbed to
     pass (run_check returns 0) and the draft is long enough to be graded, so
@@ -424,10 +484,6 @@ def test_a_receipt_block_must_be_json():
 
 
 # --- the receipt: each verification branch refuses for its own reason ------
-
-REQUEST = "write me a linkedin post about the audit"
-DRAFT = "The audit found the gate green and the test never ran."
-
 
 def _routed_lane(lane_root):
     """A present lane that ROUTES the request to an owner; returns its contract."""
