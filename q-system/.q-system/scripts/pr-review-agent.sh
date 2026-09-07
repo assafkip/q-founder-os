@@ -81,8 +81,20 @@
 # which status context it posts, and which directory its artifacts land in.
 #
 # Usage:  pr-review-agent.sh <pr-number> [--issue ASK-nnn] [--post]
-#                            [--engine claude|codex]
+#                            [--engine claude|codex] [--force] [--queue]
 #         --post also comments the review on the PR and the Linear issue.
+#         --force runs even when this head already carries a verdict comment.
+#         --queue waits for a concurrency slot instead of refusing immediately.
+#
+# EXIT CODES, and they are part of the contract because a queue script reads them:
+#   0  reviewed (or dry-run surveyed); nothing further is advised
+#   1  could not review: bad arguments, no PR, a moving head, no tree at the sha
+#   2  refused at resolution: this copy does not live at a repo root
+#   3  REFUSED TO START: this head already has a verdict, or two reviews are
+#      already live. Nothing was dispatched and no status was posted.
+#   4  ran and posted, AND the findings repeat a file from the previous
+#      REQUEST CHANGES round. The post is complete; the next patch is the wrong
+#      move (sp-46726f79). Advisory to the caller, never a block on the post.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -156,10 +168,17 @@ CODEX_MODEL="${KIPI_REVIEW_CODEX_MODEL:-gpt-5.6-sol}"
 # config change (`KIPI_REVIEW_ENGINE=claude`), not an edit to the script that
 # gates every PR in the repo.
 PR=""; ISSUE=""; POST=0; ENGINE="${KIPI_REVIEW_ENGINE:-claude}"; TARGET_REPO_ARG=""
+# --force and --queue are the two documented ways past the two refusals added for
+# sp-fa810306 and sp-0a09e013. Both are opt-in and neither has an env form: an
+# env default would let a scheduled caller inherit the bypass without anyone
+# having typed it, which is how a guard ends up permanently off.
+FORCE=0; QUEUE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --issue)  shift; ISSUE="${1:-}" ;;
     --engine) shift; ENGINE="${1:-}" ;;
+    --force)  FORCE=1 ;;
+    --queue)  QUEUE=1 ;;
     # WHICH REPO THE WORK IS IN (ASK-738). $SKEL is where this CODE lives; it is
     # not where the PR lives. Before this argument the two were the same
     # variable, so a review of an external PR number resolved against the home
@@ -219,7 +238,98 @@ GH_R_PROMPT=""
 # form, which is what every pre-ASK-738 caller and fixture already relies on.
 STATUS_REPO_PATH="{owner}/{repo}"
 [ -n "$REVIEW_SLUG" ] && STATUS_REPO_PATH="$REVIEW_SLUG"
-[ -n "$PR" ] || { echo "usage: pr-review-agent.sh <pr-number> [--issue ASK-nnn] [--post] [--engine claude|codex]" >&2; exit 1; }
+[ -n "$PR" ] || { echo "usage: pr-review-agent.sh <pr-number> [--issue ASK-nnn] [--post] [--engine claude|codex] [--force] [--queue]" >&2; exit 1; }
+
+# ONE PID FILE PER (REPO, PR), AND NEVER A THIRD CONCURRENT REVIEW (sp-0a09e013).
+#
+# THE SCAR, measured: on the evening of 2026-09-05 five reviewers and watchers
+# started as tracked tool calls were killed by the harness under memory pressure,
+# and on 2026-09-07 at 00:35Z a process exit took a nohup'd reviewer with it,
+# orphaning two tasks and losing a posted approval. Nothing on this box could
+# answer "how many reviews are live right now", so the answer was always "start
+# another one" -- and each one costs a full Opus review of a real diff.
+#
+# THE FILE IS THE ANSWER, not a process table scan. `pgrep -f pr-review-agent`
+# matches its own grep and every editor buffer holding the name, which is the
+# same class of miscount this fleet already recorded. A file written at start and
+# removed by the EXIT trap is checkable by anyone, survives the session that
+# spawned it, and self-heals: a pid the OS no longer knows is stale and is
+# reclaimed, because an operator who must clear these by hand eventually clears
+# one while a run is live.
+#
+# SAME DIRECTORY AS THE REVIEW TREES AND THEIR LOCKS, deliberately. That is the
+# one place this script already owns per (repo, PR) state, so a reader looking
+# for "what is this reviewer doing" finds the tree, the lock and the pid together
+# instead of in three conventions.
+#
+# HONEST BOUNDARY: pid numbers are recycled. A stale file whose number has been
+# handed to an unrelated process reads as live and costs one false refusal, which
+# is the safe direction -- a false refusal names the file and exits 3, while a
+# false start is the duplicate review this exists to stop.
+REVIEW_PID_DIR="$(dirname "$(review_tree_path "$HOME/.config/kipi" "$REVIEW_SLUG" "$PR")")"
+REVIEW_PID_FILE="$REVIEW_PID_DIR/$(artifact_key "$REVIEW_SLUG" "$PR").pid"
+REVIEW_PID_WRITTEN=0
+# CONCURRENCY CAP: at most 2 live runs, so this one is refused when 2 already are.
+REVIEW_CONCURRENCY_CAP="${KIPI_REVIEW_CONCURRENCY_CAP:-2}"
+REVIEW_QUEUE_SECONDS="${KIPI_REVIEW_QUEUE_SECONDS:-900}"
+
+_review_pid_release() {
+  # ONLY OUR OWN. Removing a pid file whose contents are someone else's pid would
+  # release THEIR slot, which is the concurrent-reviewer defect wearing a cleanup
+  # costume -- the same reasoning release_wt_lock already carries below.
+  [ "$REVIEW_PID_WRITTEN" = "1" ] || return 0
+  if [ "$(tr -dc '0-9' < "$REVIEW_PID_FILE" 2>/dev/null | head -c 12)" = "$$" ]; then
+    command rm -f "$REVIEW_PID_FILE" 2>/dev/null || true
+  fi
+  REVIEW_PID_WRITTEN=0
+}
+
+# _live_review_pids -> one "<pidfile> <pid>" line per LIVE run other than ours.
+# Reaps stale files as it goes: the scan is the only thing that ever runs after a
+# killed reviewer, so if it does not clean up, nothing does.
+_live_review_pids() {
+  local f pid
+  for f in "$REVIEW_PID_DIR"/*.pid; do
+    [ -f "$f" ] || continue
+    [ "$f" = "$REVIEW_PID_FILE" ] && continue
+    pid="$(tr -dc '0-9' < "$f" 2>/dev/null | head -c 12)"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      printf '%s %s\n' "$f" "$pid"
+    else
+      echo "  reclaimed a stale reviewer pid file (pid ${pid:-<empty>} is gone): $f" >&2
+      command rm -f "$f" 2>/dev/null || true
+    fi
+  done
+}
+
+mkdir -p "$REVIEW_PID_DIR" 2>/dev/null || true
+_REVIEW_WAITED=0
+while :; do
+  _LIVE="$(_live_review_pids)"
+  _LIVE_N="$(printf '%s' "$_LIVE" | grep -c . || true)"
+  [ "${_LIVE_N:-0}" -lt "$REVIEW_CONCURRENCY_CAP" ] && break
+  if [ "$QUEUE" != "1" ]; then
+    echo "REFUSING: $_LIVE_N reviews are already live (cap $REVIEW_CONCURRENCY_CAP). No review was dispatched and NO status was posted." >&2
+    printf '%s\n' "$_LIVE" | sed 's/^/  live: /' >&2
+    echo "  Wait for one to finish, or re-run with --queue to wait up to ${REVIEW_QUEUE_SECONDS}s for a slot." >&2
+    exit 3
+  fi
+  # BOUNDED WAIT, NOT AN OPEN ONE. An unbounded queue turns a stuck reviewer into
+  # a pile of blocked reviewers that all wake at once when it dies.
+  if [ "$_REVIEW_WAITED" -ge "$REVIEW_QUEUE_SECONDS" ]; then
+    echo "REFUSING: waited ${_REVIEW_WAITED}s for a slot and $_LIVE_N reviews are still live (cap $REVIEW_CONCURRENCY_CAP). No review was dispatched and NO status was posted." >&2
+    exit 3
+  fi
+  [ "$_REVIEW_WAITED" = "0" ] && echo "$_LIVE_N reviews live (cap $REVIEW_CONCURRENCY_CAP); --queue given, waiting up to ${REVIEW_QUEUE_SECONDS}s for a slot..."
+  sleep 10
+  _REVIEW_WAITED=$(( _REVIEW_WAITED + 10 ))
+done
+printf '%s' "$$" > "$REVIEW_PID_FILE" 2>/dev/null && REVIEW_PID_WRITTEN=1
+# ARMED BEFORE THE FIRST THING THAT CAN EXIT. Every refusal below this line is a
+# path the pid file has to survive, and the worktree lock's own trap further down
+# REPLACES this one, so that line clears both. A trap set after the first exit
+# path is a trap that leaks on exactly the failures it exists for.
+trap '_review_pid_release' EXIT
 
 # WHAT THE ENGINE CHANGES. Everything else below this block is shared, which is
 # the whole reason this is a flag and not a second script.
@@ -298,6 +408,18 @@ REVIEW_UNUSABLE=0
 
 mkdir -p "$ENGINE_DIR" "$VERDICT_DIR"
 TS() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+# THE ONE DEFINITION of the marker that says "this head already has a verdict"
+# (sp-fa810306). Written into every posted comment, read back before every run.
+# An HTML comment because GitHub does not render it: the marker is for machines,
+# and a visible one would be the first thing a human asked to have removed.
+#
+# WHY A MARKER AND NOT THE SHA IN PROSE. A sha appears inside a diff, inside a
+# quoted earlier comment, and inside anything a person pastes, so grepping the
+# comment text for the sha fires on comments that are not verdicts. WHY NOT THE
+# LOCAL VERDICT RECORD: the whole scar is a local record disagreeing with what
+# GitHub holds, so the check has to read GitHub.
+review_head_marker() { printf '<!-- kipi-reviewer: head=%s -->' "${1:-}"; }
 REVIEW="$ENGINE_DIR/$(artifact_key "$REVIEW_SLUG" "$PR")-$(date +%Y%m%d-%H%M%S).md"
 
 # Same bash wall clock as the worker: macOS ships no `timeout` without coreutils,
@@ -513,7 +635,9 @@ release_wt_lock() {
   fi
   _wt_lock_path=""
 }
-trap 'release_wt_lock' EXIT
+# REPLACES the pid-only trap armed above; bash keeps one EXIT trap, so this line
+# has to clear BOTH or the pid file leaks from here on.
+trap 'release_wt_lock; _review_pid_release' EXIT
 
 review_worktree() {  # review_worktree <sha> -> prints path, or nothing
   # KEYED BY REPO AND PR (ASK-738). One shared review-trees/pr-<N> path meant
