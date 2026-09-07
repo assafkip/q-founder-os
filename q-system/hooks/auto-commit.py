@@ -574,8 +574,13 @@ def main():
 
     # STDOUT, NOT STDERR, AND THAT IS THE WHOLE POINT (review round 2, major).
     # settings-template.json wires this hook as `... auto-commit.py 2>/dev/null
-    # || true` at lines 380 and 406, and that is the copy the fleet updater
-    # installs on every instance. So stderr is DISCARDED on all 22+ checkouts.
+    # || true` at line 395, the single wiring of it, and that is the copy the fleet
+    # updater installs on every instance. So stderr is DISCARDED on 22+ checkouts.
+    # (An earlier draft of this comment said "lines 380 and 406". Those came from
+    # a checkout with local edits to that file and point at unrelated hooks. A
+    # scar comment with a wrong pointer reads as coverage, which is the exact
+    # defect this PR was reviewed for; re-derive line numbers from the tree you
+    # are actually shipping.)
     # The behaviour these guards replaced reported a lock collision on STDOUT,
     # as commit_group's `skipped:` line naming the file and git's own error, and
     # that line survived the redirect. Returning early with a stderr-only

@@ -747,7 +747,7 @@ def test_a_refusal_reaches_the_channel_the_fleet_wiring_keeps(tmp_path):
     """REVIEW ROUND 2, MAJOR. The refusal was on stderr, which is thrown away.
 
     settings-template.json wires this hook as `... auto-commit.py 2>/dev/null ||
-    true` (lines 380 and 406), and that is the copy the fleet updater installs on
+    true` (line 395), and that is the copy the fleet updater installs on
     every instance. The behaviour the lock guard replaced reported a collision on
     STDOUT via commit_group's `skipped:` line, which survived that redirect. A
     stderr-only refusal does not: an orphaned index.lock, which has no age bound
