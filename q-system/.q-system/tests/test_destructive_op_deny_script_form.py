@@ -268,6 +268,25 @@ class TestAWrapperScriptIsADestructiveOpWearingAFilename:
                       tmp_path, cwd=tmp_path) == "deny"
 
 
+    def test_a_wrapper_inside_a_subshell_or_group_is_still_read(self, tmp_path):
+        """The 2026-09-07 06:08Z shape applied to the wrapper scan. `( bash w.sh )`
+        after an && split tokenises to `(` first and the scanner read that as the
+        program, so the wrapper's text was never opened. Measured before the fix
+        with a wrapper that arms the bypass: plain DENY, every paren or brace
+        form ALLOW."""
+        w = write_script(tmp_path / "consulting-sync-run.sh", ARMS_THE_BYPASS)
+        for cmd in ("( bash %s )" % w,
+                    "cd %s && ( bash %s > /tmp/x.log 2>&1 & ); sleep 1" % (tmp_path, w),
+                    "{ bash %s; }" % w,
+                    "cd %s && ( ./consulting-sync-run.sh )" % tmp_path,
+                    "(bash %s)" % w):
+            assert decide(hook_copy(tmp_path), cmd, tmp_path, cwd=tmp_path) == "deny", cmd
+
+    def test_a_harmless_wrapper_inside_a_subshell_still_passes(self, tmp_path):
+        """The negative control for the case above, in the same shape."""
+        w = write_script(tmp_path / "harmless.sh", HARMLESS)
+        assert decide(hook_copy(tmp_path), "( bash %s )" % w, tmp_path) == "allow"
+
 class TestNothingElseMoved:
     """The layers added here are deny-only and appended. Everything the file
     already refused it must still refuse, and the ordinary commands it allowed

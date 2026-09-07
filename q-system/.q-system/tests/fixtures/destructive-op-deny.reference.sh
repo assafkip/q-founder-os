@@ -564,12 +564,33 @@ if [ "$TOOL_NAME" = "Bash" ] && [ -n "$COMMAND" ]; then
     # from one bash function is worse than repeating six words.
     while [ "${#w[@]}" -gt 0 ]; do
       case "${w[0]}" in
+        # A subshell or a group opens a new command position, the same shape the
+        # regex above skips. `( bash wrapper.sh )` after an && split tokenises to
+        # `(` then `bash`, and `(bash` when the paren is glued; either way the
+        # program token was the paren, the scan returned rc 1, and the wrapper's
+        # text was never read. Measured 2026-09-07 with a wrapper that assigns the
+        # bypass: the plain form was DENY, every paren or brace form was ALLOW.
+        \(|\{)                           w=( "" "${w[@]:1}" ); w=( "${w[@]:1}" ) ;;
+        \(*|\{*)                         w[0]="${w[0]#[\(\{]}" ;;
         *=*)                             w=( "" "${w[@]:1}" ); w=( "${w[@]:1}" ) ;;
         sudo|command|nohup|nice|time|env) w=( "" "${w[@]:1}" ); w=( "${w[@]:1}" ) ;;
         *) break ;;
       esac
     done
     [ "${#w[@]}" -gt 0 ] || return 1
+    # The closing half of the same shape: `(bash w.sh)` glues the paren to the
+    # last argument and `( ./w.sh )` can leave it on the path, so the file lookup
+    # below misses by one character. Trailing parens and braces are not part of
+    # any path this scanner is asked to read.
+    local _i
+    for _i in "${!w[@]}"; do
+      while :; do
+        case "${w[$_i]}" in
+          *\)|*\}) w[$_i]="${w[$_i]%?}" ;;
+          *) break ;;
+        esac
+      done
+    done
     local prog="${w[0]##*/}" cand="" tok
     case "$prog" in
       bash|sh|zsh|ksh|dash|source|.)
