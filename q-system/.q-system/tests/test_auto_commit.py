@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -584,8 +585,16 @@ def test_it_refuses_while_another_commit_holds_index_lock(tmp_path):
 
 
 def test_it_refuses_on_head_lock_too(tmp_path):
-    """The ref lock, not the index lock, is the one that killed the prd-os ledger
-    sweep mid pre-commit (sp-d0ce1966). Both doors or neither."""
+    """HEAD.lock is a SEPARATE door, and this docstring named the wrong reason
+    for it. It said the ref lock killed the prd-os ledger sweep mid pre-commit
+    (sp-d0ce1966). Review round 2 measured that a commit on an attached branch
+    produces index.lock and `refs/heads/<branch>.lock` and NEVER HEAD.lock, and
+    an independent watch agrees: only index.lock appears through a slow
+    pre-commit. The check still earns its place -- HEAD.lock has real producers
+    (checkout, reset, merge, alongside the AUTO_MERGE / ORIG_HEAD / packed-refs
+    family) and dropping it reddens this test. What it does NOT cover is
+    `refs/heads/<branch>.lock`, which a commit really does take; that window is
+    sub-second and index.lock spans it, so it is deliberately not checked."""
     root, run = _repo(tmp_path)
     _write(root, "memory/MEMORY.md", "- note\n")
     lock = os.path.join(root, ".git", "HEAD.lock")
@@ -731,3 +740,53 @@ def test_the_lock_dir_resolves_against_PROJ_DIR_not_the_process_cwd(tmp_path):
         "The git-dir answer is being resolved against the process cwd.")
     assert "chore" not in run("git", "log", "--oneline").stdout, \
         "it committed while a lock was held in PROJ_DIR's git dir"
+
+
+
+def test_a_refusal_reaches_the_channel_the_fleet_wiring_keeps(tmp_path):
+    """REVIEW ROUND 2, MAJOR. The refusal was on stderr, which is thrown away.
+
+    settings-template.json wires this hook as `... auto-commit.py 2>/dev/null ||
+    true` (lines 380 and 406), and that is the copy the fleet updater installs on
+    every instance. The behaviour the lock guard replaced reported a collision on
+    STDOUT via commit_group's `skipped:` line, which survived that redirect. A
+    stderr-only refusal does not: an orphaned index.lock, which has no age bound
+    by design, would switch the safety net off on that checkout forever and print
+    nothing anywhere a human looks.
+
+    So this asserts the CHANNEL, not the wording. It fires the hook exactly the
+    way the fleet does, with stderr discarded, and fails if the reason vanishes.
+    """
+    root, _run = _repo(tmp_path)
+    _write(root, "memory/MEMORY.md", "- note\n")
+    lock = root / ".git" / "index.lock"
+    lock.write_text("held")
+    try:
+        out = subprocess.run(
+            [sys.executable, HOOK], capture_output=True, text=True, cwd=str(root),
+            env=dict(os.environ, CLAUDE_PROJECT_DIR=str(root)))
+    finally:
+        lock.unlink()
+    assert "another commit is in flight" in out.stdout, (
+        "the refusal did not reach STDOUT, so `2>/dev/null` in the shipped hook "
+        "wiring discards it and the safety net goes off in total silence.\n"
+        f"stdout={out.stdout!r}\nstderr={out.stderr!r}")
+
+
+def test_the_fleet_update_refusal_reaches_stdout_too(tmp_path):
+    """The sibling guard, hardened in the same breath. It had the identical
+    stderr-only shape and the identical consequence, and fixing one of two
+    guards that fail the same way is how this class comes back."""
+    root, _run = _repo(tmp_path)
+    _write(root, "memory/MEMORY.md", "- note\n")
+    marker = root / ".git" / "kipi-update.run"
+    marker.write_text(f"{os.getpid()} {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}")
+    try:
+        out = subprocess.run(
+            [sys.executable, HOOK], capture_output=True, text=True, cwd=str(root),
+            env=dict(os.environ, CLAUDE_PROJECT_DIR=str(root)))
+    finally:
+        marker.unlink()
+    assert "fleet updater run in progress" in out.stdout, (
+        "the fleet-updater refusal did not reach STDOUT.\n"
+        f"stdout={out.stdout!r}\nstderr={out.stderr!r}")

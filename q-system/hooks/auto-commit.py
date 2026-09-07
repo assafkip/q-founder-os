@@ -511,7 +511,14 @@ def another_commit_in_flight():
 
     NO AGE BOUND ON PURPOSE, unlike the run marker. A commit here holds index.lock
     for the length of its pre-commit, measured at 447-497 seconds here and
-    independently at 445s in kipi-update.sh's own note from the same night, so a
+    independently at 445s in kipi-update.sh's own note from the same night. Review
+    round 2 called that figure false, having measured ~12ms and no lock at all
+    during a pre-commit. RE-MEASURED 2026-09-07 over three command shapes against
+    a 5s pre-commit hook, and the figure stands: `git commit -m x -- <path>`,
+    which is exactly what commit_group runs, holds index.lock (plus a next-index
+    lock) for the WHOLE hook; `git commit -a` does too; only `git add` followed by
+    a bare `git commit` holds nothing, and that is the one shape this hook never
+    uses. Measure the pathspec form, or the number will look invented again. So a
     bound low enough to be useful against a crashed lock would fire constantly
     against healthy ones. A truly orphaned lock is rare, visible, and a human's
     call: "no process holds it AND every live hook's cwd is a worktree" is the test
@@ -521,8 +528,11 @@ def another_commit_in_flight():
     Measured 2026-09-07: git itself exits 128 on a held index.lock, and commit_group
     turns ANY non-zero into a `skipped:` line while this hook exits 0. So an orphaned
     lock ALREADY stopped this hook from committing, silently, before this guard
-    existed. The guard adds no new silent-outage mode; it replaces a failure found
-    after a 450s pre-commit with a refusal that costs nothing. The genuinely new
+    existed. It replaces a failure found after a 450s pre-commit with a refusal
+    that costs nothing. An earlier draft went further and said the guard adds NO
+    new silent-outage mode; review round 2 proved that false, and it is true now
+    only because of the fix it forced -- the refusal prints on stdout, because the
+    fleet wiring discards stderr. See the comment in main(). The genuinely new
     behaviour is the opposite one, and it is frequent rather than rare: a peer
     session's `git status` holds index.lock for a fraction of a second, so some turn
     ends now skip a commit they would have won. Work stays on disk either way.
@@ -562,17 +572,29 @@ def main():
     if r.returncode != 0:
         return
 
+    # STDOUT, NOT STDERR, AND THAT IS THE WHOLE POINT (review round 2, major).
+    # settings-template.json wires this hook as `... auto-commit.py 2>/dev/null
+    # || true` at lines 380 and 406, and that is the copy the fleet updater
+    # installs on every instance. So stderr is DISCARDED on all 22+ checkouts.
+    # The behaviour these guards replaced reported a lock collision on STDOUT,
+    # as commit_group's `skipped:` line naming the file and git's own error, and
+    # that line survived the redirect. Returning early with a stderr-only
+    # message made the safety net go quiet with literally zero output: an
+    # orphaned index.lock (no age bound, by design) would switch this hook off
+    # on that checkout forever and print nothing anywhere. The message is the
+    # only thing that tells a human to go look, so it has to reach the channel
+    # that survives. Pinned by
+    # test_a_refusal_reaches_the_channel_the_fleet_wiring_keeps.
     live_run = fleet_update_in_progress()
     if live_run is not None:
         print(f"auto-commit: fleet updater run in progress ({live_run}); "
-              "committing nothing", file=sys.stderr)
+              "committing nothing")
         return
 
     held = another_commit_in_flight()
     if held is not None:
         print(f"auto-commit: another commit is in flight ({held}); "
-              "committing nothing. The next turn end picks this work up.",
-              file=sys.stderr)
+              "committing nothing. The next turn end picks this work up.")
         return
 
     files = get_changed_files()
