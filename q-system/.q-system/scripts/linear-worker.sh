@@ -2461,11 +2461,18 @@ json.dump(d,open('$ATTEMPTS','w'),indent=2); print(e['rounds'])" 2>/dev/null || 
     # because which model checks this fleet's work is the kind of fact that must be
     # readable at the call site, not two files away.
     #
-    # ONE call, not two. Before this it was claude-then-codex, with codex advisory;
-    # codex now owns kipi/reviewer-approved and writes the one verdict record every
-    # gate below reads, so a second Claude pass would only burn spend and post an
-    # advisory status nobody gates on. A codex outage cannot wedge the loop: the
-    # reviewer's own Opus fallback fills the primary slot and marks it DEGRADED.
+    # ONE call, not two. It was claude-then-codex, then codex-only, and since
+    # 2026-09-06 claude-only: claude owns kipi/reviewer-approved and writes the one
+    # verdict record every gate below reads, so a second codex pass would only burn
+    # spend and post an advisory status nobody gates on.
+    #
+    # THERE IS NO FALLBACK IN THIS DIRECTION, and the sentence here used to claim
+    # one. The Opus fallback and the DEGRADED marking hang off the reviewer's codex
+    # branch, so with claude PRIMARY nothing stands behind a claude outage. That is
+    # the SAFE direction, not a gap: the reviewer exits non-zero and posts NO status,
+    # reviewer-floor turns an absent verdict into a red required context, and the PR
+    # holds. A codex fallback would be worse than none -- codex is out of credits and
+    # fails at EXIT 0, so it would fill the required gate with nothing.
     # LABEL THE INVOKER HERE, at the one place the scheduled path runs the reviewer
     # (sp-53aad86f). This is what makes a dispatcher-driven review distinguishable
     # from a hand run in the verdict record. It is set on the call rather than

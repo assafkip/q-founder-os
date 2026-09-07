@@ -213,6 +213,30 @@ for p in glob.glob(os.path.join(sys.argv[1], "*.verdict.json")) + \
         r = json.load(open(p))
     except Exception:
         continue          # a corrupt record is not a receipt
+    # ENGINE NAME IS THE ONLY FILTER AND IT CANNOT SEE THE ERA (review of PR #319,
+    # minor, measured before it was written down). The primary engine went claude ->
+    # codex (2026-07-29) -> claude (2026-09-06), so a claude record may come from the
+    # CURRENT contract, from the pre-07-29 primary era, or from a 07-29..09-06
+    # ADVISORY run. Path does not separate them either: measured on the live store,
+    # 4 of 6 pre-flip claude records sit at this ROOT, because claude was primary
+    # before 07-29 as well.
+    #
+    # WHAT THAT COSTS, AND WHAT IT DOES NOT. The ANY line below can be satisfied by
+    # an old record, so read it as "a claude review exists" and never as "the current
+    # wiring has been exercised" -- it prints the record ts for exactly that reason.
+    # The DISPATCHER-DRIVEN line is the one that matters and is unaffected today:
+    # 0 of those 6 carry invoker=worker, because the worker dispatched codex for that
+    # whole window. That is a fact about the DATA, not a property of this check, so
+    # it is stated here rather than leaned on.
+    #
+    # The real fix is a `gating` boolean written onto the verdict record, which is a
+    # schema change and has its own capture (sp-bd35985f) rather than being smuggled
+    # in behind a date literal. A date literal would be the stale-safety-argument
+    # shape this very review existed to remove.
+    #
+    # NO APOSTROPHES IN THIS BLOCK. It sits inside a quoted heredoc nested in a $( )
+    # command substitution, where one lone apostrophe breaks shell parsing. The first
+    # draft of this comment did exactly that and the file stopped parsing.
     if r.get("engine") != "claude":
         continue
     if newest is None or str(r.get("ts", "")) > str(newest.get("ts", "")):
@@ -250,7 +274,7 @@ fi
 if [ -n "$WORKER_RECEIPT" ]; then
   info "DISPATCHER-DRIVEN RECEIPT FOUND: the scheduled loop reviewed a PR unattended -- $WORKER_RECEIPT"
 else
-  info "NO DISPATCHER-DRIVEN RECEIPT YET: no codex record carries invoker=worker. A hand-run review does not count, and a record with no invoker key reads as manual."
+  info "NO DISPATCHER-DRIVEN RECEIPT YET: no claude record carries invoker=worker. A hand-run review does not count, and a record with no invoker key reads as manual."
 fi
 
 LOG="$STATE_DIR/dispatch.log"
@@ -267,8 +291,8 @@ fi
 
 echo
 if [ "$FAILED" -eq 0 ]; then
-  echo "RESULT: WIRED -- codex reviews the next PR the dispatcher picks up."
+  echo "RESULT: WIRED -- claude reviews the next PR the dispatcher picks up."
   exit 0
 fi
-echo "RESULT: NOT WIRED ($FAILED check(s) failed). Codex will NOT review on the next run."
+echo "RESULT: NOT WIRED ($FAILED check(s) failed). The PRIMARY engine will NOT review on the next run."
 exit 1
