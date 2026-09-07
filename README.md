@@ -60,7 +60,7 @@ Ask about a person, and Kipi pulls their relationship history, the decisions tha
 The reader reads the project's own folder, never a template. Three things make that true:
 
 - Sub-stores. A project can hold many knowledge bases, one per case or engagement, each with the same layout. Name one in a question and the search scopes to it. Name none and it searches all of them. A name that appears in several cases comes back as one block per case, never collapsed into the last one.
-- The project's own documents. Every markdown folder the project keeps is a source, one search pass per question, every excerpt with its file and line.
+- The project's own documents. Eight declared folder names (`output`, `research`, `inputs`, `investigation`, `build`, `docs`, `notes`, `memory`) are searched under the project root and under every sub-store, one pass per question, every excerpt with its file and line. The list is data, not code: it lives in `q-system/.q-system/knowledge-sources.json`, so a project can change what counts as a document folder.
 - Candidates from the question itself. A capitalized word the index does not know is looked up in those documents. A hit makes it an entity. A word found in more than four knowledge bases is treated as common vocabulary, dropped, and the receipt says so.
 
 The model never has to remember to go looking.
@@ -71,7 +71,9 @@ The model never has to remember to go looking.
 
 An empty search result is not proof that nothing exists. Most retrieval treats it that way.
 
-Kipi's supply step writes a receipt. Every source the question needed is recorded as read, empty, unreadable, or not searched because a deadline or a budget cut the pass short. The first line of what the model receives says `COVERAGE: FULL`, or `COVERAGE: PARTIAL` with the missing sources named, or `COVERAGE: NONE` when not one declared source could be read. FULL means fully searched. Any pass that stopped early reads as partial, never as full.
+Kipi's supply step writes a receipt. Every source the question needed is recorded as read, empty, unreadable, or cut short. The first line of what the model receives says `COVERAGE: FULL`, or `COVERAGE: PARTIAL` with the missing sources named, or `COVERAGE: NONE` when not one declared source could be read.
+
+Where the line is drawn, precisely, because this is the sentence a reader trusts hardest. A wall-clock deadline that stops a required source drops the verdict to PARTIAL, and the header names the class and entity it stopped at. A byte budget that truncates a document scan is written into the receipt row as `partially searched (budget)`, and on its own it does not move the verdict: the document class is optional in the shipped manifest, and only a required source moves it. So a truncated document pass can sit under `COVERAGE: FULL` with the truncation visible one line down in the receipt. One function computes the verdict, in `q-system/.q-system/scripts/knowledge_supply.py`.
 
 ```mermaid
 flowchart TB
@@ -79,9 +81,11 @@ flowchart TB
     S -->|"read, has lines"| A["supplied verbatim, with file and line"]
     S -->|"read, nothing there"| B["recorded: searched, empty"]
     S -->|"file missing or corrupt"| C["recorded: could not read"]
-    S -->|"deadline or budget cut the pass short"| D["recorded: partially searched"]
+    S -->|"a deadline stopped a required source"| D["recorded: not searched (deadline)"]
+    S -->|"a byte budget truncated a document scan"| E["recorded: partially searched (budget)"]
     A --> F["COVERAGE: FULL"]
     B --> F
+    E --> F
     C --> P["COVERAGE: PARTIAL, missing sources named"]
     D --> P
     C -. "every declared source unreadable" .-> N["COVERAGE: NONE"]
@@ -309,22 +313,49 @@ cd kipi-system && claude
 
 Setup walks you through who you are, what you work on, how you write, and who you know. Takes about 20 minutes. After that the system runs.
 
+The scheduled jobs are a separate, opt-in step. `./kipi install-jobs` installs the 15 committed launchd jobs on this machine. Without it nothing is scheduled, so no morning brief, no nightly health check, and no autonomous work queue.
+
+---
+
+## What else is in the box
+
+The pages above are the knowledge half. The rest of the repo:
+
+- **A CLI with 23 verbs.** `./kipi help` prints them. `check` runs the validation harness. `list` shows every copy. `health` finds dark or failing jobs, double schedules and open spillover. `work` and `converge` take a ready issue to an approved pull request. `judgment` freezes the context behind a triage decision so it can be replayed.
+- **A local MCP server with 73 tools** in `plugins/kipi-core/kipi-mcp/`: deterministic linters and scorers, morning-routine step logging, follow-up loop tracking, backup, export, import.
+- **22 namespaced slash commands** across six plugins, listed above.
+- **65 hook entries** wired in `settings-template.json`, plus seven more in the plugins' own `hooks.json`. Every copy gets the same switches, because they ship as one file.
+- **15 launchd jobs**, committed as plists next to the scripts they run.
+
 ---
 
 ## Commands
 
 Optional. Most usage is just talking to the system in Claude Code.
 
-| Command | What it does |
+Two kinds, and the difference matters when you type one. The `/q-*` names are **conventions**, not registered slash commands. They are documented in `q-system/.q-system/commands.md`, the model reads them, and saying one puts the session in that mode. No file under a `commands/` directory backs them.
+
+| Convention | What it does |
 |---|---|
-| `/q-debrief` | Extract insights from a conversation or paste a transcript |
+| `/q-debrief` | Extract insights from a conversation. Pasting a transcript runs it without being asked |
 | `/q-draft` | Quick email, DM, or content draft in your voice |
 | `/q-engage` | Generate engagement on someone else's post |
 | `/q-research` | Citation-only research mode |
-| `/q-morning` | The day brief: one message with your calendar, mail needing an answer, and your board |
+| `/q-morning` | The day brief: your calendar, mail needing an answer, your board. Also runs itself at 07:40 as the `com.kipi.morning-brief` job |
 | `/q-wrap` | End-of-day health check |
 | `/q-handoff` | Save context for next session |
-| `/wiring-check` | End-of-task gate: prove every change is connected |
+
+The **registered** slash commands ship inside the plugins and are namespaced. `find plugins -path '*/commands/*.md'` lists all 22.
+
+| Command | What it does |
+|---|---|
+| `/kipi-core:wiring-check` | End-of-task gate: prove every change is connected |
+| `/kipi-core:rca-start`, `/kipi-core:rca-check` | Scaffold a root-cause analysis, then lint it against the template |
+| `/kipi-core:say` | Read the last answer back as audio |
+| `/kipi-core:voice-refresh` | Rebuild the voice model from new meeting transcripts |
+| `/kipi-core:linear-drain` | File the issues that were captured while offline |
+| nine `/prd-os:*` | Rough idea to reviewed PRD to one issue spec per unit of work |
+| six `/kipi-dsse:*` | Execute one issue under scope enforcement, with receipts |
 
 ---
 
@@ -358,7 +389,8 @@ If you don't, you still get an AI that doesn't make you decide who to contact, w
 - `.env`, credentials, and key files blocked from read/write
 - PreToolUse hooks intercept dangerous operations
 - No secrets in committed files
-- `sudo` and `git push --force` denied by default, and the recursive remove denied at the filesystem root and on dot directories. The wider destructive-command guard (recursive removes anywhere, hard resets, branch deletion, the fleet-wide sync) is a shipped hook script that a person wires per machine. It refuses, prints a one-time approval token, and only a human shell can supply it.
+- Denied by default in both shipped settings files: `sudo`, force-push, hard reset, rebase, world-writable chmod, piped `curl`/`wget` installs, and the recursive remove at the filesystem root and on dot directories. Read the list yourself in the `permissions.deny` block of `settings-template.json`.
+- The wider destructive-command guard (recursive removes anywhere, branch deletion, the fleet-wide sync) runs on my machine and is NOT shipped in a form you can switch on. The repo carries one copy, `q-system/.q-system/tests/fixtures/destructive-op-deny.reference.sh`, non-executable and named `.reference.` on purpose so it cannot be mistaken for the live gate. No installer writes it to a hook path. Read it and wire your own, or run without it.
 
 ---
 
