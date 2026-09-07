@@ -696,3 +696,38 @@ def test_a_worktree_still_refuses_on_its_own_lock(tmp_path):
     log = subprocess.run(["git", "log", "--oneline"], cwd=wt,
                          capture_output=True, text=True).stdout
     assert "chore" not in log, "it committed while holding its own lock"
+
+
+def test_the_lock_dir_resolves_against_PROJ_DIR_not_the_process_cwd(tmp_path):
+    """PR #321 review, minor. The SAME defect PR #314 round 2 fixed one guard up.
+
+    `git rev-parse --git-dir` answers RELATIVE to the cwd it ran in, and run()
+    executes in PROJ_DIR (CLAUDE_PROJECT_DIR), which is not this process's cwd.
+    Resolving the answer against os.getcwd() points at a path that does not exist
+    whenever the two differ, no lock is ever found, and the guard FAILS OPEN into
+    the exact pre-guard behaviour it was built to remove.
+
+    fleet_update_in_progress carries that scar in its own comment and has no test
+    for it either. Every other test in this file fires with cwd == PROJ_DIR, so
+    `os.path.abspath(git_dir)` in place of `os.path.abspath(join(PROJ_DIR, ...))`
+    passed all 43 of them. This is the one that can tell them apart.
+    """
+    root, run = _repo(tmp_path)
+    _write(root, "memory/MEMORY.md", "- note\n")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    assert not (elsewhere / ".git").exists(), "the fixture must not be a repo"
+    lock = root / ".git" / "index.lock"
+    lock.write_text("held")
+    try:
+        out = subprocess.run(
+            [sys.executable, HOOK], capture_output=True, text=True,
+            cwd=str(elsewhere),
+            env=dict(os.environ, CLAUDE_PROJECT_DIR=str(root)))
+    finally:
+        lock.unlink()
+    assert "another commit is in flight" in (out.stdout + out.stderr), (
+        "with cwd outside PROJ_DIR the guard did not see PROJ_DIR's held lock. "
+        "The git-dir answer is being resolved against the process cwd.")
+    assert "chore" not in run("git", "log", "--oneline").stdout, \
+        "it committed while a lock was held in PROJ_DIR's git dir"
