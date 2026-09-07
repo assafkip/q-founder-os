@@ -626,3 +626,73 @@ def test_it_still_commits_when_no_lock_is_held(tmp_path):
     _fire(root)
     log = run("git", "log", "--oneline").stdout
     assert "chore" in log, "the hook refused with no lock held, so it never commits"
+
+
+def _worktree(tmp_path):
+    """A linked worktree of a fresh repo, plus its main checkout.
+
+    Returns (main_root, wt_root, main_git_dir, wt_git_dir).
+    """
+    main, run = _repo(tmp_path)
+    wt = tmp_path / "wt"
+    run("git", "branch", "-q", "side")
+    run("git", "worktree", "add", "-q", str(wt), "side")
+    main_git = main / ".git"
+    wt_git = main_git / "worktrees" / "wt"
+    assert wt_git.is_dir(), f"the worktree fixture never linked: {wt_git}"
+    return main, wt, main_git, wt_git
+
+
+def test_a_worktree_does_not_refuse_on_the_main_checkouts_lock(tmp_path):
+    """THE MUTANT THIS EXISTS FOR: --git-common-dir in place of --git-dir.
+
+    It survives every other test in this file, because a plain repo's git dir IS
+    its common dir, so the two spellings are indistinguishable there. They are not
+    indistinguishable on this checkout, which carries a dozen linked worktrees.
+
+    MEASURED 2026-09-07, not reasoned: index.lock and HEAD.lock are PER-WORKTREE.
+    Holding `<main>/.git/index.lock` does not block a `git add` run from a linked
+    worktree (rc=0), and holding `<main>/.git/worktrees/<n>/index.lock` does not
+    block one run from the main checkout (rc=0). Only the worktree's own lock
+    stops it (rc=128, "Unable to create ... index.lock"). So `--git-dir`, which
+    answers the per-worktree dir, names exactly the lock that can stop THIS
+    checkout, and `--git-common-dir` names one that cannot.
+
+    The cost of getting it wrong is quiet and fleet-wide: a commit in the main
+    checkout holds index.lock for its whole pre-commit (445-497s measured), so a
+    common-dir read would silence the safety net in every linked worktree for
+    eight minutes at a time, for a lock none of them was ever going to contend.
+    Note that fleet_update_in_progress deliberately reads the OPPOSITE dir, and
+    is right to: a run marker is a claim on the whole checkout, a lock is not.
+    """
+    _main, wt, main_git, _wt_git = _worktree(tmp_path)
+    _write(wt, "memory/MEMORY.md", "- note\n")
+    lock = main_git / "index.lock"
+    lock.write_text("held by the main checkout")
+    try:
+        _fire(wt)
+    finally:
+        lock.unlink()
+    log = subprocess.run(["git", "log", "--oneline"], cwd=wt,
+                         capture_output=True, text=True).stdout
+    assert "chore" in log, (
+        "the worktree refused on a lock in the MAIN checkout's git dir, which "
+        "cannot block it. The guard is reading --git-common-dir, not --git-dir.")
+
+
+def test_a_worktree_still_refuses_on_its_own_lock(tmp_path):
+    """The other direction, so the test above cannot be satisfied by never
+    refusing at all. The per-worktree lock is the one that stops this checkout."""
+    _main, wt, _main_git, wt_git = _worktree(tmp_path)
+    _write(wt, "memory/MEMORY.md", "- note\n")
+    lock = wt_git / "index.lock"
+    lock.write_text("held by this worktree")
+    try:
+        out = _fire(wt)
+    finally:
+        lock.unlink()
+    assert "another commit is in flight" in (out.stdout + out.stderr), \
+        "a worktree fired into its OWN held index.lock instead of refusing"
+    log = subprocess.run(["git", "log", "--oneline"], cwd=wt,
+                         capture_output=True, text=True).stdout
+    assert "chore" not in log, "it committed while holding its own lock"
