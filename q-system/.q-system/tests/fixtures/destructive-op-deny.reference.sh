@@ -436,26 +436,10 @@ if [ "$TOOL_NAME" = "Bash" ] && [ -n "$COMMAND" ]; then
     done
   done < <(printf '%s\n' "$COMMAND" | tr ';|&' '\n\n\n')
 
-  if [ "$_fleet_preview" = "1" ]; then
-    log_decision "allow" "fleet: every stage matching a fleet pattern is a preview"
-    exit 0
-  fi
-
-  # A preview is how you EARN the run, so it is never blocked. Checked as a plain
-  # substring rather than folded into each regex: `--dry` and `--dry-run` are the
-  # only two spellings kipi-update.sh accepts, and an exemption that is easy to
-  # read is worth more here than one that is clever.
-  case "$COMMAND" in
-    *--dry*) : ;;
-    *)
-      for pat in "${FLEET_DENY[@]}"; do
-        if echo "$COMMAND" | grep -Eq "$pat"; then
-          emit_deny "fleet-wide delete: this rsyncs the skeleton into EVERY registered instance with a delete flag, and a source tree missing a package removes it from all of them at once (2026-08-07: voicekit deleted from 19 instances). Preview it first with --dry-run and read what will be REMOVED, not only what changes. Pattern: $pat"
-        fi
-      done
-      ;;
-  esac
-
+  # PLACED ABOVE THE _fleet_preview EARLY EXIT (round 2 of PR 323). The first cut
+  # sat after it, so one preview stage anywhere in the block set _fleet_preview and
+  # exited before either layer ran: `X --dry-run && ( X --only Y )` was ALLOWED,
+  # the exact hazard ASK-1118 names. Measured, then moved.
   # ==================================================================== sp-37c08fb1
   # THE FLEET UPDATER AS A SCRIPT FILE, WITH ANY PATH PREFIX OR NONE.
   #
@@ -497,7 +481,21 @@ if [ "$TOOL_NAME" = "Bash" ] && [ -n "$COMMAND" ]; then
   # command: ALLOW on both before this line. `([({][[:space:]]*)*` skips any run
   # of opening parens or braces; the path still has to be the command itself, so
   # `( cat kipi-update.sh )` stays a read.
-  _FLEET_SCRIPT_RE='(^|[;&|][[:space:]]*)([({][[:space:]]*)*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*[^[:space:]]*kipi-update\.sh([[:space:]]|$)'
+  # Transparent prefixes and a quoted path, round 2: `timeout 900 X`, `setsid X`,
+  # `exec X`, `eval X` and `"./X"` were each measured ALLOW with the real updater
+  # present. The prefix list is the one argv_deny_reason already carries plus the
+  # three that hand the stage to their argument unchanged; timeout eats its
+  # duration. A quote on either side of the path is skipped, never required.
+  _FLEET_PREFIX_RE='(sudo|command|nohup|nice|time|env|exec|setsid|eval|timeout[[:space:]]+[^[:space:]]+|[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*)'
+  # An interpreter in front of the path is the same run: FLEET_DENY entry 2 covers
+  # it at the top of a stage, and nowhere else, so `( bash PATH )` and a wrapper
+  # line `bash PATH` were both unmatched (round 2 of PR 323). No flags between
+  # the interpreter and the path, so `bash -n PATH` stays a syntax check.
+  _FLEET_SCRIPT_RE='(^|[;&|][[:space:]]*)([({][[:space:]]*)*('"$_FLEET_PREFIX_RE"'[[:space:]]+)*((bash|sh|zsh|ksh|dash|source)[[:space:]]+)?["'"'"']?[^[:space:]"'"'"']*kipi-update\.sh["'"'"']?([[:space:]]|$)'
+  # The CLI spelling at command position, for the wrapper scan below. The bare
+  # FLEET_DENY entry 1 is unanchored on purpose for the command line (ASK-1118);
+  # inside a script body an unanchored match reads a help string as a run.
+  _FLEET_CLI_RE='(^|[;&|][[:space:]]*)([({][[:space:]]*)*('"$_FLEET_PREFIX_RE"'[[:space:]]+)*kipi[[:space:]]+update([[:space:]]|$)'
   while IFS= read -r _stage; do
     [ -n "$_stage" ] || continue
     fleet_stage_is_preview "$_stage" && continue
@@ -535,20 +533,26 @@ if [ "$TOOL_NAME" = "Bash" ] && [ -n "$COMMAND" ]; then
   # STRING, where `bash <<'EOF'` executes its own body and any parser deciding "this
   # is only prose" becomes a bypass surface. Here the subject is a FILE, `#` is the
   # shell's own comment marker, and a commented line cannot execute. Measured over
-  # the 212 tracked .sh files in this repo: without the drop the fleet rule refuses
-  # 16 ordinary scripts and the bypass rule refuses this hook's own deny message;
-  # with it the fleet rule refuses 6, and all 6 genuinely invoke the fleet updater
-  # (they are its own test suite). A gate red on 8% of its population gets switched
-  # off, and a gate that is off protects nothing.
+  # the 212 tracked .sh files in this repo: the comment drop alone still refused
+  # 20 of them (measured 2026-09-07, round 2 of PR 323), so the drop is necessary
+  # and not sufficient; the command-position read below is what brings the count
+  # down to the scripts that run the updater. A gate red on its population gets
+  # switched off, and a gate that is off protects nothing.
   #
-  # ACCEPTED COST, stated rather than discovered later: those 6 updater tests now
-  # need `kipi-approve` to be run through the Bash tool. That is the fail-closed
-  # side, and the out-of-band approval already exists for exactly this.
+  # ACCEPTED COST, stated rather than discovered later: the updater's own test
+  # scripts, which run it at command position, now need `kipi-approve` to be run
+  # through the Bash tool. That is the fail-closed side, and the out-of-band
+  # approval already exists for exactly this.
   #
   # `bash -n FILE` is a SYNTAX CHECK, not a run, so it is skipped -- same reason the
   # patterns above are anchored at command position. Blocking a read gets the gate
   # switched off.
-  _BYPASS_ASSIGN_RE='(^|[^A-Za-z0-9_])(export[[:space:]]+)?ALLOW_DESTRUCTIVE[[:space:]]*='
+  # ANCHORED AT COMMAND POSITION, round 2. The first cut matched the token
+  # anywhere in a line, so this hook's own deny text (`set ALLOW_DESTRUCTIVE=1 to
+  # bypass all`, a code line inside an echo, not a comment) refused the fixture
+  # and the capability-token installer, the escape hatch this design leans on.
+  # An assignment is a stage that BEGINS with the assignment.
+  _BYPASS_ASSIGN_RE='(^|[;&|][[:space:]]*)([({][[:space:]]*)*(export[[:space:]]+|env[[:space:]]+)?ALLOW_DESTRUCTIVE[[:space:]]*='
 
   # Echoes the path of the script a stage RUNS, rc 0. rc 1 means "this stage runs no
   # readable script file", which is the overwhelmingly common case and must be cheap.
@@ -572,8 +576,10 @@ if [ "$TOOL_NAME" = "Bash" ] && [ -n "$COMMAND" ]; then
         # bypass: the plain form was DENY, every paren or brace form was ALLOW.
         \(|\{)                           w=( "" "${w[@]:1}" ); w=( "${w[@]:1}" ) ;;
         \(*|\{*)                         w[0]="${w[0]#[\(\{]}" ;;
+        \"*|\'*)                         w[0]="${w[0]#[\"\']}" ;;
         *=*)                             w=( "" "${w[@]:1}" ); w=( "${w[@]:1}" ) ;;
-        sudo|command|nohup|nice|time|env) w=( "" "${w[@]:1}" ); w=( "${w[@]:1}" ) ;;
+        sudo|command|nohup|nice|time|env|exec|setsid|eval) w=( "" "${w[@]:1}" ); w=( "${w[@]:1}" ) ;;
+        timeout)                         w=( "" "${w[@]:2}" ); w=( "${w[@]:1}" ) ;;
         *) break ;;
       esac
     done
@@ -586,7 +592,7 @@ if [ "$TOOL_NAME" = "Bash" ] && [ -n "$COMMAND" ]; then
     for _i in "${!w[@]}"; do
       while :; do
         case "${w[$_i]}" in
-          *\)|*\}) w[$_i]="${w[$_i]%?}" ;;
+          *\)|*\}|*\"|*\') w[$_i]="${w[$_i]%?}" ;;
           *) break ;;
         esac
       done
@@ -629,18 +635,54 @@ if [ "$TOOL_NAME" = "Bash" ] && [ -n "$COMMAND" ]; then
     _target="$(_fleet_script_target "$_stage")" || continue
     # Bounded on purpose: the updater itself is 145 KB and this runs on every Bash
     # tool call. 64 KB is far past where a wrapper declares its environment.
-    _body="$(head -c 65536 "$_target" 2>/dev/null | grep -v '^[[:space:]]*#')"
-    [ -n "$_body" ] || continue
-    if printf '%s\n' "$_body" | grep -Eq "$_BYPASS_ASSIGN_RE"; then
+    # THE BODY IS READ AS COMMANDS, NOT AS TEXT (round 2). The first cut grepped
+    # the whole body for every FLEET_DENY pattern. Measured 2026-09-07 on this
+    # repo: 20 of 212 tracked scripts refused, among them an install hint that
+    # echoes the CLI phrase, a script that carries it inside a Python string, and
+    # the capability-token installer; across the founder's projects, 1933 of the
+    # 5276 scripts carrying any matchable token. A gate red on that population
+    # gets switched off. So every non-comment line is split into stages the way
+    # the command line is, and only a stage whose COMMAND is the updater, or
+    # whose command is an assignment of the bypass, counts. A backup script's
+    # rsync is not the fleet updater and is not matched here at all.
+    # Six process spawns per script, not one per stage: the first cut of this
+    # read looped a grep over every stage of every line and a population sweep
+    # that took nine minutes stopped finishing at all. Every stage is put on its
+    # own line with the same split the command line gets, prefixed with the
+    # boundary the anchored patterns expect, and matched once per pattern.
+    _bstages="$(head -c 65536 "$_target" 2>/dev/null | grep -v '^[[:space:]]*#' | tr ';|&' '\n\n\n' | sed 's/^/;/')"
+    _bypass_hit=0; _fleet_hit=""
+    if printf '%s\n' "$_bstages" | grep -Eq "$_BYPASS_ASSIGN_RE"; then _bypass_hit=1; fi
+    # A preview stage inside the body is exempt the way one on the command line is.
+    _fleet_hit="$(printf '%s\n' "$_bstages" | grep -v -- '--dry' | grep -E -m1 "$_FLEET_CLI_RE|$_FLEET_SCRIPT_RE" || true)"
+    if [ "$_bypass_hit" = "1" ]; then
       emit_deny "wrapper script arms the founder bypass in its own text: $_target. The bypass exists to require conscious action in the founder's own shell, and an agent cannot set it for itself; a script that assigns it hands that action to whoever types the script's name. On 2026-09-06 exactly this ran a real fleet sync on consulting and reverted a deliberate commit (sp-dc76e644). Fix the script to REFUSE unless the bypass comes from the calling shell."
     fi
     fleet_stage_is_preview "$_stage" && continue
-    for pat in "${FLEET_DENY[@]}"; do
-      if printf '%s\n' "$_body" | grep -Eq "$pat"; then
-        emit_deny "wrapper script runs the fleet updater: $_target matches $pat in its own text, so this command rsyncs the skeleton into EVERY registered instance with a delete flag while the command line itself looks harmless (sp-dc76e644). Preview it first with --dry-run IN ITS OWN TOOL CALL and read what will be REMOVED, not only what changes."
-      fi
-    done
+    if [ -n "$_fleet_hit" ]; then
+      emit_deny "wrapper script runs the fleet updater: $_target carries the stage [${_fleet_hit}] at command position in its own text (the leading semicolon is the stage boundary), so this command rsyncs the skeleton into EVERY registered instance with a delete flag while the command line itself looks harmless (sp-dc76e644). Preview it first with --dry-run IN ITS OWN TOOL CALL and read what will be REMOVED, not only what changes."
+    fi
   done < <(printf '%s\n' "$COMMAND" | tr ';|&' '\n\n\n')
+
+  if [ "$_fleet_preview" = "1" ]; then
+    log_decision "allow" "fleet: every stage matching a fleet pattern is a preview"
+    exit 0
+  fi
+
+  # A preview is how you EARN the run, so it is never blocked. Checked as a plain
+  # substring rather than folded into each regex: `--dry` and `--dry-run` are the
+  # only two spellings kipi-update.sh accepts, and an exemption that is easy to
+  # read is worth more here than one that is clever.
+  case "$COMMAND" in
+    *--dry*) : ;;
+    *)
+      for pat in "${FLEET_DENY[@]}"; do
+        if echo "$COMMAND" | grep -Eq "$pat"; then
+          emit_deny "fleet-wide delete: this rsyncs the skeleton into EVERY registered instance with a delete flag, and a source tree missing a package removes it from all of them at once (2026-08-07: voicekit deleted from 19 instances). Preview it first with --dry-run and read what will be REMOVED, not only what changes. Pattern: $pat"
+        fi
+      done
+      ;;
+  esac
 fi
 
 # ---- MCP destructive tool denials ----

@@ -105,6 +105,15 @@ SCRIPT_FORM_REFUSED = [
     "( ./kipi-update.sh --only X )",
     "{ kipi-update.sh --only X; }",
     "cd /Users/x/projects/kipi-scheduled && ( ( ./kipi-update.sh --only X ) )",
+    # Round 2: prefixes the reviewer measured ALLOW, and a quoted path.
+    "timeout 900 ./kipi-update.sh --only X",
+    "setsid ./kipi-update.sh --only X",
+    "exec ./kipi-update.sh --only X",
+    "eval ./kipi-update.sh --only X",
+    "\"./kipi-update.sh\" --only X",
+    "sudo FOO=bar nohup ./kipi-update.sh --only X",
+    "( bash /Users/x/projects/kipi-scheduled/kipi-update.sh --only X )",
+    "cd /Users/x && ( sh ./kipi-update.sh --only X )",
 ]
 
 # These already worked. They are here as the negative control for the pair above:
@@ -131,6 +140,7 @@ DRY_RUN_ALONE = [
 READING_IS_NOT_RUNNING = [
     "cat kipi-update.sh",
     "( cat kipi-update.sh )",
+    "bash -n kipi-update.sh",
     "grep -n rsync kipi-update.sh",
     "sed -n '1,20p' kipi-update.sh",
     "wc -l projects/kipi-scheduled/kipi-update.sh",
@@ -286,6 +296,96 @@ class TestAWrapperScriptIsADestructiveOpWearingAFilename:
         """The negative control for the case above, in the same shape."""
         w = write_script(tmp_path / "harmless.sh", HARMLESS)
         assert decide(hook_copy(tmp_path), "( bash %s )" % w, tmp_path) == "allow"
+
+class TestAPreviewInTheSameBlockDoesNotExemptTheApply:
+    """Round 1 of PR 323 measured: `X --dry-run && ( X --only Y )` ALLOWED, because
+    a preview stage matching an old pattern set _fleet_preview and the early exit
+    ran before either new layer. ASK-1118's own words: a preview sharing a command
+    block with the apply does not exempt the apply."""
+
+    def test_a_dry_run_then_a_subshell_apply_is_refused(self, tmp_path):
+        assert decide(hook_copy(tmp_path),
+                      "./kipi-update.sh --dry-run && ( ./kipi-update.sh --only X )",
+                      tmp_path) == "deny"
+
+    def test_a_dry_run_then_a_bypass_wrapper_is_refused(self, tmp_path):
+        w = write_script(tmp_path / "consulting-sync-run.sh", ARMS_THE_BYPASS)
+        assert decide(hook_copy(tmp_path),
+                      "./kipi-update.sh --dry-run && bash %s --verify-only" % w,
+                      tmp_path) == "deny"
+        assert decide(hook_copy(tmp_path),
+                      "./kipi-update.sh --dry && bash %s" % w, tmp_path) == "deny"
+
+    def test_a_dry_run_then_something_harmless_still_passes(self, tmp_path):
+        assert decide(hook_copy(tmp_path),
+                      "./kipi-update.sh --dry-run && echo done", tmp_path) == "allow"
+
+
+PRINTS_THE_PHRASE = (
+    "#!/bin/bash\n"
+    'echo "    Run: kipi update"\n'
+    "python3 - <<'PY'\n"
+    'import sys; sys.stderr.write("run kipi update --dry first")\n'
+    "PY\n"
+)
+
+CARRIES_THE_HOOKS_OWN_DENY_TEXT = (
+    "#!/bin/bash\n"
+    'reason="fleet-wide delete"\n'
+    'echo "destructive-op-deny: $reason. (or set %s=1 to bypass all)."\n'
+) % BYPASS
+
+BACKS_UP_PHOTOS = (
+    "#!/bin/bash\n"
+    "rsync -a --delete /Volumes/Photos/ /Volumes/Backup/\n"
+)
+
+RUNS_THE_CLI_PHRASE = (
+    "#!/bin/bash\n"
+    "set -euo pipefail\n"
+    "kipi update --only consulting\n"
+)
+
+REPO = pathlib.Path(__file__).resolve().parents[3]
+
+
+class TestTheWrapperRuleReadsCommandsNotText:
+    """Round 1 of PR 323 measured the first cut against this repo's 212 tracked
+    scripts: 20 refused, among them an install hint that echoes the CLI phrase,
+    a script carrying it inside a Python string, and the capability-token
+    installer. The rule reads a script's lines as commands now."""
+
+    def test_a_script_that_only_prints_the_phrase_passes(self, tmp_path):
+        w = write_script(tmp_path / "auto-update.sh", PRINTS_THE_PHRASE)
+        assert decide(hook_copy(tmp_path), "bash %s" % w, tmp_path) == "allow"
+
+    def test_a_script_carrying_the_deny_text_in_an_echo_passes(self, tmp_path):
+        w = write_script(tmp_path / "installer.sh", CARRIES_THE_HOOKS_OWN_DENY_TEXT)
+        assert decide(hook_copy(tmp_path), "bash %s" % w, tmp_path) == "allow"
+
+    def test_a_backup_script_with_rsync_delete_passes(self, tmp_path):
+        w = write_script(tmp_path / "backup-photos.sh", BACKS_UP_PHOTOS)
+        assert decide(hook_copy(tmp_path), "bash %s" % w, tmp_path) == "allow"
+
+    def test_a_script_that_runs_the_cli_phrase_is_refused(self, tmp_path):
+        w = write_script(tmp_path / "nightly.sh", RUNS_THE_CLI_PHRASE)
+        assert decide(hook_copy(tmp_path), "bash %s" % w, tmp_path) == "deny"
+
+    def test_a_wrapper_behind_timeout_is_still_read(self, tmp_path):
+        w = write_script(tmp_path / "consulting-sync-run.sh", ARMS_THE_BYPASS)
+        assert decide(hook_copy(tmp_path), "timeout 60 bash %s" % w, tmp_path) == "deny"
+
+    @pytest.mark.parametrize("rel", [
+        "plugins/kipi-core/scripts/install-capability-token.sh",
+        "q-system/hooks/auto-update.sh",
+        "q-system/.q-system/tests/fixtures/destructive-op-deny.reference.sh",
+        "kipi-push-upstream.sh",
+    ])
+    def test_the_repos_own_scripts_the_first_cut_refused_now_pass(self, tmp_path, rel):
+        p = REPO / rel
+        if not p.is_file():
+            pytest.skip("not present in this checkout: %s" % rel)
+        assert decide(hook_copy(tmp_path), "bash %s" % p, tmp_path) == "allow"
 
 class TestNothingElseMoved:
     """The layers added here are deny-only and appended. Everything the file
