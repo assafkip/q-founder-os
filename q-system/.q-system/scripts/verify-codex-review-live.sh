@@ -39,7 +39,7 @@ pass() { printf '  PASS %s\n' "$1"; }
 fail() { printf '  FAIL %s\n' "$1"; FAILED=$((FAILED+1)); }
 info() { printf '  ---- %s\n' "$1"; }
 
-echo "codex-review live-wiring check ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+echo "PR-review live-wiring check -- PRIMARY engine: claude ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
 
 # --- 1. the scheduler exists and is loaded -----------------------------------
 # CAPTURE FIRST, then match. `launchctl list | grep -q "$LABEL"` under
@@ -93,7 +93,7 @@ else
     || fail "the live worker does NOT parse; the whole run dies"
 fi
 
-# --- 4. the live reviewer makes codex THE GATE, not a second opinion ---------
+# --- 4. the live reviewer makes claude THE GATE, not a second opinion --------
 if [ ! -f "$LIVE_REVIEWER" ]; then
   fail "no reviewer at $LIVE_REVIEWER"
 else
@@ -195,7 +195,36 @@ info "StartInterval: ${INTERVAL}s"
 # state dir silently reported on the founder's real one -- a verifier reading a
 # different installation than the one under test is worse than no verifier.
 STATE_DIR="${KIPI_STATE_DIR:-$HOME/.config/kipi}"
-RECEIPT="$(python3 - "$STATE_DIR/pr-reviews" <<'PY' 2>/dev/null
+# WHICH REPO THIS VERIFIER IS ANSWERING FOR. Derived from the LIVE checkout the
+# plist actually points at, then keyed exactly the way pr-review-agent.sh keys its
+# artifacts (repo-slug-lib.sh: artifact_key turns owner/name into owner_name). One
+# definition of the shape, reproduced here rather than re-invented, because the
+# scan below now depends on it to avoid answering off another repo's record.
+# PURE PARAMETER EXPANSION, NOT sed -E. The first cut used a lazy `+?` quantifier,
+# which BSD sed on macOS rejects outright ("repetition-operator operand invalid").
+# stderr went to /dev/null, the slug came out EMPTY, and the scan below then matched
+# NOTHING -- fail-closed, but silently, on the one machine this runs on. Caught by
+# EXECUTING the script; `bash -n` parses a broken regex just fine.
+_ru="$(git -C "$LIVE_ROOT" config --get remote.origin.url 2>/dev/null)"
+_ru="${_ru%.git}"; _rn="${_ru##*/}"; _ro="${_ru%/*}"; _ro="${_ro##*[:/]}"
+if [ -n "$_rn" ] && [ -n "$_ro" ] && [ "$_rn" != "$_ru" ]; then
+  RECEIPT_SLUG="$(printf '%s_%s' "$_ro" "$_rn" | tr -c 'A-Za-z0-9._-' '_')"
+else
+  RECEIPT_SLUG=""
+fi
+# The legacy un-slugged pr-<N>.verdict.json records all belong to the HOME repo
+# (repo-slug-lib.sh verdict_record_path says so), so only the home repo may count
+# them. Anything else must match its own key or it is another repo's evidence.
+RECEIPT_LEGACY_OK=0
+case "$RECEIPT_SLUG" in *_kipi-system) RECEIPT_LEGACY_OK=1 ;; esac
+# AN UNDERIVABLE SLUG IS ANNOUNCED, NOT ABSORBED. With no key and no legacy
+# permission the scan matches nothing and prints "NO RECEIPT YET", which reads
+# exactly like a healthy repo that has simply not been reviewed yet. That is the
+# silent-wrong-answer shape this whole file exists to refuse.
+if [ -z "$RECEIPT_SLUG" ]; then
+  fail "cannot derive this repo slug from $LIVE_ROOT (remote.origin.url='${_ru:-<none>}'), so the receipt scan below would silently match no records and report NO RECEIPT for a repo that may well have one."
+fi
+RECEIPT="$(python3 - "$STATE_DIR/pr-reviews" "$RECEIPT_SLUG" "$RECEIPT_LEGACY_OK" <<'PY' 2>/dev/null
 import glob, json, os, sys
 newest = None
 # Initialised beside `newest`, because the first cut did NOT initialise it: the loop
@@ -204,15 +233,62 @@ newest = None
 # 'dispatcher-driven receipt' then PASSED against the failure message. Same
 # swallowed-exception shape as the ledger-root fix earlier tonight.
 worker = None
-# Both layouts: the PRIMARY engine writes pr-<N>.verdict.json to the parent dir,
+# Both layouts: the PRIMARY engine writes its verdict record to the parent dir,
 # a secondary engine to <dir>/<engine>/. Globbing only one would miss the receipt
 # the moment KIPI_REVIEW_PRIMARY_ENGINE changes.
-for p in glob.glob(os.path.join(sys.argv[1], "*.verdict.json")) + \
-         glob.glob(os.path.join(sys.argv[1], "*", "*.verdict.json")):
+#
+# SCOPED TO THIS REPO (review of PR #320, major). This scan used to glob every
+# *.verdict.json in the store, which holds records for 3 repo slugs plus ~120
+# legacy un-slugged ones. So a worker-driven review of a DIFFERENT repository
+# satisfied the dispatcher-driven proof line for THIS one -- the exact defect
+# repo-slug-lib.sh was written to end, quoting its own header: a gate could read
+# an APPROVE earned by a different repository code. A verifier that answers
+# "is THIS repo wired" off another repo record is worse than no verifier.
+#
+# The legacy un-slugged pr-<N>.verdict.json shape is accepted ONLY for the home
+# repo, matching verdict_record_path in that same lib, which documents that all
+# ~90 legacy records belong to the home repo.
+key = sys.argv[2]                      # e.g. assafkip_kipi-system, or "" for legacy-only
+legacy_ok = sys.argv[3] == "1"
+def mine(path):
+    b = os.path.basename(path)
+    if key and b.startswith(key + "__"):
+        return True
+    return legacy_ok and "__" not in b
+for p in sorted(filter(mine,
+        glob.glob(os.path.join(sys.argv[1], "*.verdict.json")) +
+        glob.glob(os.path.join(sys.argv[1], "*", "*.verdict.json")))):
     try:
         r = json.load(open(p))
     except Exception:
         continue          # a corrupt record is not a receipt
+    # ENGINE NAME CANNOT SEE WHICH CONTRACT A RECORD WAS WRITTEN UNDER (review of
+    # PR #319 minor, corrected by the review of PR #320). The primary engine went
+    # claude -> codex (2026-07-29) -> claude (2026-09-06), so in principle a claude
+    # record could come from the current era, the pre-07-29 primary era, or a
+    # 07-29..09-06 ADVISORY run.
+    #
+    # WHAT IS ACTUALLY MEASURED, 2026-09-07, replacing a causal sentence that was
+    # asserted here and was FALSE. The earliest claude record in the store is dated
+    # 2026-09-03, so ZERO exist from the pre-07-29 era and that era is unreachable
+    # through this filter. The 4 claude records sitting at this ROOT are all dated
+    # 09-03/09-04, i.e. from the codex-primary window, where claude was advisory --
+    # 2 of them ALSO have a copy in the subdir, the fingerprint of a hand run with a
+    # non-default primary. The earlier comment explained the root records by saying
+    # claude was primary before 07-29. That was a story, not a measurement.
+    #
+    # SO THE REMAINING EXPOSURE IS NARROW AND IS STATED IN THE OUTPUT, not only
+    # here: the ANY line can be satisfied by an advisory-era record. The
+    # DISPATCHER-DRIVEN line additionally requires invoker=worker, and the scan is
+    # now scoped to this repo, so it can no longer be answered by another repo.
+    # The durable fix is a `gating` boolean on the record at write time (sp-bd35985f);
+    # a date literal here would be the stale-safety-argument shape the PR #319 review
+    # existed to remove.
+    #
+    # NO APOSTROPHES IN THIS BLOCK. It sits inside a quoted heredoc nested in a $( )
+    # command substitution, where one lone apostrophe breaks shell parsing. The first
+    # draft of this comment did exactly that and the file stopped parsing.
+    r["_advisory"] = os.path.basename(os.path.dirname(p)) != os.path.basename(sys.argv[1].rstrip("/"))
     if r.get("engine") != "claude":
         continue
     if newest is None or str(r.get("ts", "")) > str(newest.get("ts", "")):
@@ -227,9 +303,14 @@ for p in glob.glob(os.path.join(sys.argv[1], "*.verdict.json")) + \
         if worker is None or str(r.get("ts", "")) > str(worker.get("ts", "")):
             worker = r
 def line(r):
-    return "PR #%s %s verdict=%s head=%.12s at %s (invoker=%s)" % (
+    # THE CAVEAT GOES IN THE OUTPUT (review of PR #320, minor). It used to live only
+    # in a comment above, which the operator reading this banner never sees -- and a
+    # comment is not a fix. A record written into an <engine>/ subdir is by
+    # construction an ADVISORY one, so say so on the line itself.
+    tag = " [ADVISORY-slot record, not a gating one]" if r.get("_advisory") else ""
+    return "PR #%s %s verdict=%s head=%.12s at %s (invoker=%s)%s" % (
         r.get("pr"), r.get("issue", "?"), r.get("verdict"),
-        str(r.get("head_sha", "")), r.get("ts"), r.get("invoker", "<absent>"))
+        str(r.get("head_sha", "")), r.get("ts"), r.get("invoker", "<absent>"), tag)
 if newest:
     print("ANY|" + line(newest))
 if worker:
@@ -250,7 +331,7 @@ fi
 if [ -n "$WORKER_RECEIPT" ]; then
   info "DISPATCHER-DRIVEN RECEIPT FOUND: the scheduled loop reviewed a PR unattended -- $WORKER_RECEIPT"
 else
-  info "NO DISPATCHER-DRIVEN RECEIPT YET: no codex record carries invoker=worker. A hand-run review does not count, and a record with no invoker key reads as manual."
+  info "NO DISPATCHER-DRIVEN RECEIPT YET: no claude record carries invoker=worker. A hand-run review does not count, and a record with no invoker key reads as manual."
 fi
 
 LOG="$STATE_DIR/dispatch.log"
@@ -267,8 +348,8 @@ fi
 
 echo
 if [ "$FAILED" -eq 0 ]; then
-  echo "RESULT: WIRED -- codex reviews the next PR the dispatcher picks up."
+  echo "RESULT: WIRED -- claude reviews the next PR the dispatcher picks up."
   exit 0
 fi
-echo "RESULT: NOT WIRED ($FAILED check(s) failed). Codex will NOT review on the next run."
+echo "RESULT: NOT WIRED ($FAILED check(s) failed). The PRIMARY engine will NOT review on the next run."
 exit 1
