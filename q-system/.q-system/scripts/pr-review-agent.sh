@@ -34,22 +34,35 @@
 # either stamp `codex-adversarial` (a false record) or skip the stamp and never
 # approve. In a repo whose thesis is receipts, the honest token had to exist first.
 #
-# TWO ENGINES, ONE SCRIPT -- CODEX IS THE ONE THAT GATES (ASK-221)
-# ----------------------------------------------------------------
-# Sana (the PR author) is Claude. A Claude reviewer is a different process with no
-# shared memory, genuinely useful -- but the same lab and the same model family, so
-# the blind spots stay CORRELATED. Fresh context is not an independent mind.
+# TWO ENGINES, ONE SCRIPT -- CLAUDE IS THE ONE THAT GATES (founder-directed 2026-09-06)
+# ---------------------------------------------------------------------------------
+# THIS REVERSES the 2026-07-29 directive recorded below. Founder, 2026-09-06, said
+# twice: "forget codex use claude for fallback" / "forget codex go with the claude
+# fallback". So claude is now THE reviewer: it owns `kipi/reviewer-approved` and
+# writes the ONE verdict record converge.sh and linear-worker.sh gate on. codex keeps
+# the same script but posts an ADVISORY `kipi/codex-approved` out of the gate's way.
 #
-# So codex is THE reviewer, not a second opinion appended to a Claude one:
-# founder directive 2026-07-29, "codex with gpt-5.6 as a sr. staff swe at Meta is
-# the agent that checks sana's work". It owns `kipi/reviewer-approved` and writes
-# the ONE verdict record converge.sh and linear-worker.sh gate on. Claude keeps
-# the same script but posts an ADVISORY `kipi/claude-approved` and writes its
-# record out of the gate's way.
+# THE COST IS REAL AND IS ACCEPTED, not overlooked. Sana (the PR author) is Claude, so
+# a Claude reviewer shares her lab and model family and re-derives her blind spots;
+# fresh context is not an independent mind. That was the whole argument for the
+# 2026-07-29 directive, "codex with gpt-5.6 as a sr. staff swe at Meta is the agent
+# that checks sana's work", and it is still true. What changed is availability, not
+# the argument. Restoring independence is `KIPI_REVIEW_ENGINE=codex
+# KIPI_REVIEW_PRIMARY_ENGINE=codex`, both together, or flipping the two defaults back.
 #
-# The Opus fallback below is what makes this safe: when codex is down, Claude
-# fills the PRIMARY slot and the status says DEGRADED out loud, so an outage
-# degrades the gate's independence instead of wedging every open PR.
+# WHY IT CHANGED, measured 2026-09-06 as three stacked failures each masking the next:
+# ~/.codex/config.toml asked for `gpt-6-astra` when the fleet is on Sol; codex-cli
+# 0.147.0 was too old for that model and returned HTTP 400; and underneath both, the
+# workspace is OUT OF CREDITS, which `gpt-5.6-sol` returns too. `codex exec` exits 0
+# on all three, so two sessions reviewed for a full evening on the Opus fallback and
+# nothing said so. An engine that fails silently cannot hold a required gate.
+#
+# BOTH DEFAULTS MOVE TOGETHER OR THE GATE WEDGES. The branch below posts
+# `kipi/reviewer-approved` only when ENGINE equals PRIMARY_ENGINE. Setting
+# KIPI_REVIEW_ENGINE=claude alone leaves PRIMARY_ENGINE=codex, so every review lands
+# on the advisory context and every open PR waits forever on a status nobody posts.
+#
+# The fallback still works in the new direction and still says DEGRADED out loud.
 #
 # It is a FLAG, not a second script, on purpose: sha capture (ASK-216), verdict
 # derivation from labelled severities, the commit-status post (ASK-217) and
@@ -133,7 +146,7 @@ CODEX_MODEL="${KIPI_REVIEW_CODEX_MODEL:-gpt-5.6-sol}"
 # CODEX BY DEFAULT. Env-overridable so a codex outage long enough to matter is a
 # config change (`KIPI_REVIEW_ENGINE=claude`), not an edit to the script that
 # gates every PR in the repo.
-PR=""; ISSUE=""; POST=0; ENGINE="${KIPI_REVIEW_ENGINE:-codex}"; TARGET_REPO_ARG=""
+PR=""; ISSUE=""; POST=0; ENGINE="${KIPI_REVIEW_ENGINE:-claude}"; TARGET_REPO_ARG=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --issue)  shift; ISSUE="${1:-}" ;;
@@ -217,7 +230,7 @@ STATUS_REPO_PATH="{owner}/{repo}"
 #   the ROOT, not a subdir. So "codex is the gate" means codex writes THAT path,
 #   and claude's record moves down into $OUT_DIR/claude to get out of its way.
 #   Exactly one engine writes the gating record: single writer, preserved.
-PRIMARY_ENGINE="${KIPI_REVIEW_PRIMARY_ENGINE:-codex}"
+PRIMARY_ENGINE="${KIPI_REVIEW_PRIMARY_ENGINE:-claude}"
 
 # WHO ASKED FOR THIS REVIEW (sp-53aad86f). The verdict record proved that A CODEX
 # REVIEW RAN; it could not prove THE DISPATCHER RAN ONE UNATTENDED, which is the

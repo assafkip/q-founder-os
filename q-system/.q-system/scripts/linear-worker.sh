@@ -2449,9 +2449,14 @@ except Exception: d={}
 e=d.setdefault('$ISSUE',{}); e['rounds']=e.get('rounds',0)+1
 json.dump(d,open('$ATTEMPTS','w'),indent=2); print(e['rounds'])" 2>/dev/null || echo "?")"
     say "review PR #$PR_NUM for $ISSUE (round $ROUNDS)"
-    # CODEX REVIEWS SANA'S WORK (ASK-221, founder directive 2026-07-29). Sana is
-    # Claude, so a Claude reviewer shares her lab and model family and re-derives
-    # her blind spots -- fresh context is not an independent mind. `--engine codex`
+    # CLAUDE REVIEWS SANA'S WORK (founder-directed 2026-09-06, "forget codex go
+    # with the claude fallback"). This REVERSES ASK-221 / the 2026-07-29 directive.
+    # The cost is known and accepted: Sana is Claude, so a Claude reviewer shares her
+    # lab and model family and re-derives her blind spots, and fresh context is not
+    # an independent mind. Availability decided it, not the argument -- codex has
+    # been returning "workspace is out of credits" at EXIT 0, and an engine that
+    # fails silently cannot hold a required gate. See pr-review-agent.sh's header
+    # for the measured chain. `--engine claude`
     # is stated EXPLICITLY here rather than inherited from the reviewer's default,
     # because which model checks this fleet's work is the kind of fact that must be
     # readable at the call site, not two files away.
@@ -2465,7 +2470,7 @@ json.dump(d,open('$ATTEMPTS','w'),indent=2); print(e['rounds'])" 2>/dev/null || 
     # (sp-53aad86f). This is what makes a dispatcher-driven review distinguishable
     # from a hand run in the verdict record. It is set on the call rather than
     # exported once, so it cannot leak into an unrelated reviewer invocation.
-    KIPI_REVIEW_INVOKER=worker $REVIEWER_CMD "$PR_NUM" --issue "$ISSUE" --post --engine codex >>"$LOG" 2>&1 \
+    KIPI_REVIEW_INVOKER=worker $REVIEWER_CMD "$PR_NUM" --issue "$ISSUE" --post --engine claude >>"$LOG" 2>&1 \
       || say "WARN: codex reviewer failed on PR #$PR_NUM (the PR stands, unreviewed)"
     # Read back the verdict RECORD the reviewer just wrote (never re-grep the
     # review prose) and state what happens next in plain terms. Rework itself

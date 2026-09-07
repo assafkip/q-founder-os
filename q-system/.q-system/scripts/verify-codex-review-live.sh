@@ -79,10 +79,10 @@ info "live HEAD:      $(git -C "$LIVE_ROOT" rev-parse --short HEAD 2>/dev/null |
 if [ ! -f "$LIVE_WORKER" ]; then
   fail "no worker at $LIVE_WORKER"
 else
-  if grep -q -- '--engine codex' "$LIVE_WORKER"; then
-    pass "the live worker dispatches the reviewer with --engine codex"
+  if grep -q -- '--engine claude' "$LIVE_WORKER"; then
+    pass "the live worker dispatches the reviewer with --engine claude"
   else
-    fail "the live worker never passes --engine codex. Tomorrow's run reviews with Claude only -- same lab as the author, so the blind spots stay correlated. If the wiring is on a branch, it has to reach $(git -C "$LIVE_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null)."
+    fail "the live worker never passes --engine claude, so the scheduled run does not dispatch the engine that owns the gate. If the wiring is on a branch, it has to reach $(git -C "$LIVE_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null)."
   fi
   if grep -q 'pr-review-agent.sh' "$LIVE_WORKER"; then
     pass "the live worker routes review through pr-review-agent.sh"
@@ -97,15 +97,15 @@ fi
 if [ ! -f "$LIVE_REVIEWER" ]; then
   fail "no reviewer at $LIVE_REVIEWER"
 else
-  if grep -qE 'KIPI_REVIEW_ENGINE:-codex' "$LIVE_REVIEWER"; then
-    pass "the live reviewer defaults to the codex engine"
+  if grep -qE 'KIPI_REVIEW_ENGINE:-claude' "$LIVE_REVIEWER"; then
+    pass "the live reviewer defaults to the claude engine"
   else
-    fail "the live reviewer's default engine is not codex, so a bare invocation reviews with Claude"
+    fail "the live reviewer's default engine is not claude, so a bare invocation does not review with the engine that owns the gate"
   fi
-  if grep -qE 'KIPI_REVIEW_PRIMARY_ENGINE:-codex' "$LIVE_REVIEWER"; then
-    pass "codex is the PRIMARY engine, so it owns kipi/reviewer-approved"
+  if grep -qE 'KIPI_REVIEW_PRIMARY_ENGINE:-claude' "$LIVE_REVIEWER"; then
+    pass "claude is the PRIMARY engine, so it owns kipi/reviewer-approved"
   else
-    fail "codex is not the primary engine in the live copy, so its verdict lands on an ADVISORY context and gates nothing"
+    fail "claude is not the PRIMARY engine in the live copy, so its verdict lands on an ADVISORY context and gates nothing. Both KIPI_REVIEW_ENGINE and KIPI_REVIEW_PRIMARY_ENGINE must name the same engine or every open PR wedges."
   fi
   if grep -q 'kipi/reviewer-approved' "$LIVE_REVIEWER"; then
     pass "the live reviewer posts the required context kipi/reviewer-approved"
@@ -142,10 +142,18 @@ fi
 # --- 6. the engine binary the live reviewer will shell actually exists -------
 # Wiring that names a binary the PATH does not have degrades to the Opus fallback
 # on every run: the gate stays green and stops being a second lab's opinion.
-if command -v codex >/dev/null 2>&1; then
-  pass "codex is on PATH ($(command -v codex))"
+if command -v claude >/dev/null 2>&1; then
+  pass "claude is on PATH ($(command -v claude))"
 else
-  fail "codex is NOT on PATH. Every scheduled review falls back to Opus and the gate is DEGRADED, which is exactly the independence this engine exists to buy."
+  fail "claude is NOT on PATH and claude is the PRIMARY engine, so every scheduled review has no binary to shell and the gate cannot be answered."
+fi
+# codex is ADVISORY since 2026-09-06, so its absence is reported and does not fail.
+# It is still worth printing: the day it comes back is the day independence is
+# restorable, and nobody will notice from a silent check.
+if command -v codex >/dev/null 2>&1; then
+  printf '  NOTE codex is on PATH (%s); advisory engine, does not gate\n' "$(command -v codex)"
+else
+  printf '  NOTE codex is not on PATH; advisory engine, does not gate\n'
 fi
 
 # --- 7. the live copy's OWN tests pass against the live copy ------------------
@@ -205,7 +213,7 @@ for p in glob.glob(os.path.join(sys.argv[1], "*.verdict.json")) + \
         r = json.load(open(p))
     except Exception:
         continue          # a corrupt record is not a receipt
-    if r.get("engine") != "codex":
+    if r.get("engine") != "claude":
         continue
     if newest is None or str(r.get("ts", "")) > str(newest.get("ts", "")):
         newest = r
