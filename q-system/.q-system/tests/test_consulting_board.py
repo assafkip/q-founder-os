@@ -604,7 +604,16 @@ class TestRound4:
 
             def __call__(self, req, timeout):
                 method, url = req.get_method(), req.full_url
-                if "/databases/" in url and not self.calls:
+                # THE SCHEMA READ IS NOT THE QUERY (PR reviewer round 7, minor). A GET
+                # on /databases/<id> was added ahead of the paint, and it took this
+                # fake's "first call" slot, so the slow query below never ran and the
+                # abandoned-worker path this test exists for stopped being exercised.
+                # Matching on the METHOD keeps the two apart.
+                if method == "GET" and "/databases/" in url:
+                    self.calls.append(("schema", timeout))
+                    return io.BytesIO(b'{"properties": {}}')
+                if "/databases/" in url and not [c for c in self.calls
+                                                 if c[0] != "schema"]:
                     self.calls.append(("query-slow", timeout))
                     time.sleep(slow_first_query_s)
                     return io.BytesIO(b'{"results": [], "has_more": false}')

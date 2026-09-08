@@ -200,19 +200,25 @@ class TestHisPlacementSurvivesTheProducerDroppingTheRow:
         assert counts["held"] == 1 and counts["kept"] == 0, counts
         assert not [s for s in sent if s[2].get("archived")], sent
 
-    def test_a_held_row_is_a_term_of_the_read_back_sum(self, monkeypatch):
-        """A held row IS on the board. Leaving it out of the sum made the proof report
-        a mismatch every run once any pinned row's producer went quiet, which is the
-        false-alarm shape that trains him to ignore the word (PR reviewer round 4)."""
+    def test_a_held_row_is_reported_as_held_and_as_nothing_else(self, monkeypatch):
+        """A held row IS on the board, so it has to be a term of `collect`'s read-back
+        sum or the proof reports a mismatch every run once any pinned row's producer
+        goes quiet (PR reviewer round 4, major).
+
+        THIS TEST DOES NOT RECOMPUTE THAT SUM. The first version did, and a test that
+        recomputes the formula it guards stays green when the real one drops a term
+        (round 7, minor). The sum itself is held by
+        test_every_row_on_the_board_is_a_term_of_the_read_back_sum in
+        test_consulting_board.py, which reads the expression `collect` actually uses.
+        What belongs here is the count that expression consumes."""
         page = self._page("cb:gone", "Done signal: x\nscope=card\nbucket=This Week\npinned=1")
         monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {"cb:gone": page})
         monkeypatch.setattr(br, "_request", lambda *a, **k: None)
         counts = br.paint({"top_of_mind": [], "this_week": [], "inbox": [],
                            "healthy_scopes": {"card"}}, "tok", "db")
-        expected = (counts["wanted"] + counts["kept"] + counts["held"]
-                    - counts["deferred_new"])
-        assert expected == 1, counts
-        assert counts["held"] == 1 and counts["kept"] == 0, counts
+        assert counts["held"] == 1, counts
+        assert counts["kept"] == 0 and counts["archived"] == 0, counts
+        assert counts["wanted"] == 0 and counts["deferred_new"] == 0, counts
 
     def test_nothing_is_written_to_a_held_row(self, monkeypatch):
         """The first answer to 'a pinned row has no exit' wrote a stamp into its Notes,
@@ -264,45 +270,44 @@ class TestALinkIsComparable:
 class TestAColumnThisBoardLacksIsNotAWholeLostMorning:
     """`Link` and `Next` are new. Notion answers an unknown property with a 400 that
     aborts the paint mid-write, so a board that predates them would lose every row of
-    that morning to a column nobody noticed was missing (PR reviewer round 5, major)."""
+    that morning to a column nobody noticed was missing (PR reviewer round 5, major).
+
+    `known` maps a column name to its TYPE. Name alone was not enough: a board carrying
+    `Link` as rich_text rather than url takes the same 400 the guard exists to prevent,
+    and the guard would have called the column fine (round 7, minor)."""
 
     ITEM = {"title": "t", "key": "k", "done": "d", "priority": "P1",
             "source": "Gmail", "link": "https://example.test/x", "next": "go"}
+    #: BY HAND, never derived from WRITES_TYPE: a column dropped from that map would
+    #: otherwise take its own test with it and the suite would stay green.
+    OLD_BOARD = {"Task": "title", "Item id": "rich_text", "Notes": "rich_text",
+                 "Domain": "multi_select", "Priority": "select", "Source": "select",
+                 "Bucket": "select", "Status": "select"}
+
+    def _props(self):
+        return br._properties(self.ITEM, "Inbox", "cb:x", False)
 
     def test_a_board_without_the_new_columns_is_written_without_them(self):
-        props = br._properties(self.ITEM, "Inbox", "cb:x", False)
-        assert {"Link", "Next"} <= set(props), sorted(props)
-        old_board = {"Task", "Item id", "Notes", "Domain", "Priority", "Source"}
-        assert set(br._only_known(props, old_board)) == old_board, sorted(props)
+        keep, dropped = br._only_known(self._props(), self.OLD_BOARD)
+        assert "Link" not in keep and "Next" not in keep, sorted(keep)
+        assert dropped == ("Link", "Next"), dropped
 
-    def test_the_create_path_is_filtered_too(self, monkeypatch):
-        """The first fix filtered the PATCH and not the POST, so a board lacking the
-        column still took a 400 on its first NEW row and abandoned the whole paint.
-        The patch printed "write sites filtered: 1" and nobody asked whether there were
-        two (PR reviewer round 6, major)."""
-        sent = []
-        monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {})
-        monkeypatch.setattr(br, "_request",
-                            lambda tok, m, path, body, op=None, bud=None: sent.append((m, path, body)))
-        old_board = {"Task", "Item id", "Notes", "Domain", "Priority", "Source",
-                     "Bucket", "Status"}
-        br.paint({"top_of_mind": [dict(self.ITEM, scope="card")], "this_week": [],
-                  "inbox": [], "healthy_scopes": {"card"}},
-                 "tok", "db", known=old_board)
-        posts = [s for s in sent if s[0] == "POST"]
-        assert posts, sent
-        written = set(posts[0][2]["properties"])
-        assert "Link" not in written and "Next" not in written, sorted(written)
+    def test_a_board_that_has_them_as_the_WRONG_TYPE_drops_them_too(self):
+        board = dict(self.OLD_BOARD, Link="rich_text", Next="rich_text")
+        keep, dropped = br._only_known(self._props(), board)
+        assert dropped == ("Link",), dropped
+        assert "Next" in keep, sorted(keep)
 
     def test_a_board_with_them_keeps_them(self):
-        props = br._properties(self.ITEM, "Inbox", "cb:x", False)
-        assert br._only_known(props, set(props)) == props
+        board = dict(self.OLD_BOARD, Link="url", Next="rich_text")
+        keep, dropped = br._only_known(self._props(), board)
+        assert keep == self._props() and dropped == (), dropped
 
     def test_an_unreadable_schema_writes_everything_exactly_as_before(self):
         """The read failing is not the columns being gone. Refusing to write on a bad
         response would turn one bad answer into a blank morning."""
-        props = br._properties(self.ITEM, "Inbox", "cb:x", False)
-        assert br._only_known(props, None) == props
+        keep, dropped = br._only_known(self._props(), None)
+        assert keep == self._props() and dropped == ()
 
     def test_a_failed_schema_request_is_None_not_an_exception(self, monkeypatch):
         def boom(*a, **k):
@@ -310,8 +315,46 @@ class TestAColumnThisBoardLacksIsNotAWholeLostMorning:
         monkeypatch.setattr(br, "_request", boom)
         assert br._schema_properties("tok", "db") is None
 
-    def test_an_empty_schema_answer_is_None_not_an_empty_set(self, monkeypatch):
-        """An empty set would filter EVERY property out and write nothing at all,
-        which is the same lost morning by a different route."""
+    def test_an_empty_schema_answer_is_None_not_an_empty_map(self, monkeypatch):
+        """An empty map would drop EVERY property and write nothing at all, which is
+        the same lost morning by a different route."""
         monkeypatch.setattr(br, "_request", lambda *a, **k: {"properties": {}})
         assert br._schema_properties("tok", "db") is None
+
+    def test_the_schema_read_keeps_the_type(self, monkeypatch):
+        monkeypatch.setattr(br, "_request", lambda *a, **k: {
+            "properties": {"Task": {"type": "title"}, "Link": {"type": "url"}}})
+        assert br._schema_properties("tok", "db") == {"Task": "title", "Link": "url"}
+
+    def _paint_against(self, monkeypatch, board):
+        sent = []
+        monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {})
+        monkeypatch.setattr(br, "_request",
+                            lambda tok, m, path, body, op=None, bud=None: sent.append((m, path, body)))
+        counts = br.paint({"top_of_mind": [dict(self.ITEM, scope="card")],
+                           "this_week": [], "inbox": [], "healthy_scopes": {"card"}},
+                          "tok", "db", known=board)
+        return counts, sent
+
+    def test_the_create_path_is_filtered_too(self, monkeypatch):
+        """The first fix filtered the PATCH and not the POST, so a board lacking the
+        column still took a 400 on its first NEW row and abandoned the whole paint. The
+        patch printed "write sites filtered: 1" and nobody asked whether there were two
+        (round 6, major)."""
+        counts, sent = self._paint_against(monkeypatch, self.OLD_BOARD)
+        posts = [s for s in sent if s[0] == "POST"]
+        assert posts, sent
+        written = set(posts[0][2]["properties"])
+        assert "Link" not in written and "Next" not in written, sorted(written)
+
+    def test_what_could_not_be_written_is_reported_never_silent(self, monkeypatch):
+        """A board without `Link` wrote every row with no link and still said
+        "read-back ok". A silent half-write is worse than the crash it replaced,
+        because the crash gets looked at (round 7, major)."""
+        counts, _ = self._paint_against(monkeypatch, self.OLD_BOARD)
+        assert counts["dropped_columns"] == ("Link", "Next"), counts["dropped_columns"]
+
+    def test_a_complete_board_reports_nothing_dropped(self, monkeypatch):
+        board = dict(self.OLD_BOARD, Link="url", Next="rich_text")
+        counts, _ = self._paint_against(monkeypatch, board)
+        assert counts["dropped_columns"] == (), counts["dropped_columns"]

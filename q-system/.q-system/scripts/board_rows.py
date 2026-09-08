@@ -540,14 +540,48 @@ def _schema_properties(token, db, opener=None, budget=None):
     except Exception:
         return None
     props = (data or {}).get("properties")
-    return set(props) if isinstance(props, dict) and props else None
+    if not isinstance(props, dict) or not props:
+        return None
+    # NAME AND TYPE, not name alone (PR reviewer round 7, minor). A board carrying a
+    # `Link` column that is rich_text rather than url still takes the 400 this guard
+    # exists to prevent, and the guard would have said the column was fine.
+    return {name: (p or {}).get("type") for name, p in props.items()}
+
+
+#: What `_properties` writes, per column, so a board whose column is a different TYPE
+#: is treated the same as a board that lacks it: dropped, and said out loud.
+WRITES_TYPE = {"Task": "title", "Item id": "rich_text", "Notes": "rich_text",
+               "Domain": "multi_select", "Priority": "select", "Source": "select",
+               "Bucket": "select", "Status": "select", "Link": "url",
+               "Next": "rich_text"}
 
 
 def _only_known(props: dict, known):
-    """`props` minus any column this board does not have. `known` None -> unchanged."""
+    """(props this board can take, names dropped). `known` None -> unchanged, nothing
+    dropped, which is what shipped before the filter existed.
+
+    A column is dropped when the board does not have it OR has it under a different
+    type. The caller REPORTS what was dropped: silently writing a row without its link
+    and then printing "read-back ok" is the quiet half-write this whole file is built
+    to refuse (PR reviewer round 7, major).
+    """
     if known is None:
-        return props
-    return {k: v for k, v in props.items() if k in known}
+        return props, ()
+    keep, dropped = {}, []
+    for k, v in props.items():
+        want = WRITES_TYPE.get(k)
+        if k in known and (want is None or known[k] == want):
+            keep[k] = v
+        else:
+            dropped.append(k)
+    return keep, tuple(sorted(dropped))
+
+
+def _drop_and_note(props, known, sink: set):
+    """`_only_known`, recording what it dropped into `sink` for the caller to report."""
+    keep, dropped = _only_known(props, known)
+    sink.update(dropped)
+    return keep
 
 
 def paint(buckets: dict, token, db, opener=None, budget=None, known=None) -> dict:
@@ -560,6 +594,10 @@ def paint(buckets: dict, token, db, opener=None, budget=None, known=None) -> dic
     """
     if buckets.get("error"):
         raise ValueError(buckets["error"])
+
+    #: Every column this run could not write, so the morning line can say so. A link
+    #: dropped in silence is worse than a crash: the crash gets looked at.
+    dropped_cols: set = set()
 
     wanted, scopes, over_cap, capped = {}, {}, 0, set()
     for key, bucket in BUCKET_OF.items():
@@ -630,9 +668,9 @@ def paint(buckets: dict, token, db, opener=None, budget=None, known=None) -> dic
                 continue
             _request(token, "POST", "/pages",
                      {"parent": {"database_id": db},
-                      "properties": _only_known(
+                      "properties": _drop_and_note(
                           _properties(item, bucket, iid, include_bucket=True,
-                                      status="Not started"), known)},
+                                      status="Not started"), known, dropped_cols)},
                      opener, budget)
             created += 1
         else:
@@ -646,9 +684,9 @@ def paint(buckets: dict, token, db, opener=None, budget=None, known=None) -> dic
             # made the row differ forever: it was PATCHed every run, `unchanged` stayed
             # at zero, and the write budget went on rewriting values nobody changed.
             # What is compared has to be what is written.
-            props = _only_known(
+            props = _drop_and_note(
                 _properties(item, record, iid, include_bucket=write,
-                            record_bucket=record, pinned=pin), known)
+                            record_bucket=record, pinned=pin), known, dropped_cols)
             pinned += 1 if pin else 0
             if _already_holds(page, props):
                 unchanged += 1
@@ -707,7 +745,7 @@ def paint(buckets: dict, token, db, opener=None, budget=None, known=None) -> dic
         archived += 1
 
     return {"created": created, "updated": updated, "archived": archived,
-            "held": held,
+            "held": held, "dropped_columns": tuple(sorted(dropped_cols)),
             "kept": kept, "wanted": len(wanted), "moved": moved, "pinned": pinned,
             "over_cap": over_cap, "unchanged": unchanged, "deferred": deferred,
             # Rows we WANTED but never created: they are not on the board, so the
@@ -790,6 +828,12 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
             f"{counts['kept']} kept (source quiet), {counts['pinned']} yours (untouched), "
             f"{counts['held']} yours (source stopped reporting it), "
             "read-back ok")
+    if counts["dropped_columns"]:
+        # NEVER SILENT. The filter stops a missing column aborting the paint; it must
+        # not also hide that the rows went out without it. A board missing `Link` wrote
+        # every row without its link and still said "read-back ok" (round 7, major).
+        line += ("; this board has no " + ", ".join(counts["dropped_columns"])
+                 + " column, so those values were not written")
     if counts["over_cap"]:
         line += f"; {counts['over_cap']} row(s) over the {BUDGET_ROWS}-row cap, not written"
     if counts["deferred"]:
