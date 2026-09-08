@@ -939,6 +939,16 @@ class TestNoTestCanWriteTheLiveColumnRecord:
         br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
         assert seen.get("record") == br.COLUMNS_MADE, seen
 
+    def test_reading_without_a_record_path_also_raises(self, monkeypatch):
+        """The write lost its default and the comment said there was none left, while
+        the READ still had one, so a caller that omitted `record=` quietly consulted
+        the live file (PR #334 reviewer, minor). Half a chokepoint described as a
+        whole one."""
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        with pytest.raises(AssertionError) as e:
+            br._columns_made("db")
+        assert "no default" in str(e.value)
+
     def test_a_private_path_is_allowed(self, tmp_path):
         rec = tmp_path / "made.json"
         br._remember_columns("db", ["Link"], rec)

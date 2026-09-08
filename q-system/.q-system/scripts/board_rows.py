@@ -652,8 +652,16 @@ def _columns_made(db, path=None):
     is the safe answer: the worst it costs is offering a column he removed once more,
     and that is said on the line.
     """
+    # NO AMBIENT DEFAULT ON THE READ EITHER (PR #334 reviewer, minor). The write lost
+    # its default and the comment said there was none left; the read still had one, so
+    # a caller that omitted `record=` quietly consulted the live file while the module
+    # claimed that could not happen. Half a chokepoint described as a whole one.
+    if path is None:
+        raise AssertionError(
+            "no record path given. Production passes record=COLUMNS_MADE explicitly; "
+            "a test passes its own tmp path. There is no default.")
     try:
-        data = json.loads(Path(path or COLUMNS_MADE).read_text("utf-8"))
+        data = json.loads(Path(path).read_text("utf-8"))
     except (OSError, ValueError):
         return set()
     if not isinstance(data, dict):
@@ -663,9 +671,18 @@ def _columns_made(db, path=None):
 
 
 def _remember_columns(db, names, path=None):
-    """Append to the record. A failure here is not fatal: the worst case is offering to
-    create a column he removed a second time, which is the behaviour before the record
-    existed, and it is still said out loud on the line.
+    """Append to the record.
+
+    A WRITE failure is not fatal: an OSError is swallowed and the worst case is
+    offering to create a column he removed a second time, which is the behaviour
+    before the record existed, and it is still said out loud on the line.
+
+    A MISSING PATH is a different thing and is fatal on purpose (PR #334 reviewer,
+    minor: the old docstring said "a failure here is not fatal" flatly, while the
+    AssertionError below escapes every except arm in `collect` and takes the whole
+    board section with it). That is the intent. A caller that forgot `record=` is a
+    programming error, it only reaches this line in a test, and a loud failure in the
+    suite is exactly what stops it reaching his machine.
 
     THE LIVE RECORD IS NEVER WRITTEN BY A TEST, and that is a chokepoint rather than a
     rule someone remembers (PR #332 reviewer round 7, minor). `collect` has had this
