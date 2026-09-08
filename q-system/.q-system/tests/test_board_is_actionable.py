@@ -470,3 +470,63 @@ class TestTheCardLineDoesNotPointAtRowsThatAreNotThere:
         quiet = [r for r in rows if "ball is not with you" in r]
         assert not board, board
         assert quiet and "4" in quiet[0], quiet
+
+
+class TestADeadLinkIsWorseThanNoLink:
+    """The mail producer's documented fallback key is `mail:<sender>|<subject>`.
+    Pasting that after the thread URL builds a link that opens nothing, which costs a
+    click and teaches him the column lies (PR reviewer round 10, minor)."""
+
+    def test_a_real_thread_id_gets_a_link(self):
+        assert cb.gmail_link("mail:1a06eb5b0b03759f") == (
+            "https://mail.google.com/mail/u/0/#all/1a06eb5b0b03759f")
+
+    def test_the_fallback_key_shape_gets_no_link(self):
+        assert cb.gmail_link("mail:someone@example.test|Re: a subject") is None
+
+    def test_an_empty_or_odd_id_gets_no_link(self):
+        assert cb.gmail_link("mail:") is None
+        assert cb.gmail_link("") is None
+        assert cb.gmail_link("mail:not hex at all") is None
+
+    def test_the_row_still_paints_without_its_link(self, tmp_path):
+        class Row(str):
+            pass
+        r = Row("someone@example.test  Re: a subject")
+        r.key = "mail:someone@example.test|Re: a subject"
+        item = cb.buckets(NOW, {"mail": ([r], None)}, _paths(tmp_path))["inbox"][0]
+        assert item["link"] is None and item["title"], item
+
+
+class TestTheIdentityRefusalFiresBeforeTheFirstQuery:
+    """`existing_rows` filters its query on `Item id`, so a board without that column
+    takes a raw 400 from Notion before `_only_known` is reached and the remediation
+    never fires (PR reviewer round 10, minor)."""
+
+    def test_a_board_without_the_id_column_is_refused_up_front(self):
+        with pytest.raises(br.MissingIdentityColumn):
+            br._refuse_without_identity({"Task": "title", "Notes": "rich_text"})
+
+    def test_a_wrongly_typed_id_column_is_refused_too(self):
+        with pytest.raises(br.MissingIdentityColumn):
+            br._refuse_without_identity({"Task": "title", "Item id": "select"})
+
+    def test_a_good_board_passes(self):
+        br._refuse_without_identity({"Task": "title", "Item id": "rich_text"})
+
+    def test_an_unreadable_schema_is_not_a_verdict_about_the_columns(self):
+        br._refuse_without_identity(None)
+
+    def test_the_runner_refuses_before_it_queries(self, monkeypatch, tmp_path):
+        calls = []
+        monkeypatch.setattr(br, "_schema_properties",
+                            lambda *a, **k: {"Task": "title"})
+        monkeypatch.setattr(br, "existing_rows",
+                            lambda *a, **k: calls.append("queried") or {})
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.delenv("KIPI_BRIEF_DRY_RUN", raising=False)
+        tf = tmp_path / "notion-token"; tf.write_text("t", encoding="utf-8")
+        dbf = tmp_path / "notion-board-db"; dbf.write_text("d", encoding="utf-8")
+        rows, err = br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
+        assert calls == [], "it queried the board before refusing"
+        assert rows == [] and "identifies rows by" in err, err

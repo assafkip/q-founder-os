@@ -596,6 +596,21 @@ def _only_known(props: dict, known):
     return keep, tuple(sorted(dropped))
 
 
+def _refuse_without_identity(known):
+    """Raise when the board cannot take a column the painter works by. `known` None
+    (schema unreadable) is not a verdict about the columns, so it passes."""
+    if known is None:
+        return
+    missing = [k for k in UNDROPPABLE
+               if k not in known or known[k] != WRITES_TYPE[k]]
+    if missing:
+        raise MissingIdentityColumn(
+            f"the board cannot take {', '.join(missing)}, which the painter "
+            "identifies rows by. Writing rows without it would create pages this "
+            "module can never find or archive again, one per row per run. Fix the "
+            "board's columns.")
+
+
 def _drop_and_note(props, known, sink: set):
     """`_only_known`, recording what it dropped into `sink` for the caller to report."""
     keep, dropped = _only_known(props, known)
@@ -807,8 +822,14 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
             # to the painter. See `_schema_properties`: a board that predates `Link`
             # and `Next` would otherwise take a 400 on the first row and lose the
             # whole morning's paint to a column nobody noticed was missing.
-            counts = paint(buckets, token, db, opener, budget,
-                           known=_schema_properties(token, db, opener, budget))
+            known = _schema_properties(token, db, opener, budget)
+            # BEFORE THE FIRST QUERY, not inside the write loop. `existing_rows`
+            # filters on `Item id`, so a board without that column takes a raw 400
+            # from Notion before `_only_known` is ever reached and the remediation
+            # sentence never fires (round 10, minor). Checked here, the one failure a
+            # person can fix is the one they are told about.
+            _refuse_without_identity(known)
+            counts = paint(buckets, token, db, opener, budget, known=known)
         dupes = {}
         seen = len(existing_rows(token, db, opener, dupes_out=dupes, budget=budget))
         return counts, dupes, seen

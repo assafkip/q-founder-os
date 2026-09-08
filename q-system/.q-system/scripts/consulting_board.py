@@ -612,6 +612,19 @@ DONE_GTM_FALLBACK = "the step is done or you wrote down why it did not happen"
 #: worth saying gets it from whoever knows, and the writer never blanks it.
 GMAIL_THREAD = "https://mail.google.com/mail/u/0/#all/"
 
+#: A Gmail thread id is hex. The mail producer's documented FALLBACK key is
+#: `mail:<sender>|<subject>` (see `_FALLBACK_KEY`), and pasting that after the thread
+#: URL builds a link that opens nothing (PR reviewer round 10, minor). A dead link is
+#: worse than no link: it costs a click and teaches him the column lies. No id it can
+#: recognise means no link, and the row still carries its subject and its done signal.
+_THREAD_ID = re.compile(r"^[0-9a-f]{8,24}$", re.I)
+
+
+def gmail_link(key: str):
+    """The thread URL for a `mail:<thread id>` key, or None when the id is not one."""
+    _, _, rest = str(key or "").partition(":")
+    return GMAIL_THREAD + rest if _THREAD_ID.match(rest) else None
+
 DONE_BY_SOURCE = {
     "Gmail": "you replied in the thread",
     "GroupMe": "you answered in the chat",
@@ -712,8 +725,11 @@ def buckets(now: dt.datetime, sources: dict, paths=None) -> dict:
         #
         # THE KNOWN COST, taken deliberately (PR reviewer round 3, major). A client
         # going ⚪ drops its row from `wanted`, so an UNPINNED one is archived, and the
-        # flip back creates a fresh page at Status "Not started", losing a status he
-        # had set. Kept anyway: he asked for these rows gone in as many words, Status
+        # flip back creates a fresh page: it loses the Status he set AND anything he
+        # typed into Link or Next, which this same change went to trouble never to
+        # blank on a live row (round 10, minor: the comment named only Status and that
+        # undersold it). Kept anyway: he asked for these rows gone in as many words,
+        # Status
         # was measured unused on 2026-09-07 (12 of 12 rows read "Not started", the
         # painter writes it create-only and nothing else moves it), and the only fix
         # that preserves it is restoring the archived page instead of creating a new
@@ -838,7 +854,7 @@ def buckets(now: dt.datetime, sources: dict, paths=None) -> dict:
                     "Every inbox producer must emit morning-brief.Row(line, key); "
                     "keying on the rendered line is the PR #296 rounds 1-4 defect.")
             inbox.append({"title": text, "key": key, "detail": "",
-                          "link": (GMAIL_THREAD + key.split(":", 1)[1]
+                          "link": (gmail_link(key)
                                    if label == "Gmail" and key.startswith("mail:")
                                    else None),
                           "source": label, "scope": f"inbox:{label}",
