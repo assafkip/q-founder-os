@@ -622,12 +622,29 @@ CREATABLE = tuple(n for n in WRITES_TYPE if n not in UNDROPPABLE)
 #: ABSENT was deleted by a person, and this module does not put it back.
 COLUMNS_MADE = STATE_DIR / "board-columns-created.json"
 
+#: Per board, the columns HE removed after this module created them. Read by the
+#: dropped-columns report so his own choice is not also listed as a board fault.
+_chosen_absent: dict = {}
+
 
 def _columns_made(db, path=None):
+    """What this module created on `db` before. Unreadable or malformed reads EMPTY.
+
+    `_remember_columns` already refused a non-dict and this did not, so a file holding
+    a JSON list raised AttributeError out of `.get`, which no `collect` handler catches
+    (they take OSError and ValueError), and the entire board section died on a
+    malformed file this module writes itself (PR #332 reviewer round 5, minor). Empty
+    is the safe answer: the worst it costs is offering a column he removed once more,
+    and that is said on the line.
+    """
     try:
-        return set((json.loads(Path(path or COLUMNS_MADE).read_text("utf-8")) or {}).get(db) or [])
+        data = json.loads(Path(path or COLUMNS_MADE).read_text("utf-8"))
     except (OSError, ValueError):
         return set()
+    if not isinstance(data, dict):
+        return set()
+    names = data.get(db)
+    return set(names) if isinstance(names, (list, tuple, set)) else set()
 
 
 def _remember_columns(db, names, path=None):
@@ -674,6 +691,11 @@ def ensure_columns(known, token, db, opener=None, budget=None, record=None):
     removed = sorted(n for n in missing if n in made_before)
     for n in removed:
         del missing[n]
+    # NAMED ONCE, AS HIS CHOICE. The dropped-columns sentence also lists these, so the
+    # line said the same column twice: once as his removal and once as something the
+    # board "cannot take", on a line already near 900 characters (round 5, minor). A
+    # choice he made is not a fault to report back to him.
+    _chosen_absent[db] = set(removed)
     # A column PRESENT UNDER THE WRONG TYPE is deliberately not healed here (PR #332
     # reviewer, minor). Creating an absent column adds nothing and loses nothing;
     # retyping an existing one makes Notion convert every value in it, which is a data
@@ -988,8 +1010,10 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
     except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError) as exc:
         return [], f"board write failed: {type(exc).__name__}: {exc}"
 
+    notes = "".join(f"; {n}" for n in (counts.get("column_problems") or ()))
     if dupes:
-        return [], (f"duplicate board rows for {len(dupes)} item(s): "
+        return [], (notes.lstrip("; ") + ("; " if notes else "")
+                    + f"duplicate board rows for {len(dupes)} item(s): "
                     f"{', '.join(sorted(dupes))}. Two painters have run; the board "
                     "holds doubles and this run's counts cannot be trusted")
     # `kept` rows belong to a source that could not answer this run: they are on the
@@ -1001,7 +1025,8 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
     if seen != expected:
         # The write-only-integration scar: a PATCH that returns 200 is not proof the
         # board holds what we think. The read-back is the proof.
-        return [], (f"read-back mismatch: expected {expected} row(s) "
+        return [], (notes.lstrip("; ") + ("; " if notes else "")
+                    + f"read-back mismatch: expected {expected} row(s) "
                     f"({counts['wanted']} written + {counts['kept']} kept from a quiet "
                     f"source + {counts['held']} held for you), board shows {seen}")
     line = (f"board: {counts['created']} new, {counts['updated']} refreshed, "
@@ -1012,6 +1037,9 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
             "read-back ok")
     for note in counts.get("column_problems") or ():
         line += f"; {note}"
+    chosen = set().union(*_chosen_absent.values()) if _chosen_absent else set()
+    counts["dropped_columns"] = tuple(
+        d for d in counts["dropped_columns"] if d.split(" (")[0] not in chosen)
     if counts["dropped_columns"]:
         # NEVER SILENT. The filter stops a missing column aborting the paint; it must
         # not also hide that the rows went out without it. A board missing `Link` wrote

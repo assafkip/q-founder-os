@@ -819,3 +819,38 @@ class TestAFailedColumnCreationReachesTheLine:
     def test_a_clean_run_says_nothing_about_it(self, monkeypatch, tmp_path):
         line = self._line(monkeypatch, tmp_path, ())
         assert "403" not in line and "restricted" not in line, line
+
+
+class TestACorruptRecordDoesNotKillTheBoardSection:
+    """`_remember_columns` refused a non-dict and `_columns_made` did not, so a file
+    holding a JSON list raised AttributeError out of `.get`, which no `collect` handler
+    catches, and the whole section died on a malformed file this module writes itself
+    (PR #332 reviewer round 5, minor)."""
+
+    def test_a_json_list_reads_empty_not_a_crash(self, tmp_path):
+        rec = tmp_path / "made.json"
+        rec.write_text("[1, 2, 3]", encoding="utf-8")
+        assert br._columns_made("db", rec) == set()
+
+    def test_a_json_string_reads_empty(self, tmp_path):
+        rec = tmp_path / "made.json"
+        rec.write_text('"not a mapping"', encoding="utf-8")
+        assert br._columns_made("db", rec) == set()
+
+    def test_a_board_entry_that_is_not_a_list_reads_empty(self, tmp_path):
+        rec = tmp_path / "made.json"
+        rec.write_text(json.dumps({"db": "Link"}), encoding="utf-8")
+        assert br._columns_made("db", rec) == set()
+
+    def test_broken_json_reads_empty(self, tmp_path):
+        rec = tmp_path / "made.json"
+        rec.write_text("{ not json", encoding="utf-8")
+        assert br._columns_made("db", rec) == set()
+
+    def test_an_absent_file_reads_empty(self, tmp_path):
+        assert br._columns_made("db", tmp_path / "never-written.json") == set()
+
+    def test_a_good_record_still_reads(self, tmp_path):
+        rec = tmp_path / "made.json"
+        rec.write_text(json.dumps({"db": ["Link", "Next"]}), encoding="utf-8")
+        assert br._columns_made("db", rec) == {"Link", "Next"}
