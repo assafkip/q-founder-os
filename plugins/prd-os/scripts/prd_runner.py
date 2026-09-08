@@ -46,6 +46,7 @@ import subprocess
 import tempfile
 import os
 import re
+import shlex
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1154,6 +1155,110 @@ def _gate_lifecycle(record: dict) -> str:
     return lifecycle
 
 
+def _reject_unrunnable_gate(command: str) -> None:
+    """Refuse a gate whose command cannot run. Validated AT THE DOOR.
+
+    Scar 2026-08-24 (ASK-1040), measured by executing all 47 registered gates:
+    12 were not runnable at all. SEVEN held PROSE in the command slot -- the
+    shell was being asked to run `check:the`, `check:adding`, `asserting` --
+    because somebody wrote a DESCRIPTION of the check where the check goes.
+    Three were shell syntax errors. Registration accepted every one of them
+    without a word, and each was then recorded as permanent protection.
+
+    A gate that cannot execute is worse than no gate: it is counted, reported,
+    and believed. The registry is append-only, so a bad row is close to
+    permanent -- which is exactly why the check belongs here and not downstream.
+
+    NOT validated here: whether the command TESTS anything real. `true` is a
+    legal gate and a useless one. This refuses the unrunnable, not the useless;
+    the zero-collecting pytest class is its own item.
+    """
+    cmd = (command or "").strip()
+    if not cmd:
+        raise ValueError("gate command is empty; a gate that runs nothing is not a gate")
+    import shutil
+    import subprocess as _sp
+    # 1. Does it parse? Catches the unterminated-heredoc class.
+    syntax = _sp.run(["bash", "-n", "-c", cmd], capture_output=True, text=True)
+    if syntax.returncode != 0:
+        raise ValueError(
+            f"gate command is not valid shell: {syntax.stderr.strip()[:200]}\n"
+            f"  command: {cmd[:160]}")
+    # 2. Is the first word a real command? Catches the prose class, which is the
+    #    one that actually happened seven times. Builtins resolve too, so
+    #    `cd x && ...` passes; `check:the ...` does not.
+    #
+    # THE RAW FIRST TOKEN IS NOT THE COMMAND NAME, and assuming it was made this
+    # guard refuse commands bash runs perfectly (review of PR #330, MAJOR 1,
+    # reproduced against real specs in this repo). Two shapes:
+    #
+    #   PYTHONPATH=src python3 -m pytest ...   -> first token is an ASSIGNMENT
+    #   (cd plugins/prd-os && pytest -q)       -> first token is a SUBSHELL open
+    #
+    # Census over all 204 decoded bypass_checks in .prd-os/issues/: 16 refused, 2
+    # of them this false-positive class (srsa-authoritative-path-contract.md,
+    # srsa-check-repairs-survived-merge.md). That is not a cosmetic miss --
+    # issue_runner RUNS the bypass_check and requires exit 0 BEFORE registering,
+    # so the command is PROVEN runnable and then refused at the door, and
+    # issue_runner turns any exception here into a hard `cannot close`. An
+    # unattended closeout died on a check that had just gone green, with an error
+    # blaming prose.
+    #
+    # Leading assignments are stripped, and a command opening a group or subshell
+    # is accepted on bash's own verdict: step 1 already parsed it with `bash -n`,
+    # which is a stronger statement about `(cd x && y)` than any token probe.
+    probe_cmd = cmd
+    while True:
+        head = probe_cmd.split(None, 1)
+        if not head:
+            break
+        # NAME=value, the POSIX assignment prefix. Deliberately strict about the
+        # NAME half so `check:the=thing` prose cannot masquerade as one.
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", head[0]):
+            if len(head) == 1:
+                # An assignment and nothing else runs no check at all.
+                raise ValueError(
+                    "gate command is only environment assignments, so it runs "
+                    f"no check.\n  command: {cmd[:160]}")
+            probe_cmd = head[1]
+            continue
+        break
+    stripped = probe_cmd.lstrip()
+    # `!` IS NOT AN ACCEPT, and grouping it with the others was a hole I opened
+    # (review of PR #330 round 3, MINOR). `!` NEGATES the pipeline's status, so
+    # `! check:the ledger is append-only` runs a command that does not exist, gets
+    # 127, and the negation turns that into exit 0 -- a gate that passes forever,
+    # in an append-only registry. It is stripped and probing continues, so the
+    # prose behind it is still caught.
+    while stripped[:1] == "!":
+        stripped = stripped[1:].lstrip()
+        if not stripped:
+            # NOT DEAD CODE, though it looks it on macOS. `bash -n -c '!'` is a
+            # syntax error under bash 3.2 (so step 1 refuses first) and PARSES
+            # under the bash 5.x that CI runs, where this is the only thing
+            # standing between a bare `!` and `stripped.split()[0]` on an empty
+            # string. CI proved it by failing on a test that had pinned the macOS
+            # door. Platform-split behaviour, kept deliberately.
+            raise ValueError(
+                "gate command is only a negation, so it runs no check.\n"
+                f"  command: {cmd[:160]}")
+    # `(`, `{` and a leading redirect open shell GRAMMAR, not a command name, and
+    # `bash -n` above already accepted the whole line. Prose inside a subshell
+    # still fails LOUDLY at run time (127), which is the tolerable direction; the
+    # negation above was the one that fails silently green.
+    if stripped[:1] in ("(", "{", "<", ">"):
+        return
+    first = stripped.split()[0]
+    probe = _sp.run(["bash", "-lc", f"command -v {shlex.quote(first)} >/dev/null 2>&1"],
+                    capture_output=True, text=True)
+    if probe.returncode != 0 and not shutil.which(first):
+        raise ValueError(
+            f"gate command does not start with a runnable command: {first!r}. "
+            "This is the prose-in-the-command-slot class (ASK-1040): write the "
+            "CHECK here, not a description of it.\n"
+            f"  command: {cmd[:160]}")
+
+
 def gate_register(
     cfg: Config,
     *,
@@ -1171,6 +1276,15 @@ def gate_register(
             f"invalid gate lifecycle {lifecycle!r}; "
             f"expected one of {', '.join(GATE_LIFECYCLES)}"
         )
+    # THE DOOR IS CHECKED AFTER IDEMPOTENCY, NOT BEFORE (review of PR #330, MAJOR 2).
+    # gate_id is issue_id + sha256(command), so a RE-CLOSE of the same issue with the
+    # same bypass_check resolves to a row that already exists and must be a no-op.
+    # Validating first turned that no-op into a raise, and issue_runner converts any
+    # raise here into `cannot close` -- so tightening the door would have broken
+    # re-close, a workflow issue_runner documents ("spec closed once, reopened,
+    # amended, closed again"). A row already in the registry got past whatever door
+    # existed when it was written; re-litigating it at read time is not this guard's
+    # job. New rows are still validated below.
     gate_id = f"{issue_id}-{_hashlib.sha256(command.encode()).hexdigest()[:8]}"
     path = _gates_path(cfg)
     if path.is_file():
@@ -1180,13 +1294,36 @@ def gate_register(
                 if existing.get("gate_id") == gate_id:
                     existing_lifecycle = _gate_lifecycle(existing)
                     if existing_lifecycle != lifecycle:
+                        # NAME THE RECOVERY. Every gate this fleet's closeout wrote
+                        # before the lifecycle fix took LEGACY_GATE_LIFECYCLE, so the
+                        # FIRST re-close of any such issue lands here, and the caller
+                        # (issue_runner) turns it into a bare `cannot close`. The
+                        # recovery exists and lives outside the closeout flow; an
+                        # error that does not name it is a dead end at 3am.
                         raise ValueError(
                             f"gate {gate_id!r} already registered as "
-                            f"{existing_lifecycle!r}, not {lifecycle!r}"
+                            f"{existing_lifecycle!r}, not {lifecycle!r}. "
+                            "The registry is append-only, so this is not edited in "
+                            # --registry is required=True in that script, so the
+                            # first version of this message printed a command that
+                            # exits 2 (review of PR #330 round 2, MINOR 1). A
+                            # recovery pointer that does not run is the dead end it
+                            # was written to remove.
+                            "place: run `python3 plugins/prd-os/scripts/"
+                            "migrate_gate_lifecycle.py --registry "
+                            f"{_gates_path(cfg)} --regression {gate_id} "
+                            "--apply`, then close again."
                         )
                     return {"gate_id": gate_id, "registered": False}
             except json.JSONDecodeError:
                 continue
+    # THE DOOR, for a genuinely NEW row only. Everything above this line either
+    # returned a no-op or raised on a lifecycle conflict, so an already-permanent
+    # gate never reaches it -- which is the whole point of the ordering (MAJOR 2).
+    # This line is what test_gate_register_ACTUALLY_CALLS_the_unrunnable_guard
+    # defends; deleting it while re-ordering is exactly the mistake that test
+    # caught during the review fix, 2026-09-07.
+    _reject_unrunnable_gate(command)
     record = {"gate_id": gate_id, "prd_id": prd_id, "issue_id": issue_id,
               "command": command,
               "lifecycle": lifecycle,
@@ -2752,6 +2889,7 @@ def cmd_gates(cfg: Config, args) -> int:
             "other lifecycles are retained as non-current evidence\n"
         )
         return 2
+    registered_total = len(records)
     records = [
         record for record in records
         if record["lifecycle"] == "regression"
@@ -2890,8 +3028,39 @@ def cmd_gates(cfg: Config, args) -> int:
         for gid, tail in failures:
             sys.stderr.write(f"GATE RED: {gid}\n{tail}\n")
         return 1
-    print(f"all {len(records)} regression gates green; "
-          f"{len(blocking)} blocking spillover item(s)")
+    # `skipped_self_ref` joins the condition (review of PR #330 round 2, MINOR 2).
+    # Keying only on len(records)==0 missed the other way to execute nothing: a
+    # registry whose regression gates are ALL skipped as self-referential has
+    # records non-empty and zero commands run, and printed the same "all N
+    # regression gates green" at exit 0. The counter was already incremented and
+    # never read. No producer emits this shape today (censused: 0 of 204
+    # bypass_checks are self-referential), which is exactly when a hole gets in.
+    executed = len(records) - skipped_self_ref
+    if executed <= 0 and registered_total:
+        # AN EMPTY EXECUTED SET IS NOT A PASS, and it must never be printed as
+        # one. Scar 2026-08-24 (ASK-1038): this line said "all 0 regression
+        # gates green" against a 47-gate registry, and the sentence was TRUE --
+        # vacuously, because the closeout registrar wrote every gate as
+        # historical-receipt, the one lifecycle filtered out just above. Exit 0
+        # was read as "the gates are green" for 29 days while nothing ran.
+        # A count of zero is now stated as the anomaly it is.
+        why = ("0 have lifecycle 'regression'" if not records
+               else f"all {skipped_self_ref} skipped as self-referential")
+        print(f"[WARN] gates: {registered_total} gate(s) registered, NONE "
+              f"executed -- {why}, so no regression check ran. "
+              f"Exit 0 below covers the spillover verdict ONLY.")
+    # THE FINAL LINE MUST NOT CONTRADICT THE WARN (review of PR #330 round 3,
+    # MINOR). It printed "all 0 regression gates green" immediately under a WARN
+    # saying nothing executed -- which is the exact ASK-1038 sentence, still
+    # there, three lines below its own alarm. A reader who scrolls to the last
+    # line, or a script that greps it, sees the reassurance and not the warning.
+    if executed <= 0:
+        print(f"NO regression gate executed ({registered_total} registered); "
+              f"{len(blocking)} blocking spillover item(s)")
+    else:
+        print(f"all {executed} regression gates green "
+              f"({registered_total} registered); "
+              f"{len(blocking)} blocking spillover item(s)")
     return 0
 
 
