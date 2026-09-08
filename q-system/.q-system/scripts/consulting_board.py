@@ -63,6 +63,16 @@ PT = ZoneInfo("America/Los_Angeles")
 #: that fits the founder's screen without scrolling, measured against the 2026-09-03 card
 #: (7 red). A withheld count is always printed rather than the rest being dropped silently.
 MAX_CLIENT_ROWS = 6
+#: WHEN THE STATE CARD IS WRITTEN, from `io.askconsulting.ask-crm-state-card.plist`
+#: (StartCalendarInterval 07:30 PT). The morning brief runs at 07:00, from
+#: `com.kipi.morning-brief.plist`. So the brief reads this card THIRTY MINUTES BEFORE
+#: today's is written, every single day, and a rule that demanded today's date could
+#: never be satisfied at 07:00. Measured in ~/.config/kipi/logs/morning-brief.out.log:
+#: the refusal fired on the 09-05 and 09-07 runs, and today-card.md was last written
+#: 09-07 07:30. The cost was a P0 "Your book: COULD NOT READ" row painted onto his
+#: board every morning and cleared by nothing, since the hourly repaint has no
+#: scheduler. A row he cannot act on is the thing he asked to have removed.
+CARD_WRITTEN_AT = dt.time(7, 30)
 
 
 def consulting_root() -> Path:
@@ -320,11 +330,27 @@ def read_heartbeat(now: dt.datetime, paths=None) -> tuple[dict, str | None]:
         return beat, f"the 07:30 state card crashed: {beat['crash']}"
 
     stamped = (beat.get("card") or {}).get("date")
-    today = now.astimezone(PT).date().isoformat()
-    if stamped != today:
-        return beat, (f"the state card is from {stamped}, not {today}. "
-                      "Showing it as today's book would be wrong, so it is withheld")
-    return beat, None
+    local = now.astimezone(PT)
+    today = local.date().isoformat()
+    if stamped == today:
+        return beat, None
+
+    # YESTERDAY'S CARD IS THE NEWEST ONE THAT EXISTS BEFORE 07:30, and calling the
+    # newest card a failure is not a refusal, it is a clock error. The old rule was
+    # date equality, so at 07:00 it refused a card that was working perfectly and had
+    # simply not been rewritten yet. What it protected against is real and is kept:
+    # yesterday's book must never be presented AS today's, so the caller labels it.
+    #
+    # AFTER 07:30 THE SAME CARD IS A GENUINE FAILURE, and still refused. That is the
+    # whole reason this keys on the schedule rather than on a fixed number of hours:
+    # a 26-hour window would have swallowed a card the 07:30 job failed to write.
+    yesterday = (local.date() - dt.timedelta(days=1)).isoformat()
+    if stamped == yesterday and local.time() < CARD_WRITTEN_AT:
+        beat["card_is_yesterdays"] = True
+        return beat, None
+
+    return beat, (f"the state card is from {stamped}, not {today}. "
+                  "Showing it as today's book would be wrong, so it is withheld")
 
 
 def read_gtm(paths=None) -> tuple[dict | None, str | None]:
@@ -520,7 +546,13 @@ def collect(now: dt.datetime, sources: dict, paths=None):
     rows = []
     counts = (beat.get("card") or {}).get("counts") or {}
     if counts:
-        rows.append(f"book: {counts.get('red', 0)} owed, {counts.get('reach', 0)} to reach out")
+        # NAMED, never silently substituted. The reader accepts yesterday's card before
+        # 07:30 because it is the newest one there is; the promise it must keep is that
+        # nobody reads it as today's.
+        age = " (yesterday's card, today's is written at 07:30)" if beat.get(
+            "card_is_yesterdays") else ""
+        rows.append(f"book: {counts.get('red', 0)} owed, "
+                    f"{counts.get('reach', 0)} to reach out{age}")
 
     shown = card_rows[:MAX_CLIENT_ROWS]
     for row in shown:

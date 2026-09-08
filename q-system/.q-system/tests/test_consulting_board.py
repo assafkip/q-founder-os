@@ -278,6 +278,75 @@ class TestOnlyOnePainterAtATime:
             pass                                   # no raise means it was released
 
 
+class TestTheBriefReadsTheCardBeforeTheCardIsWritten:
+    """THE CLOCK ERROR, and it cost him a P0 row every single morning.
+
+    `com.kipi.morning-brief` runs at 07:00 PT. `io.askconsulting.ask-crm-state-card`
+    writes the card at 07:30 PT. The freshness rule was date equality, so at 07:00 the
+    card was ALWAYS stamped yesterday, always refused, and the painter always added
+    "Your book: COULD NOT READ" at P0. Nothing cleared it, because the hourly repaint
+    has no scheduler. Measured in morning-brief.out.log on the 09-05 and 09-07 runs.
+
+    Refusing the newest card that exists is not a refusal, it is a clock error. What
+    the old rule protected is kept: yesterday's book is never presented as today's.
+    """
+
+    #: 07:00 PT, the brief's own slot, before the card is written.
+    BRIEF_SLOT = dt.datetime(2026, 9, 3, 14, 0, tzinfo=dt.timezone.utc)
+
+    def test_before_0730_yesterdays_card_is_the_newest_one_and_is_used(self, tmp_path):
+        rows, err = cb.collect(self.BRIEF_SLOT, {}, _tree(tmp_path, date="2026-09-02"))
+        assert err is None, err
+        assert rows, "the book was withheld at the brief's own slot"
+
+    def test_and_it_says_out_loud_that_it_is_yesterdays(self, tmp_path):
+        """Accepting it is only safe because nothing reads it as today's."""
+        rows, _ = cb.collect(self.BRIEF_SLOT, {}, _tree(tmp_path, date="2026-09-02"))
+        assert any("yesterday's card" in r for r in rows), rows
+
+    def test_and_the_board_grows_no_P0_row_he_cannot_act_on(self, tmp_path):
+        """The founder-visible half. He asked for rows that lead to an action; this one
+        led to waiting for a job that had already been scheduled to run later."""
+        b = cb.buckets(self.BRIEF_SLOT, {}, _tree(tmp_path, date="2026-09-02"))
+        assert not any(r["scope"] == cb.CARD_ALARM for r in b["top_of_mind"])
+
+    def test_after_0730_the_same_card_is_a_REAL_failure_and_still_refused(self, tmp_path):
+        """Why this keys on the schedule and not on a count of hours. A 26-hour window
+        would swallow a card the 07:30 job genuinely failed to write."""
+        after = dt.datetime(2026, 9, 3, 14, 45, tzinfo=dt.timezone.utc)   # 07:45 PT
+        rows, err = cb.collect(after, {}, _tree(tmp_path, date="2026-09-02"))
+        assert rows == []
+        assert "2026-09-02" in err and "2026-09-03" in err
+
+    def test_the_boundary_is_the_card_job_itself(self, tmp_path):
+        """One minute either side of CARD_WRITTEN_AT, so the constant is what decides
+        and not an accident of the two chosen timestamps."""
+        before = dt.datetime(2026, 9, 3, 14, 29, tzinfo=dt.timezone.utc)  # 07:29 PT
+        at = dt.datetime(2026, 9, 3, 14, 30, tzinfo=dt.timezone.utc)      # 07:30 PT
+        assert cb.collect(before, {}, _tree(tmp_path, date="2026-09-02"))[1] is None
+        assert cb.collect(at, {}, _tree(tmp_path, date="2026-09-02"))[1] is not None
+
+    def test_a_card_older_than_yesterday_is_refused_at_any_hour(self, tmp_path):
+        """The window is one day wide on purpose. Two days means a job has been dead
+        through a run that should have fixed it."""
+        _, err = cb.collect(self.BRIEF_SLOT, {}, _tree(tmp_path, date="2026-09-01"))
+        assert err is not None and "2026-09-01" in err
+
+    def test_the_constant_matches_the_plist_that_writes_the_card(self):
+        """A literal here would be a second copy of the schedule, free to drift from
+        the job it describes. The consulting plist is not in this repo, so this pins
+        the constant against the LOADED job when it is present and says so when it is
+        not, rather than asserting nothing."""
+        import plistlib
+        pl = (pathlib.Path.home() / "Library/LaunchAgents"
+              / "io.askconsulting.ask-crm-state-card.plist")
+        if not pl.exists():
+            pytest.skip("the consulting state-card job is not installed on this machine")
+        cal = plistlib.loads(pl.read_bytes())["StartCalendarInterval"]
+        assert (cal["Hour"], cal["Minute"]) == (cb.CARD_WRITTEN_AT.hour,
+                                                cb.CARD_WRITTEN_AT.minute)
+
+
 class TestAStaleCardIsAnError:
     """Never a quiet mirror. He would act on it."""
 
