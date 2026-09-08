@@ -71,14 +71,24 @@ PT = ZoneInfo("America/Los_Angeles")
 #: (7 red). A withheld count is always printed rather than the rest being dropped silently.
 MAX_CLIENT_ROWS = 6
 #: WHEN THE STATE CARD IS WRITTEN, from `io.askconsulting.ask-crm-state-card.plist`
-#: (StartCalendarInterval 07:30 PT). The morning brief runs at 07:00, from
-#: `com.kipi.morning-brief.plist`. So the brief reads this card THIRTY MINUTES BEFORE
-#: today's is written, every single day, and a rule that demanded today's date could
-#: never be satisfied at 07:00. Measured in ~/.config/kipi/logs/morning-brief.out.log:
-#: the refusal fired on the 09-05 and 09-07 runs, and today-card.md was last written
-#: 09-07 07:30. The cost was a P0 "Your book: COULD NOT READ" row painted onto his
-#: board every morning and cleared by nothing, since the hourly repaint has no
-#: scheduler. A row he cannot act on is the thing he asked to have removed.
+#: (StartCalendarInterval 07:30 PT). This repo's `com.kipi.morning-brief.plist` commits
+#: 07:40, DELIBERATELY after it: f9f74ac1 set that minute on 2026-09-04 in the change
+#: that made this board mirror the card. So on the shipped schedule a card stamped
+#: yesterday never happens, and this window never opens.
+#:
+#: IT OPENED FOR FOUR DAYS BECAUSE THE LOADED JOB HAD DRIFTED. The copy in
+#: ~/Library/LaunchAgents said 07:00, forty minutes early, and never picked up the
+#: committed 07:40. Measured in ~/.config/kipi/logs/morning-brief.out.log: the refusal
+#: fired on the 09-05 and 09-07 runs, and today-card.md was last written 09-07 07:30.
+#: The cost was a P0 "Your book: COULD NOT READ" row painted on his board every morning
+#: and cleared by nothing, because the hourly repaint has no scheduler. The drift is
+#: fixed by reinstalling the template; nothing detects the NEXT one, which is
+#: sp-de7afcff.
+#:
+#: THIS WINDOW IS NOT THAT FIX and does not pretend to be. It is what an early run
+#: should DO: use the newest card there is and label it, rather than paint a P0 he
+#: cannot act on about a job that has not run yet. A hand-run before 07:30 takes the
+#: same path, which is how the drift was found.
 CARD_WRITTEN_AT = dt.time(7, 30)
 
 
@@ -557,7 +567,8 @@ def collect(now: dt.datetime, sources: dict, paths=None):
     # (PR #335 reviewer, nit) and a heartbeat with no counts rendered yesterday's client
     # rows with nothing saying so.
     if beat.get("card_is_yesterdays"):
-        rows.append("book: yesterday's card, today's is written at 07:30")
+        rows.append("book: yesterday's card, today's is written at "
+                    f"{CARD_WRITTEN_AT.strftime('%H:%M')}")
     counts = (beat.get("card") or {}).get("counts") or {}
     if counts:
         rows.append(f"book: {counts.get('red', 0)} owed, "

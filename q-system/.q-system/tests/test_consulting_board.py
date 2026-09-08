@@ -291,23 +291,27 @@ class TestTheBriefReadsTheCardBeforeTheCardIsWritten:
     the old rule protected is kept: yesterday's book is never presented as today's.
     """
 
-    #: 07:00 PT, the brief's own slot, before the card is written.
-    BRIEF_SLOT = dt.datetime(2026, 9, 3, 14, 0, tzinfo=dt.timezone.utc)
+    #: 07:00 PT. AN EARLY RUN, and deliberately not called "the brief's slot" any more
+    #: (PR #335 reviewer round 2, minor). The committed slot is 07:40, after the card;
+    #: 07:00 is the schedule the LOADED job had drifted to, and it is also what a
+    #: hand-run hits. Naming it the brief's slot made the suite green at a schedule this
+    #: repo does not ship.
+    EARLY = dt.datetime(2026, 9, 3, 14, 0, tzinfo=dt.timezone.utc)
 
     def test_before_0730_yesterdays_card_is_the_newest_one_and_is_used(self, tmp_path):
-        rows, err = cb.collect(self.BRIEF_SLOT, {}, _tree(tmp_path, date="2026-09-02"))
+        rows, err = cb.collect(self.EARLY, {}, _tree(tmp_path, date="2026-09-02"))
         assert err is None, err
         assert rows, "the book was withheld at the brief's own slot"
 
     def test_and_it_says_out_loud_that_it_is_yesterdays(self, tmp_path):
         """Accepting it is only safe because nothing reads it as today's."""
-        rows, _ = cb.collect(self.BRIEF_SLOT, {}, _tree(tmp_path, date="2026-09-02"))
+        rows, _ = cb.collect(self.EARLY, {}, _tree(tmp_path, date="2026-09-02"))
         assert any("yesterday's card" in r for r in rows), rows
 
     def test_and_the_board_grows_no_P0_row_he_cannot_act_on(self, tmp_path):
         """The founder-visible half. He asked for rows that lead to an action; this one
         led to waiting for a job that had already been scheduled to run later."""
-        b = cb.buckets(self.BRIEF_SLOT, {}, _tree(tmp_path, date="2026-09-02"))
+        b = cb.buckets(self.EARLY, {}, _tree(tmp_path, date="2026-09-02"))
         assert not any(r["scope"] == cb.CARD_ALARM for r in b["top_of_mind"])
 
     def test_after_0730_the_same_card_is_a_REAL_failure_and_still_refused(self, tmp_path):
@@ -329,7 +333,7 @@ class TestTheBriefReadsTheCardBeforeTheCardIsWritten:
     def test_a_card_older_than_yesterday_is_refused_at_any_hour(self, tmp_path):
         """The window is one day wide on purpose. Two days means a job has been dead
         through a run that should have fixed it."""
-        _, err = cb.collect(self.BRIEF_SLOT, {}, _tree(tmp_path, date="2026-09-01"))
+        _, err = cb.collect(self.EARLY, {}, _tree(tmp_path, date="2026-09-01"))
         assert err is not None and "2026-09-01" in err
 
     def test_the_BOARD_says_it_too_not_just_the_slack_line(self, tmp_path):
@@ -337,7 +341,7 @@ class TestTheBriefReadsTheCardBeforeTheCardIsWritten:
         only safe because nothing reads it as today's, and I had written that safety
         into the brief while the Notion board, which is the surface he opens, painted a
         day-old book with no marker at all."""
-        b = cb.buckets(self.BRIEF_SLOT, {}, _tree(tmp_path, date="2026-09-02"))
+        b = cb.buckets(self.EARLY, {}, _tree(tmp_path, date="2026-09-02"))
         card_rows = [r for r in b["top_of_mind"] if r["scope"] == "card"]
         assert card_rows, "no client rows reached the board to check"
         assert all("yesterday's card" in r["detail"] for r in card_rows), card_rows
@@ -349,23 +353,42 @@ class TestTheBriefReadsTheCardBeforeTheCardIsWritten:
         beat = json.loads(paths["heartbeat"].read_text())
         beat["card"].pop("counts", None)
         paths["heartbeat"].write_text(json.dumps(beat))
-        rows, err = cb.collect(self.BRIEF_SLOT, {}, paths)
+        rows, err = cb.collect(self.EARLY, {}, paths)
         assert err is None, err
         assert any("yesterday's card" in r for r in rows), rows
 
     def test_a_fresh_card_is_labelled_with_nothing(self, tmp_path):
         """The marker is not decoration. On a normal day it must be absent, or it stops
         carrying information."""
-        b = cb.buckets(self.BRIEF_SLOT, {}, _tree(tmp_path))
+        b = cb.buckets(self.EARLY, {}, _tree(tmp_path))
         card_rows = [r for r in b["top_of_mind"] if r["scope"] == "card"]
         assert card_rows
         assert not any("yesterday's card" in r["detail"] for r in card_rows)
 
-    def test_the_constant_matches_the_plist_that_writes_the_card(self):
-        """A literal here would be a second copy of the schedule, free to drift from
-        the job it describes. The consulting plist is not in this repo, so this pins
-        the constant against the LOADED job when it is present and says so when it is
-        not, rather than asserting nothing."""
+    def test_the_card_is_written_before_this_repo_runs_the_brief(self):
+        """THE DESIGN INVARIANT, and it runs everywhere (PR #335 reviewer round 2,
+        minor). The previous version pinned the constant against a LOADED LaunchAgent
+        and skipped on any host without it, so on CI it asserted nothing and the
+        constant was pinned on exactly one Mac.
+
+        This reads the plist THIS repo commits, so it runs on every host: the brief
+        must be scheduled at or after the card it mirrors. That is the relationship
+        f9f74ac1 established, and the whole defect was a loaded job that had drifted
+        off it."""
+        import plistlib
+        brief = plistlib.loads(
+            (pathlib.Path(__file__).resolve().parents[1] / "scripts"
+             / "com.kipi.morning-brief.plist").read_bytes())
+        cal = brief["StartCalendarInterval"]
+        assert (cal["Hour"] * 60 + cal["Minute"]) >= (cb.CARD_WRITTEN_AT.hour * 60
+                                                      + cb.CARD_WRITTEN_AT.minute), (
+            "the brief is committed to run BEFORE the card it mirrors; that is the "
+            "inversion this class exists for")
+
+    def test_and_the_constant_still_matches_the_installed_card_job(self):
+        """Kept as a second, weaker check: on the founder's own machine the constant
+        must equal the job it names. It skips elsewhere, which is why it is not the
+        only pin any more."""
         import plistlib
         pl = (pathlib.Path.home() / "Library/LaunchAgents"
               / "io.askconsulting.ask-crm-state-card.plist")
