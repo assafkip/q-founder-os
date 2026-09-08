@@ -60,7 +60,7 @@ Ask about a person, and Kipi pulls their relationship history, the decisions tha
 The reader reads the project's own folder, never a template. Three things make that true:
 
 - Sub-stores. A project can hold many knowledge bases, one per case or engagement, each with the same layout. Name one in a question and the search scopes to it. Name none and it searches all of them. A name that appears in several cases comes back as one block per case, never collapsed into the last one.
-- The project's own documents. Every markdown folder the project keeps is a source, one search pass per question, every excerpt with its file and line.
+- The project's own documents. Eight declared folder names (`output`, `research`, `inputs`, `investigation`, `build`, `docs`, `notes`, `memory`) are searched under the project root and under every sub-store, one pass per question, every excerpt with its file and line. The list is data, not code: it is the `folders` key of `q-system/.q-system/knowledge-sources.json`, so a project can change what counts as a document folder.
 - Candidates from the question itself. A capitalized word the index does not know is looked up in those documents. A hit makes it an entity. A word found in more than four knowledge bases is treated as common vocabulary, dropped, and the receipt says so.
 
 The model never has to remember to go looking.
@@ -71,7 +71,9 @@ The model never has to remember to go looking.
 
 An empty search result is not proof that nothing exists. Most retrieval treats it that way.
 
-Kipi's supply step writes a receipt. Every source the question needed is recorded as read, empty, unreadable, or not searched because a deadline or a budget cut the pass short. The first line of what the model receives says `COVERAGE: FULL`, or `COVERAGE: PARTIAL` with the missing sources named, or `COVERAGE: NONE` when not one declared source could be read. FULL means fully searched. Any pass that stopped early reads as partial, never as full.
+Kipi's supply step writes a receipt. Every source the question needed is recorded as read, empty, unreadable, or cut short. The first line of what the model receives says `COVERAGE: FULL`, or `COVERAGE: PARTIAL` with the missing sources named, or `COVERAGE: NONE` when not one declared source could be read.
+
+Where the line is drawn, precisely, because this is the sentence a reader trusts hardest. Only a source the manifest marks `required` can move the verdict. A deadline or a byte cap that cuts a required source short drops it to `COVERAGE: PARTIAL` and names the source. The same truncation on an optional source is written into that source's receipt row as `partially searched (...)` and leaves the verdict alone. In the shipped manifest the document scan is optional in all five task classes, so a truncated document pass can sit under `COVERAGE: FULL` with the truncation one line down in the receipt. If you want it to move the verdict, set `"required": true` for `docs` in `q-system/.q-system/knowledge-sources.json`, which is what the investigation manifest does. One function computes the verdict, in `q-system/.q-system/scripts/knowledge_supply.py`.
 
 ```mermaid
 flowchart TB
@@ -79,9 +81,11 @@ flowchart TB
     S -->|"read, has lines"| A["supplied verbatim, with file and line"]
     S -->|"read, nothing there"| B["recorded: searched, empty"]
     S -->|"file missing or corrupt"| C["recorded: could not read"]
-    S -->|"deadline or budget cut the pass short"| D["recorded: partially searched"]
+    S -->|"cut short, source is required"| D["recorded: partially searched"]
+    S -->|"cut short, source is optional"| E["recorded: partially searched"]
     A --> F["COVERAGE: FULL"]
     B --> F
+    E --> F
     C --> P["COVERAGE: PARTIAL, missing sources named"]
     D --> P
     C -. "every declared source unreadable" .-> N["COVERAGE: NONE"]
