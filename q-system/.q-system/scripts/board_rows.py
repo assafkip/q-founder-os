@@ -527,8 +527,37 @@ def _fair_share(rows, budget):
     return out
 
 
-def paint(buckets: dict, token, db, opener=None, budget=None) -> dict:
-    """Create, refresh and archive. Returns a counts dict. Never moves a row."""
+def _schema_properties(token, db, opener=None, budget=None):
+    """The property names this database actually carries, or None when unreadable.
+
+    None means "do not filter", which is the behaviour that shipped before this
+    existed. A board whose schema cannot be read is not a board whose columns are
+    gone, and refusing to write on a failed read would turn one bad response into a
+    blank morning.
+    """
+    try:
+        data = _request(token, "GET", f"/databases/{db}", None, opener, budget)
+    except Exception:
+        return None
+    props = (data or {}).get("properties")
+    return set(props) if isinstance(props, dict) and props else None
+
+
+def _only_known(props: dict, known):
+    """`props` minus any column this board does not have. `known` None -> unchanged."""
+    if known is None:
+        return props
+    return {k: v for k, v in props.items() if k in known}
+
+
+def paint(buckets: dict, token, db, opener=None, budget=None, known=None) -> dict:
+    """Create, refresh and archive. Returns a counts dict. Never moves a row.
+
+    `known` is the set of property names this board actually has, or None for "write
+    everything", which is what shipped before it existed. It is READ BY THE CALLER and
+    passed in rather than fetched here, so driving `paint` directly makes exactly the
+    requests it always made. See `_schema_properties` for why the filter exists.
+    """
     if buckets.get("error"):
         raise ValueError(buckets["error"])
 
@@ -620,7 +649,7 @@ def paint(buckets: dict, token, db, opener=None, budget=None) -> dict:
             if out_of_write_budget():
                 deferred += 1
                 continue
-            _request(token, "PATCH", f"/pages/{page['id']}", {"properties": props},
+            _request(token, "PATCH", f"/pages/{page['id']}", {"properties": _only_known(props, known)},
                      opener, budget)
             updated += 1
             moved += 1 if write else 0
@@ -710,7 +739,12 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
         # The lock is held INSIDE the budget: a painter that runs out of time also
         # lets go, so the 07:40 job is not refused by a worker the brief abandoned.
         with exclusive():
-            counts = paint(buckets, token, db, opener, budget)
+            # The schema read happens HERE, once per run, and its answer is handed
+            # to the painter. See `_schema_properties`: a board that predates `Link`
+            # and `Next` would otherwise take a 400 on the first row and lose the
+            # whole morning's paint to a column nobody noticed was missing.
+            counts = paint(buckets, token, db, opener, budget,
+                           known=_schema_properties(token, db, opener, budget))
         dupes = {}
         seen = len(existing_rows(token, db, opener, dupes_out=dupes, budget=budget))
         return counts, dupes, seen

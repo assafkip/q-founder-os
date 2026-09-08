@@ -521,10 +521,18 @@ def collect(now: dt.datetime, sources: dict, paths=None):
     shown = card_rows[:MAX_CLIENT_ROWS]
     for row in shown:
         rows.append(f"{row['health']} {row['name']} · {row['detail']}")
-    withheld = len(card_rows) - len(shown)
+    # COUNT ONLY WHAT THE BOARD ACTUALLY CARRIES (PR reviewer round 5, minor). This
+    # said "more on the board" about every row past the cap, and since ⚪ and 🟢 stopped
+    # reaching the board at all, some of those rows are nowhere to go and look at. A
+    # pointer to a place the thing is not is worse than no pointer.
+    withheld = len([r for r in card_rows[MAX_CLIENT_ROWS:]
+                    if r["health"] not in ("⚪", "🟢")])
+    quiet = len(card_rows) - len(shown) - withheld
     if withheld:
         # Never a silent trim. The count is the founder's cue that the board has more.
         rows.append(f"...and {withheld} more on the board")
+    if quiet:
+        rows.append(f"...and {quiet} where the ball is not with you")
     move, gtm_err = read_gtm(paths)
     if gtm_err:
         # A missing GTM move does not void the clients. It is named and the section

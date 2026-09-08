@@ -259,3 +259,40 @@ class TestALinkIsComparable:
                                "Inbox", "cb:x", False)
         page = {"properties": dict(props, Link={"url": "https://example.test/old"})}
         assert not br._already_holds(page, props)
+
+
+class TestAColumnThisBoardLacksIsNotAWholeLostMorning:
+    """`Link` and `Next` are new. Notion answers an unknown property with a 400 that
+    aborts the paint mid-write, so a board that predates them would lose every row of
+    that morning to a column nobody noticed was missing (PR reviewer round 5, major)."""
+
+    ITEM = {"title": "t", "key": "k", "done": "d", "priority": "P1",
+            "source": "Gmail", "link": "https://example.test/x", "next": "go"}
+
+    def test_a_board_without_the_new_columns_is_written_without_them(self):
+        props = br._properties(self.ITEM, "Inbox", "cb:x", False)
+        assert {"Link", "Next"} <= set(props), sorted(props)
+        old_board = {"Task", "Item id", "Notes", "Domain", "Priority", "Source"}
+        assert set(br._only_known(props, old_board)) == old_board, sorted(props)
+
+    def test_a_board_with_them_keeps_them(self):
+        props = br._properties(self.ITEM, "Inbox", "cb:x", False)
+        assert br._only_known(props, set(props)) == props
+
+    def test_an_unreadable_schema_writes_everything_exactly_as_before(self):
+        """The read failing is not the columns being gone. Refusing to write on a bad
+        response would turn one bad answer into a blank morning."""
+        props = br._properties(self.ITEM, "Inbox", "cb:x", False)
+        assert br._only_known(props, None) == props
+
+    def test_a_failed_schema_request_is_None_not_an_exception(self, monkeypatch):
+        def boom(*a, **k):
+            raise RuntimeError("notion said no")
+        monkeypatch.setattr(br, "_request", boom)
+        assert br._schema_properties("tok", "db") is None
+
+    def test_an_empty_schema_answer_is_None_not_an_empty_set(self, monkeypatch):
+        """An empty set would filter EVERY property out and write nothing at all,
+        which is the same lost morning by a different route."""
+        monkeypatch.setattr(br, "_request", lambda *a, **k: {"properties": {}})
+        assert br._schema_properties("tok", "db") is None
