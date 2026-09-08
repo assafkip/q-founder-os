@@ -1284,8 +1284,14 @@ def gate_register(
                             f"gate {gate_id!r} already registered as "
                             f"{existing_lifecycle!r}, not {lifecycle!r}. "
                             "The registry is append-only, so this is not edited in "
+                            # --registry is required=True in that script, so the
+                            # first version of this message printed a command that
+                            # exits 2 (review of PR #330 round 2, MINOR 1). A
+                            # recovery pointer that does not run is the dead end it
+                            # was written to remove.
                             "place: run `python3 plugins/prd-os/scripts/"
-                            f"migrate_gate_lifecycle.py --regression {gate_id} "
+                            "migrate_gate_lifecycle.py --registry "
+                            f"{_gates_path(cfg)} --regression {gate_id} "
                             "--apply`, then close again."
                         )
                     return {"gate_id": gate_id, "registered": False}
@@ -3002,7 +3008,15 @@ def cmd_gates(cfg: Config, args) -> int:
         for gid, tail in failures:
             sys.stderr.write(f"GATE RED: {gid}\n{tail}\n")
         return 1
-    if not records and registered_total:
+    # `skipped_self_ref` joins the condition (review of PR #330 round 2, MINOR 2).
+    # Keying only on len(records)==0 missed the other way to execute nothing: a
+    # registry whose regression gates are ALL skipped as self-referential has
+    # records non-empty and zero commands run, and printed the same "all N
+    # regression gates green" at exit 0. The counter was already incremented and
+    # never read. No producer emits this shape today (censused: 0 of 204
+    # bypass_checks are self-referential), which is exactly when a hole gets in.
+    executed = len(records) - skipped_self_ref
+    if executed <= 0 and registered_total:
         # AN EMPTY EXECUTED SET IS NOT A PASS, and it must never be printed as
         # one. Scar 2026-08-24 (ASK-1038): this line said "all 0 regression
         # gates green" against a 47-gate registry, and the sentence was TRUE --
@@ -3010,9 +3024,11 @@ def cmd_gates(cfg: Config, args) -> int:
         # historical-receipt, the one lifecycle filtered out just above. Exit 0
         # was read as "the gates are green" for 29 days while nothing ran.
         # A count of zero is now stated as the anomaly it is.
+        why = ("0 have lifecycle 'regression'" if not records
+               else f"all {skipped_self_ref} skipped as self-referential")
         print(f"[WARN] gates: {registered_total} gate(s) registered, NONE "
-              f"executable -- 0 have lifecycle 'regression', so no regression "
-              f"check ran. Exit 0 below covers the spillover verdict ONLY.")
+              f"executed -- {why}, so no regression check ran. "
+              f"Exit 0 below covers the spillover verdict ONLY.")
     print(f"all {len(records)} regression gates green "
           f"({registered_total} registered); "
           f"{len(blocking)} blocking spillover item(s)")

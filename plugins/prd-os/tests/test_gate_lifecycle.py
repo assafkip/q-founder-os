@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import ast
 import json
 import re
 import subprocess
@@ -204,9 +205,19 @@ def test_a_lifecycle_conflict_names_its_recovery(repo):
     cfg = module.load_config(repo)
     module.gate_register(cfg, prd_id="prd-x", issue_id="issue-conf",
                          command="true", lifecycle="historical-receipt")
-    with pytest.raises(ValueError, match="migrate_gate_lifecycle.py"):
+    with pytest.raises(ValueError) as exc:
         module.gate_register(cfg, prd_id="prd-x", issue_id="issue-conf",
                              command="true", lifecycle="regression")
+    msg = str(exc.value)
+    assert "migrate_gate_lifecycle.py" in msg
+    # THE FLAG, not just the filename (review of PR #330 round 2, MINOR 1). The
+    # first version matched the substring and stayed green against a command that
+    # exits 2, because --registry is required=True in that script. A recovery
+    # pointer is only a recovery if it runs.
+    assert "--registry" in msg, f"recovery command omits a required flag:\n{msg}"
+    quoted = msg.split("`")[1]
+    for flag in ("--registry", "--regression", "--apply"):
+        assert flag in quoted, f"{flag} missing from the printed command: {quoted}"
 
 
 def test_gate_register_ACTUALLY_CALLS_the_unrunnable_guard(repo):
@@ -363,8 +374,34 @@ def test_a_registry_with_nothing_executable_is_not_reported_as_green(repo):
                         "lifecycle": "historical-receipt"}])
     result = run(repo, "gates", "run")
     out = result.stdout + result.stderr
-    assert "NONE executable" in out, out
+    # "executable" was the wrong word and is now "executed": these gates ARE
+    # executable, they simply did not run. The distinction is the whole finding.
+    assert "[WARN]" in out, out
+    assert "NONE executed" in out, out
     assert "1 registered" in out, out
+
+
+def test_a_registry_whose_gates_are_ALL_SKIPPED_is_not_reported_as_green(repo):
+    """The other way to execute nothing (review of PR #330 round 2, MINOR 2).
+
+    The WARN keyed on `len(records) == 0`. A registry whose regression gates are
+    all skipped as self-referential has records NON-empty and zero commands run,
+    so it printed "all 1 regression gates green" at exit 0 with nothing executed --
+    the identical sentence ASK-1038 was written to stop. `skipped_self_ref` was
+    already being counted and never read.
+
+    No producer emits this shape today (0 of 204 bypass_checks in .prd-os/issues
+    are self-referential), which is precisely the condition under which a hole
+    survives unnoticed.
+    """
+    write_gates(repo, [{"gate_id": "selfref",
+                        "command": "python3 plugins/prd-os/scripts/prd_runner.py gates run",
+                        "lifecycle": "regression"}])
+    result = run(repo, "gates", "run")
+    out = result.stdout + result.stderr
+    assert "[WARN]" in out, out
+    assert "NONE executed" in out, out
+    assert "self-referential" in out, out
 
 
 def test_the_closeout_registrar_asks_for_regression_at_the_call_site(repo):
@@ -380,18 +417,39 @@ def test_the_closeout_registrar_asks_for_regression_at_the_call_site(repo):
     registrar added later with no lifecycle kept it green. There is exactly one
     call site today, which is what made that a latent hole rather than a live one
     -- and exactly the condition under which nobody notices.
+
+    THE ARGUMENT LIST IS PARSED, NOT WINDOWED (review of PR #330 round 2, MINOR 3).
+    The first fix replaced `src.index(...)` with every match but kept a 260-char
+    forward window per match, so two ADJACENT registrars fall inside each other's
+    window and a lifecycled second call donates its `lifecycle="regression"` to an
+    unlifecycled first. Reproduced: 2 call sites, first one unlifecycled, verdict
+    GREEN. Adjacency is the likeliest arrangement for the very second registrar this
+    test exists to catch, so `ast` removes the window rather than widening it.
     """
     src = (PLUGIN_ROOT.parent / "kipi-dsse" / "scripts" / "issue_runner.py").read_text()
-    starts = [m.start() for m in re.finditer(r"_prd_runner\.gate_register\(", src)]
-    assert starts, "no gate_register call site found at all -- the test lost its subject"
-    unlifecycled = [
-        src[i:i + 260] for i in starts
-        if 'lifecycle="regression"' not in src[i:i + 260]
-    ]
-    assert not unlifecycled, (
-        f"{len(unlifecycled)} of {len(starts)} closeout registrar call site(s) do not "
-        "name their lifecycle, so they take LEGACY_GATE_LIFECYCLE and `gates run` "
-        "filters them out:\n" + "\n---\n".join(unlifecycled))
+
+    def _is_gate_register(node):
+        f = node.func
+        return (isinstance(f, ast.Attribute) and f.attr == "gate_register") or (
+            isinstance(f, ast.Name) and f.id == "gate_register")
+
+    calls = [n for n in ast.walk(ast.parse(src))
+             if isinstance(n, ast.Call) and _is_gate_register(n)]
+    assert calls, "no gate_register call site found at all -- the test lost its subject"
+    bad = []
+    for n in calls:
+        kw = {k.arg: k for k in n.keywords if k.arg}
+        val = kw.get("lifecycle")
+        ok = (val is not None
+              and isinstance(val.value, ast.Constant)
+              and val.value.value == "regression")
+        if not ok:
+            bad.append(f"line {n.lineno}: lifecycle="
+                       f"{ast.unparse(val.value) if val is not None else '<absent>'}")
+    assert not bad, (
+        f"{len(bad)} of {len(calls)} closeout registrar call site(s) do not pass "
+        'lifecycle="regression", so they take LEGACY_GATE_LIFECYCLE and `gates run` '
+        "filters them out:\n" + "\n".join(bad))
 
 
 # ---------------------------------------------------------------------------
