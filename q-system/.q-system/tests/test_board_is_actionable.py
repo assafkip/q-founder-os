@@ -118,9 +118,12 @@ class TestEveryMailRowCanBeStartedFromTheRow:
         b = self._mail(tmp_path, "mail:bbbbbbbbbbbbbbbb")["link"]
         assert a != b and a.endswith("aaaaaaaaaaaaaaaa"), (a, b)
 
-    def test_a_gmail_row_says_what_to_do(self, tmp_path):
-        assert self._mail(tmp_path, "mail:1a06eb5b0b03759f")["next"] == (
-            "Open the thread and reply.")
+    def test_the_producer_supplies_no_next_for_an_inbox_row(self, tmp_path):
+        """A constant per source restates DONE_BY_SOURCE in the imperative, which is
+        the duplication this change removes from Notes (PR reviewer, nit). The link
+        and the subject are what make the row startable. Because the writer never
+        blanks a property it was not given, a Next a human wrote there survives."""
+        assert self._mail(tmp_path, "mail:1a06eb5b0b03759f").get("next") is None
 
 
 class TestTheWriterCarriesLinkAndNext:
@@ -170,3 +173,60 @@ class TestTheNoteDoesNotRepeatItself:
                                "cb:x", False)
         note = props["Notes"]["rich_text"][0]["text"]["content"]
         assert "a real extra fact" in note and "signal" in note, note
+
+
+class TestHisPlacementSurvivesTheProducerDroppingTheRow:
+    """The module's contract is that a row a human moved is never moved by the machine.
+    The archive loop was the hole in it: a pinned row was archived the moment its
+    producer stopped emitting it, taking his placement and his Status with it. Filtering
+    white client lines off the board makes that flip ordinary rather than rare."""
+
+    def _page(self, iid, note):
+        return {"id": f"page-{iid}",
+                "properties": {"Item id": {"rich_text": [{"plain_text": iid}]},
+                               "Notes": {"rich_text": [{"plain_text": note}]}}}
+
+    def test_a_pinned_row_is_kept_when_its_producer_stops_emitting_it(self, monkeypatch):
+        page = self._page("cb:gone", "Done signal: x\nscope=card\nbucket=This Week\npinned=1")
+        sent = []
+        monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {"cb:gone": page})
+        monkeypatch.setattr(br, "_request",
+                            lambda tok, m, path, body, op=None, bud=None: sent.append((m, path, body)))
+        counts = br.paint({"top_of_mind": [], "this_week": [], "inbox": [],
+                           "healthy_scopes": {"card"}}, "tok", "db")
+        assert counts["archived"] == 0, sent
+        assert counts["kept"] == 1, counts
+        assert not [s for s in sent if s[2].get("archived")], sent
+
+    def test_an_unpinned_row_the_producer_dropped_is_still_archived(self, monkeypatch):
+        page = self._page("cb:gone", "Done signal: x\nscope=card\nbucket=This Week")
+        sent = []
+        monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {"cb:gone": page})
+        monkeypatch.setattr(br, "_request",
+                            lambda tok, m, path, body, op=None, bud=None: sent.append((m, path, body)))
+        counts = br.paint({"top_of_mind": [], "this_week": [], "inbox": [],
+                           "healthy_scopes": {"card"}}, "tok", "db")
+        assert counts["archived"] == 1, (counts, sent)
+
+
+class TestALinkIsComparable:
+    """Without url in `_prop_value` every row carrying a Link read as unreadable, so
+    `_already_holds` was always False and the painter rewrote every Gmail row every
+    run (PR reviewer, major)."""
+
+    def test_a_url_property_reads_back_as_its_value(self):
+        assert br._prop_value({"url": "https://example.test/x"}) == "https://example.test/x"
+
+    def test_an_unchanged_link_is_not_rewritten(self):
+        props = br._properties({"title": "t", "key": "k", "done": "d",
+                                "link": "https://example.test/x"},
+                               "Inbox", "cb:x", False)
+        page = {"properties": {k: v for k, v in props.items()}}
+        assert br._already_holds(page, props), "a row that already holds its Link was rewritten"
+
+    def test_a_changed_link_is_rewritten(self):
+        props = br._properties({"title": "t", "key": "k", "done": "d",
+                                "link": "https://example.test/new"},
+                               "Inbox", "cb:x", False)
+        page = {"properties": dict(props, Link={"url": "https://example.test/old"})}
+        assert not br._already_holds(page, props)

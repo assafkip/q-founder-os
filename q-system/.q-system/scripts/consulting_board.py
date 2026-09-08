@@ -596,6 +596,12 @@ DONE_GTM_FALLBACK = "the step is done or you wrote down why it did not happen"
 #: already carries. Founder's standing rule: if he cannot copy-paste it, click it or
 #: check it off, it does not belong. Measured 2026-09-07: not one row on the board
 #: carried a URL, including the P0 intro he had to go find in Gmail by hand.
+#:
+#: NO `next` IS WRITTEN FOR AN INBOX ROW (PR reviewer, nit). A constant per source
+#: ("Open the thread and reply.") restates `DONE_BY_SOURCE` in the imperative, which
+#: is the duplication this same change removes from the Notes column. The link plus
+#: the subject is what makes the row startable; a row whose next step is genuinely
+#: worth saying gets it from whoever knows, and the writer never blanks it.
 GMAIL_THREAD = "https://mail.google.com/mail/u/0/#all/"
 
 DONE_BY_SOURCE = {
@@ -706,11 +712,13 @@ def buckets(now: dt.datetime, sources: dict, paths=None) -> dict:
         # in This Week carrying his done signal over Sana's build work. DEC-34.
         if row["health"] in ("⚪", "🟢"):
             continue
-        # EVERYTHING THE CARD SURFACES IS TOP OF MIND, and This Week is no longer
-        # written from the card. The section's own text says it is his and that
-        # nothing fills it automatically; eleven machine rows were in it on
-        # 2026-09-07. A board where every section is machine-written has no place
-        # that represents a decision he made, and the drag is the point.
+        # EVERYTHING THE CARD SURFACES IS TOP OF MIND. THE CARD no longer writes
+        # This Week; `read_week` still does, from the GTM queue and from deliverables
+        # due inside the window, and those are genuinely this week's committed work.
+        # What left the section is the client lane, which was eleven machine rows on
+        # 2026-09-07 in a section whose own text says nothing fills it automatically.
+        # Emptying it completely is not this change: the week rows would then have no
+        # home and would be invisible, which is the defect sp-772d21e9 is about.
         top.append(item)
 
     # The dates failing is reported ONCE, as its own row, never as a line stapled to
@@ -818,8 +826,6 @@ def buckets(now: dt.datetime, sources: dict, paths=None) -> dict:
                           "link": (GMAIL_THREAD + key.split(":", 1)[1]
                                    if label == "Gmail" and key.startswith("mail:")
                                    else None),
-                          "next": ("Open the thread and reply."
-                                   if label == "Gmail" else "Answer in the chat."),
                           "source": label, "scope": f"inbox:{label}",
                           # Inbox rows are things a person is waiting on. P2: below a
                           # client he owes something to and below a broken source, above

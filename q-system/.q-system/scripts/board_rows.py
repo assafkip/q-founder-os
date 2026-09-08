@@ -311,6 +311,12 @@ def _prop_value(prop):
         return ((prop.get("select") or {}).get("name") or "") or None
     if "multi_select" in prop:
         return tuple(sorted((o.get("name") or "") for o in prop.get("multi_select") or []))
+    # `url` joined this list with `Link` (PR reviewer, major). Without it every row
+    # carrying a Link read as unreadable, `_already_holds` was always False, and the
+    # painter PATCHed every Gmail row on every run: a write budget spent re-writing
+    # values that had not changed, and a `last_edited_time` that lied about it.
+    if "url" in prop:
+        return prop.get("url") or None
     # A DISTINCT OBJECT, never None (round 13, minor). The docstring below promised
     # that an unreadable property compares unequal and fails toward writing, while
     # None == None made two unreadable shapes compare EQUAL and skip the write, so a
@@ -614,6 +620,18 @@ def paint(buckets: dict, token, db, opener=None, budget=None) -> dict:
             continue
         if _scope_of(page) not in healthy:
             kept += 1                      # its source could not answer; leave it alone
+            continue
+        if _note_field(page, PINNED_LINE.split("=")[0] + "="):
+            # HIS DRAG SURVIVES THE PRODUCER DROPPING THE ROW (PR reviewer, major).
+            # The module's contract is that a row a human moved is never moved or
+            # re-bucketed by the machine, and this loop was the hole in it: a row he
+            # had pinned was still archived the moment its producer stopped emitting
+            # it, taking his placement and his Status with it and recreating the row
+            # at "Not started" when the producer came back. Filtering white client
+            # lines out of the board (DEC-34) makes that flip ordinary rather than
+            # rare, which is how the reviewer found it.
+            kept += 1
+            pinned += 1
             continue
         if out_of_write_budget():
             # An unarchived row is on the board, so it counts as kept for the read-back
