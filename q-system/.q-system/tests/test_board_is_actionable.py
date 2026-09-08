@@ -908,9 +908,14 @@ class TestNoTestCanWriteTheLiveColumnRecord:
         br._remember_columns("db", ["Link"], rec)
         assert json.loads(rec.read_text())["db"] == ["Link"]
 
-    def test_the_live_record_does_not_exist_after_this_suite(self):
-        assert not br.COLUMNS_MADE.exists(), (
-            f"the suite wrote {br.COLUMNS_MADE}, which the 07:40 job reads")
+    # DELETED, NOT WEAKENED: `test_the_live_record_does_not_exist_after_this_suite`.
+    # It asserted the absence of a file PRODUCTION writes, so the first morning the real
+    # job healed a column on his board the suite would have gone red on his machine and
+    # blamed itself for correct behaviour (PR #332 reviewer round 8, major). It was
+    # conflating "no test wrote this" with "this never exists", and only the first is a
+    # property of the suite. The chokepoint in `_remember_columns` is what actually
+    # holds the rule, and it holds it at the moment of the write rather than by
+    # inspecting the world afterwards.
 
 
 class TestARefusedCreateStillNamesWhatItCosts:
@@ -930,6 +935,19 @@ class TestARefusedCreateStillNamesWhatItCosts:
         assert "no permission" in joined, problems
         assert "nothing is ever archived" in joined, problems
         assert "invisible on the board" in joined, problems
+
+    def test_a_response_that_answers_but_lacks_the_column_is_not_a_success(
+            self, monkeypatch, tmp_path):
+        """Notion accepting the PATCH and quietly not adding the column read as a clean
+        run, while the empty and refused paths both reported it (round 8, minor)."""
+        after = {"properties": {"Task": {"type": "title"},
+                                "Item id": {"type": "rich_text"}}}
+        monkeypatch.setattr(br, "_request", lambda *a, **k: after)
+        _, problems = br.ensure_columns(dict(self.BARE), "tok", "db",
+                                        record=tmp_path / "made.json")
+        joined = " ".join(problems)
+        assert "does not carry them" in joined, problems
+        assert "nothing is ever archived" in joined, problems
 
     def test_an_unconfirmed_create_names_the_cost(self, monkeypatch, tmp_path):
         monkeypatch.setattr(br, "_request",

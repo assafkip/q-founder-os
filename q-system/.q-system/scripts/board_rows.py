@@ -267,9 +267,16 @@ def _note_field(page, prefix: str) -> str:
 def _scope_of(page) -> str:
     """The scope a row was written under, read back off the row itself.
 
-    Stored in Notes rather than a new Notion property so the board's schema does not
-    change: a select option added by a writer is a schema edit the founder did not ask
-    for. Unknown scope is treated as UNHEALTHY by the caller, which fails safe: an
+    Stored in Notes rather than in a property of its own. The original reason was that
+    the board's schema should not change at all; that is no longer true, and saying so
+    was misleading (round 8, minor). `ensure_columns` now adds up to eight columns
+    deliberately, and tells him on the morning line when it does.
+
+    What survives the change is the narrower reason, which is why this still lives in
+    Notes: `scope=` is MACHINERY, read back by the painter to decide an archive. A
+    column for it would put an internal decision on his board as something to look at
+    and edit, and this file has spent a night removing exactly that kind of row.
+    Unknown scope is treated as UNHEALTHY by the caller, which fails safe: an
     unrecognised row is kept, never archived.
     """
     return _note_field(page, SCOPE_PREFIX)
@@ -778,6 +785,20 @@ def ensure_columns(known, token, db, opener=None, budget=None, record=None):
         made = sorted(n for n in missing if n in fresh)
         if made:
             _remember_columns(db, made, record)
+        # A RESPONSE THAT ANSWERS AND STILL LACKS THE COLUMN IS NOT A SUCCESS (round 8,
+        # minor). The empty-properties and refusal paths both report an unconfirmed
+        # create; this one returned no problem at all, so a Notion that accepts the
+        # PATCH and quietly does not add the column read as a clean run.
+        absent = sorted(n for n in missing if n not in fresh)
+        if absent:
+            return ({n: (p or {}).get("type") for n, p in fresh.items()},
+                    told + (f"asked Notion for {', '.join(absent)} and the schema it "
+                            "returned does not carry them, so they were not written",)
+                    + tuple(f"{n}: {STRUCTURAL_COST[n]}" for n in absent
+                            if n in STRUCTURAL_COST)
+                    + ((f"added the {', '.join(made)} "
+                        + ("columns" if len(made) > 1 else "column")
+                        + " to this board",) if made else ()))
         # SAID OUT LOUD (round 4, major). Adding columns to his board is a change to
         # his board, and a change he is not told about is one he cannot disagree with.
         return ({n: (p or {}).get("type") for n, p in fresh.items()},
