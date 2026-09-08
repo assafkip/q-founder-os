@@ -171,7 +171,8 @@ def read_card(paths=None) -> tuple[list[dict], str | None]:
     paths = paths or _paths()
     path = paths["card"]
     if not path.exists():
-        return [], f"no state card at {path.name}; the 07:30 job has not written one"
+        return [], (f"no state card at {path.name}; the "
+                    f"{CARD_WRITTEN_AT.strftime('%H:%M')} job has not written one")
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -362,7 +363,8 @@ def read_heartbeat(now: dt.datetime, paths=None) -> tuple[dict, str | None]:
     beat.pop("card_is_yesterdays", None)
 
     if beat.get("crash"):
-        return beat, f"the 07:30 state card crashed: {beat['crash']}"
+        return beat, (f"the {CARD_WRITTEN_AT.strftime('%H:%M')} state card crashed: "
+                      f"{beat['crash']}")
 
     stamped = (beat.get("card") or {}).get("date")
     local = now.astimezone(PT)
@@ -756,7 +758,7 @@ def buckets(now: dt.datetime, sources: dict, paths=None) -> dict:
         top.append({"title": "Your book: COULD NOT READ", "key": "card:error",
                     "detail": card_problem, "source": "State card", "scope": CARD_ALARM,
                     "priority": "P0", "domain": "Fleet",
-                    "done": "the 07:30 state card writes a fresh one",
+                    "done": f"the {CARD_WRITTEN_AT.strftime('%H:%M')} state card writes a fresh one",
                     "bucket_reason": "error"})
 
     my_side, my_side_err = ({}, None) if card_problem else read_my_side(now, paths)

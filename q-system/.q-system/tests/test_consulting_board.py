@@ -301,7 +301,7 @@ class TestTheBriefReadsTheCardBeforeTheCardIsWritten:
     def test_before_0730_yesterdays_card_is_the_newest_one_and_is_used(self, tmp_path):
         rows, err = cb.collect(self.EARLY, {}, _tree(tmp_path, date="2026-09-02"))
         assert err is None, err
-        assert rows, "the book was withheld at the brief's own slot"
+        assert rows, "the book was withheld on a run before the card is written"
 
     def test_and_it_says_out_loud_that_it_is_yesterdays(self, tmp_path):
         """Accepting it is only safe because nothing reads it as today's."""
