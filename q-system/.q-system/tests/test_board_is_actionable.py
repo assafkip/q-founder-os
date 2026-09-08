@@ -994,7 +994,11 @@ class TestNoTestCanWriteTheLiveColumnRecord:
         with pytest.raises(AssertionError) as e:
             br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
         assert "live column record" in str(e.value)
-        assert not live.exists(), "collect reached the live record and wrote it"
+        # NO write assertion here, deliberately (round 5, minor). The guard fires on the
+        # `_columns_made` READ at the top of `ensure_columns`, and the write is past the
+        # network stub, so `not live.exists()` could never have failed. A branch that
+        # cannot go red reads as coverage and is not. The write path is pinned by the
+        # test above, where the call reaches `_remember_columns` directly.
 
     def test_redirecting_columns_made_is_how_a_test_opts_in(self, monkeypatch, tmp_path):
         """The escape hatch is the same one LOCK_FILE already uses, so the habit is

@@ -639,11 +639,20 @@ CREATABLE = tuple(n for n in WRITES_TYPE if n not in UNDROPPABLE)
 
 #: Columns this module has created before, per board. A column in here that is now
 #: ABSENT was deleted by a person, and this module does not put it back.
-COLUMNS_MADE = STATE_DIR / "board-columns-created.json"
+#: ONE literal, because the guard below is path equality against it (PR #334 reviewer
+#: round 5, minor). Written twice, renaming the file moved COLUMNS_MADE and left
+#: _LIVE_RECORD pointing at a name nothing uses. The guard would then match nothing,
+#: refuse nothing, and all 85 board tests would stay green while the protection was
+#: gone. A duplicated literal is a silent off switch.
+_RECORD_NAME = "board-columns-created.json"
+COLUMNS_MADE = STATE_DIR / _RECORD_NAME
 
-#: THE REAL LOCATION, frozen. Tests redirect `COLUMNS_MADE`; nothing redirects this, so
-#: it is what "am I about to touch the founder's live file" is measured against.
-_LIVE_RECORD = STATE_DIR / "board-columns-created.json"
+#: THE REAL LOCATION, frozen. Production reads `COLUMNS_MADE`, which a test may redirect
+#: to tmp to opt in; this one is the fixed answer to "am I about to touch the founder's
+#: live file". Two tests DO monkeypatch it, and that is the sanctioned way to exercise
+#: the guard without handing it his real path (round 5, minor: the comment here used to
+#: claim nothing redirected it, which those same two tests contradicted).
+_LIVE_RECORD = STATE_DIR / _RECORD_NAME
 
 
 def _refuse_live_record_under_test(path):
