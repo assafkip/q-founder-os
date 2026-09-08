@@ -555,6 +555,19 @@ WRITES_TYPE = {"Task": "title", "Item id": "rich_text", "Notes": "rich_text",
                "Bucket": "select", "Status": "select", "Link": "url",
                "Next": "rich_text"}
 
+#: NEVER DROPPABLE (PR reviewer round 8, major). `Item id` is the row's identity: every
+#: lookup, every refresh and every archive decision keys on it, and `existing_rows`
+#: queries the board by its prefix. Dropping it does not degrade a row, it creates a
+#: row this module can never find again -- one more per wanted row per run, forever,
+#: with no error anywhere. `Task` is the title, so a row without it is untitled on his
+#: board. Losing either is worse than the 400 the filter exists to prevent, so a board
+#: that cannot take them stops the paint instead of half-writing it.
+UNDROPPABLE = ("Item id", "Task")
+
+
+class MissingIdentityColumn(RuntimeError):
+    """The board cannot take a column the painter cannot work without."""
+
 
 def _only_known(props: dict, known):
     """(props this board can take, names dropped). `known` None -> unchanged, nothing
@@ -574,6 +587,12 @@ def _only_known(props: dict, known):
             keep[k] = v
         else:
             dropped.append(k)
+    hard = [k for k in UNDROPPABLE if k in dropped]
+    if hard:
+        raise MissingIdentityColumn(
+            f"the board cannot take {', '.join(hard)}, which the painter identifies "
+            "rows by. Writing rows without it would create pages this module can never "
+            "find or archive again, one per row per run. Fix the board's columns.")
     return keep, tuple(sorted(dropped))
 
 
@@ -832,8 +851,16 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
         # NEVER SILENT. The filter stops a missing column aborting the paint; it must
         # not also hide that the rows went out without it. A board missing `Link` wrote
         # every row without its link and still said "read-back ok" (round 7, major).
-        line += ("; this board has no " + ", ".join(counts["dropped_columns"])
-                 + " column, so those values were not written")
+        #
+        # "cannot take", not "has no": the column may be present under the wrong TYPE,
+        # and telling him it is missing sends him looking for something that is there
+        # (round 8, minor). The plural is counted rather than assumed for the same
+        # reason: a line that says "column" about three of them reads as one.
+        names = counts["dropped_columns"]
+        line += ("; this board cannot take the "
+                 + ", ".join(names)
+                 + (" columns" if len(names) > 1 else " column")
+                 + ", so those values were not written")
     if counts["over_cap"]:
         line += f"; {counts['over_cap']} row(s) over the {BUDGET_ROWS}-row cap, not written"
     if counts["deferred"]:

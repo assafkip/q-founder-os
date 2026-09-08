@@ -14,6 +14,8 @@ take its own test with it.
 import datetime as dt
 import json
 import sys
+
+import pytest
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
@@ -358,3 +360,71 @@ class TestAColumnThisBoardLacksIsNotAWholeLostMorning:
         board = dict(self.OLD_BOARD, Link="url", Next="rich_text")
         counts, _ = self._paint_against(monkeypatch, board)
         assert counts["dropped_columns"] == (), counts["dropped_columns"]
+
+
+class TestTheIdentityColumnIsNeverDropped:
+    """`Item id` is how every lookup, refresh and archive decision finds a row, and
+    `existing_rows` queries the board by its prefix. Dropping it does not degrade a
+    row: it creates a page this module can never find again, one more per wanted row
+    per run, with no error anywhere (PR reviewer round 8, major)."""
+
+    ITEM = {"title": "t", "key": "k", "done": "d", "priority": "P1", "source": "Gmail"}
+
+    def _props(self):
+        return br._properties(self.ITEM, "Inbox", "cb:x", False)
+
+    def test_a_board_that_cannot_take_the_id_stops_the_paint(self):
+        board = {"Task": "title", "Notes": "rich_text", "Domain": "multi_select",
+                 "Priority": "select", "Source": "select"}
+        with pytest.raises(br.MissingIdentityColumn) as e:
+            br._only_known(self._props(), board)
+        assert "Item id" in str(e.value)
+
+    def test_the_id_under_the_wrong_type_stops_it_too(self):
+        board = {"Task": "title", "Item id": "select", "Notes": "rich_text",
+                 "Domain": "multi_select", "Priority": "select", "Source": "select"}
+        with pytest.raises(br.MissingIdentityColumn):
+            br._only_known(self._props(), board)
+
+    def test_a_missing_title_stops_it(self):
+        board = {"Item id": "rich_text", "Notes": "rich_text",
+                 "Domain": "multi_select", "Priority": "select", "Source": "select"}
+        with pytest.raises(br.MissingIdentityColumn) as e:
+            br._only_known(self._props(), board)
+        assert "Task" in str(e.value)
+
+    def test_an_optional_column_still_only_drops(self):
+        """The refusal is for identity, not for everything. A board missing `Link`
+        still paints, minus the link, and says so."""
+        board = {"Task": "title", "Item id": "rich_text", "Notes": "rich_text",
+                 "Domain": "multi_select", "Priority": "select", "Source": "select"}
+        keep, dropped = br._only_known(
+            br._properties(dict(self.ITEM, link="https://example.test/x"),
+                           "Inbox", "cb:x", False), board)
+        assert dropped == ("Link",) and "Item id" in keep
+
+
+class TestTheSchemaGuardIsActuallyWiredIntoTheRun:
+    """A guard the production path never passes is a guard that does not exist, and the
+    suite would stay green either way (PR reviewer round 8, nit)."""
+
+    def test_the_runner_hands_paint_the_schema_it_read(self, monkeypatch, tmp_path):
+        seen = {}
+        monkeypatch.setattr(br, "_schema_properties",
+                            lambda *a, **k: {"Task": "title", "Item id": "rich_text"})
+
+        def spy_paint(buckets, token, db, opener=None, budget=None, known=None):
+            seen["known"] = known
+            return {"created": 0, "updated": 0, "archived": 0, "kept": 0, "held": 0,
+                    "wanted": 0, "moved": 0, "pinned": 0, "over_cap": 0,
+                    "unchanged": 0, "deferred": 0, "deferred_new": 0,
+                    "dropped_columns": ()}
+
+        monkeypatch.setattr(br, "paint", spy_paint)
+        monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {})
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.delenv("KIPI_BRIEF_DRY_RUN", raising=False)
+        tf = tmp_path / "notion-token"; tf.write_text("t", encoding="utf-8")
+        dbf = tmp_path / "notion-board-db"; dbf.write_text("d", encoding="utf-8")
+        br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
+        assert seen.get("known") == {"Task": "title", "Item id": "rich_text"}, seen
