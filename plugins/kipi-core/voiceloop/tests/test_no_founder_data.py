@@ -80,20 +80,35 @@ def test_the_tree_has_files_to_check():
     NIT), so a walk that returned 8 files would have passed while grepping
     almost nothing. A floor that cannot notice a 36-file shortfall is decoration.
 
-    The honest version compares against the thing that must be there: every .py
-    the package ships has to appear in the scanned set. A truncated or
-    misfiltered walk fails this; a healthy one cannot.
+    ITS FIRST VERSION WAS TAUTOLOGICAL, and the fix is the whole point of this
+    docstring (PR #105 review, MINOR, 2026-09-07). It derived the expected set as
+    every `.py` on disk. But `.py` matches no `_BINARY_SUFFIXES` entry, so a `.py`
+    file is in the scanned set BY CONSTRUCTION and `py_on_disk - scanned` was empty
+    no matter what `_tree_files` did. Its only reachable failure was a walk that
+    returned literally nothing.
+
+    Measured against the exact regression it exists to prevent -- putting the old
+    `.py/.json/.jsonl/.md` allowlist back:
+
+        hardened scan sees 45 files, allowlist scan sees 44
+        missed by the allowlist: requirements-authorship.txt
+        py-derived assertion   -> PASSES under both        <- blind
+        non-binary assertion   -> FAILS under the allowlist <- catches it
+
+    So the expected set is derived with the SAME predicate the scan uses, negated
+    off a raw walk. Now the only way to satisfy it is to actually scan everything
+    that is not binary, which is the property the file is about.
     """
     scanned = set(_tree_files())
-    py_on_disk = {
+    on_disk = {
         os.path.join(root, f)
         for root, dirs, files in os.walk(PKG)
         if "__pycache__" not in root
         for f in files
-        if f.endswith(".py")
+        if not f.endswith(_BINARY_SUFFIXES)
     }
-    assert py_on_disk, "the walk found no .py at all -- it is broken"
-    missing = sorted(py_on_disk - scanned)
+    assert on_disk, "the walk found no files at all -- it is broken"
+    missing = sorted(on_disk - scanned)
     assert not missing, "the scan skipped shipped files: %s" % ", ".join(missing)
 
 
