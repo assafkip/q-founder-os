@@ -136,6 +136,7 @@ STAGE_REGATE = "regate"          # the 15 deterministic gates re-judging a revis
 STAGE_CHECKLIST = "checklist"    # the checklist itself could not be read
 STAGE_FORMAT = "format"          # the answer did not follow the strict contract
 STAGE_COST = "cost"              # how many model calls this candidate cost, by tier
+STAGE_CAPTURE = "capture"        # the caller's draft capture failed; the run continued
 
 
 class Outcome:
@@ -519,7 +520,7 @@ def violations_for(failures):
 
 def run(text, channel, at=None, runner=None, reviser=None, regate=None,
         path=None, log_path=None, attempts=CRITIC_MAX_ATTEMPTS, notify=None,
-        **kwargs):
+        capture=None, **kwargs):
     """Critique, revise, re-gate, re-critique. Returns an `Outcome`, never a hold.
 
     `regate(text) -> (repaired_text, blocking_violations)` is supplied by the caller and
@@ -534,10 +535,113 @@ def run(text, channel, at=None, runner=None, reviser=None, regate=None,
     A revision the gates reject is a DISCARD, not another attempt: re-running the same
     prompt against the same text is the identical-retry this repo already bans, and the
     slot refills from the next candidate in the same cycle.
+
+    `capture(bodies, channel, at)` IS OPTIONAL AND THE ENGINE OWNS NO STORE (2026-09-07,
+    cgs-1). The critic keeps `content_key.text_sha(text)` and throws the body away, so
+    none of its verdicts could ever be checked against a person's own read: a draft that
+    fails is discarded and never reaches the postbook. `bodies` is every body this run
+    wrote a VERDICT ROW about, keyed by that same sha, handed to the caller once, after
+    the log is written. That is wider than "judged": it includes a revision the deterministic
+    gates rejected, which the critic never scored but which owns a STAGE_REGATE row and
+    therefore has to be joinable. The store carries no stage, so a gold-set builder
+    tells the two apart by joining back through the log.
+
+    why a CALLABLE and not a path. The store needs a read-modify-write under
+    `locking.file_lock`, which locks a sibling `<path>.lock` because `os.replace` swaps
+    the inode; a lock taken on the data file the way `append` does it guards an inode
+    the replace has already unlinked and excludes nobody. Engine code may not import the
+    deployment's lock, so a store here would have had a second writer AND a second lock
+    mechanism that never serialised against the first. Injecting the callable puts the
+    whole store on one side of the line.
+
+    A capture that raises is a MISSING CACHE ROW, never a dead slot. Nothing else on
+    this path catches it, so an ENOSPC on the output directory would propagate out of
+    `critic.run` into `cycle.run_slot`.
+
+    THE BLAST RADIUS, corrected after review measured it rather than accepting the
+    first draft's claim. A deployment whose scheduled callers already wrap this in
+    `except Exception` loses one SLOT plus an error entry in its heartbeat, not the
+    whole job. That is bad enough and is the argument this wrapper stands on; a scar
+    comment that overstates its own scar is how the next reader stops trusting the
+    rest of the comment. A deployment that does NOT wrap its caller loses the job, so
+    the wrapper is the engine's guarantee either way.
     """
     at = at or _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     rows = rows_for(channel, path)
     log_rows = []
+    attempt = 1
+    # Every body this run JUDGED, keyed by the same content key the log rows carry, so
+    # the two artifacts join. A dict and not a list because the revision loop can judge
+    # the same body twice (failed rows are re-judged first on the next pass).
+    judged = {}
+
+    def _note(body):
+        """Record a body at the moment it enters judgement.
+
+        Two other placements were measured and rejected. `_row` is a pure dict-builder
+        that `test_critic.py` calls directly and whose regate callers pass gate-repaired
+        text; making it write would make those tests write. `_cost_row` fires once per
+        candidate with whichever body is current, so it stores at most one body per
+        candidate while a revising run judges two or three, and the ones it drops are
+        the attempt-1 originals.
+
+        THE RATIO IS THE POINT AND THE LOG IS THE RECORD. An operator's verdict log
+        carries far more distinct `draft_sha` than `cost` rows; count them there rather
+        than trusting a number written here, which rots (the first draft of this
+        comment was stale within the hour, partly from the run that verified it) and
+        which is that operator's usage data, not this package's.
+        """
+        if body:
+            judged[content_key.text_sha(body)] = body
+
+    def _flush():
+        """THE single flush point, replacing the six bare `append` calls.
+
+        Order is load-bearing: the verdict log is the primary artifact and is written
+        FIRST, so a capture failure cannot cost a verdict row.
+
+        THE COST OF THAT ORDER, named because the standard review asked for it either
+        fixed or stated. A capture failure produces a SECOND append, so one run's rows
+        are no longer one atomic write, and `critic.append`'s own docstring records that
+        two processes reach this file at once. Another run's rows can land between the
+        two, and `batch_review.segments` opens a block only on an attempt-1 critique
+        row, so an orphaned capture warn row is attributed to whichever block is open.
+        The alternative -- run the capture first and write once -- was rejected: the
+        store takes a file lock, and a STUCK lock (not a raise) would then lose the
+        verdict rows entirely, which is strictly worse than mis-attributing a warn.
+        The rendering half is `batch_review`'s and is out of this issue's scope.
+        """
+        append(log_rows, log_path)
+        if capture is None:
+            return
+        try:
+            capture(dict(judged), channel, at)
+        except Exception as exc:                  # noqa: BLE001 - see the docstring
+            # LOUD AND OPEN, the same posture as the empty-checklist branch. A capture
+            # that never fired and one that fails every time look identical in the
+            # store, so the difference has to reach the log and the notify sink.
+            #
+            # THE RECOVERY IS WRAPPED TOO, and that is not belt-and-braces. The fault
+            # this handler exists for is ENOSPC or a permission fault on the output
+            # directory, and a deployment normally puts its draft store and its critic
+            # log in the SAME one. So the recovery is another `append` into the very
+            # directory that just failed, plus a `notify` into caller-supplied code.
+            # Unwrapped, the exact fault named two lines up raised out of `run()` into
+            # the caller and cost a slot: the recovery became the failure. Found by
+            # review 2026-09-07, reproduced by
+            # `test_a_failing_log_write_in_the_recovery_still_cannot_kill_the_run`.
+            try:
+                append([_row(at, channel, text, "capture", WARN,
+                             f"draft capture failed after {len(judged)} bodies: "
+                             f"{exc}", attempt, STAGE_CAPTURE)],
+                       log_path)
+            except Exception:                     # noqa: BLE001
+                pass
+            if notify:
+                try:
+                    notify(f"{channel}: draft capture failed: {exc}")
+                except Exception:                 # noqa: BLE001
+                    pass
     # THE SPEND IS A NUMBER IN THE LOG, not an impression (2026-08-13). Counted per
     # candidate across every attempt, split by tier, so "we are burning way too many
     # tokens" becomes something anyone can total out of the file.
@@ -554,12 +658,11 @@ def run(text, channel, at=None, runner=None, reviser=None, regate=None,
         if notify:
             notify(f"{channel}: critic checklist empty or unreadable; draft shipped "
                    f"with no critique")
-        append(log_rows, log_path)
+        _flush()
         return Outcome(ACCEPTED, text, log_rows)
-
-    attempt = 1
     order = None
     while True:
+        _note(text)
         results = review(text, channel, runner=runner, path=path, order=order,
                          counts=counts, **kwargs)
         failures = []
@@ -578,12 +681,12 @@ def run(text, channel, at=None, runner=None, reviser=None, regate=None,
                 failures.append((row, detail))
         if not failures:
             log_rows.append(_cost_row(at, channel, text, counts, attempt))
-            append(log_rows, log_path)
+            _flush()
             return Outcome(ACCEPTED, text, log_rows, attempts=attempt)
         if attempt >= attempts or reviser is None or regate is None:
             reasons = [f"critic-{row['id']}: {detail}" for row, detail in failures]
             log_rows.append(_cost_row(at, channel, text, counts, attempt))
-            append(log_rows, log_path)
+            _flush()
             return Outcome(DISCARDED, "", log_rows, reasons, attempts=attempt)
 
         attempt += 1
@@ -592,25 +695,31 @@ def run(text, channel, at=None, runner=None, reviser=None, regate=None,
         except Exception as exc:                  # a broken reviser is not a hold
             reasons = [f"reviser raised: {exc}"]
             log_rows.append(_cost_row(at, channel, text, counts, attempt))
-            append(log_rows, log_path)
+            _flush()
             return Outcome(DISCARDED, "", log_rows, reasons, attempts=attempt)
         if not revised:
             reasons = ["reviser returned nothing"] + \
                       [f"critic-{row['id']}: {detail}" for row, detail in failures]
             log_rows.append(_cost_row(at, channel, text, counts, attempt))
-            append(log_rows, log_path)
+            _flush()
             return Outcome(DISCARDED, "", log_rows, reasons, attempts=attempt)
 
         repaired, blocking = regate(revised)
         if blocking:
+            _note(revised)
             detail = "; ".join(str(v.get("detail", v)) for v in blocking)[:300]
             log_rows.append(_row(at, channel, revised, "gates", FAIL, detail,
                                  attempt, STAGE_REGATE))
             log_rows.append(_cost_row(at, channel, text, counts, attempt))
-            append(log_rows, log_path)
+            _flush()
             return Outcome(DISCARDED, "", log_rows,
                            [f"critic revision failed the gate stack: {detail}"],
                            attempts=attempt)
+        # NO _note(repaired) HERE, deliberately. `text = repaired` follows, and the
+        # loop head re-enters `_note(text)` one statement later with the same body, so
+        # a call here is dead by construction: deleting it left the whole suite green
+        # (standard review, 2026-09-07). The regate-FAIL branch above DOES need its own
+        # `_note`, because that branch returns and never reaches the loop head.
         log_rows.append(_row(at, channel, repaired, "gates", PASS,
                              "critic revision re-entered the full gate stack and passed",
                              attempt, STAGE_REGATE))
