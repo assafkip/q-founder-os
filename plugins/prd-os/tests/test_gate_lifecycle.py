@@ -278,6 +278,54 @@ def _runner_module():
     return mod
 
 
+def test_a_negated_absence_check_is_a_REAL_gate_and_must_register():
+    """`! grep -q ...` is a live idiom, and the fixture is a gate that exists.
+
+    The command below is registered right now as gate `mrm-9-stale-refs-afa25ce1` in
+    consulting's .prd-os/gates.jsonl. It is the "assert this string is absent" shape.
+
+    WHY THIS TEST EXISTS. An earlier version of this restoration censused ONE repo's 204
+    bypass_checks, found 0 commands starting with shell grammar, and concluded the shape
+    was unused. Wrong population. Censused across both on 2026-09-08:
+
+        registered gates.jsonl : 1032 rows / 699 distinct -> 5 distinct start with `!`
+        spec bypass_checks     : 41588 rows / 958 distinct -> the same 5
+
+    All five are `! grep`-shaped absence assertions and one of them is a secret scan.
+    The guard runs at REGISTRATION only, so the already-registered rows are not
+    retroactively refused -- but every one of these still lives in an active spec, so a
+    re-close tries to register it again, and a refusal there is a hard `cannot close`.
+    """
+    mod = _runner_module()
+    for cmd in [
+        "! grep -q 'decide.py:276' q-consult/pipeline/tests/test_client_repo_provenance.py",
+        "! grep -Eiq 'sk-ant-|AKIA[0-9A-Z]{16}|-----BEGIN' projects/x",
+        "! /usr/bin/grep -rnE '\\bpersistLiveRun\\(' kipi-web/",
+    ]:
+        mod._reject_unrunnable_gate(cmd)
+
+
+def test_a_NEGATED_prose_command_is_still_refused():
+    """Stripping `!` must not become a way to smuggle prose past the guard.
+
+    `!` is the one grammar shape that earns handling, because it INVERTS. `command -v !`
+    RESOLVES (bash reserved word), so without the strip the probe accepts `! <anything>`,
+    and `bash -c '! <missing command>'` exits 0 -- a gate that passes forever in an
+    append-only registry. `(` and `{` need no such handling: prose inside them exits 127
+    and the gate goes RED loudly, which is the tolerable direction.
+    """
+    mod = _runner_module()
+    for bad in ("! check:the ledger is append-only", "!! check:the prose"):
+        with pytest.raises(ValueError, match="does not start with a runnable command"):
+            mod._reject_unrunnable_gate(bad)
+    # A bare `!` is refused on both platforms but by DIFFERENT guards: bash 3.2 calls it
+    # a syntax error at step 1, bash 5.x parses it and the strip loop catches it. Assert
+    # the outcome, not which door closed.
+    with pytest.raises(ValueError) as bare:
+        mod._reject_unrunnable_gate("!")
+    assert "not valid shell" in str(bare.value) or "only a negation" in str(bare.value)
+
+
 def test_gate_register_ACTUALLY_CALLS_the_unrunnable_guard(repo):
     """The guard is WIRED, not merely present. The one addition beyond the restore.
 

@@ -1213,6 +1213,30 @@ def _reject_unrunnable_gate(command: str) -> None:
             probe_cmd = head[1]
             continue
         break
+    # A LEADING `!` IS STRIPPED, and this is the one shell shape that must be handled.
+    # Not a general grammar heuristic -- `!` alone earns it, because it INVERTS:
+    #
+    #   `command -v !` RESOLVES (it is a bash reserved word), so without this the probe
+    #   accepts `! <anything>`, and `bash -c '! <missing command>'` exits 0. A negated
+    #   prose gate would register and pass forever in an append-only registry.
+    #   `(` and `{` do not need this: prose inside them exits 127 and the gate goes RED
+    #   loudly, which is the tolerable direction.
+    #
+    # `! grep -q ...` (assert-absent) is a REAL and recurring idiom, not a hypothetical.
+    # Censused across both populations on this machine 2026-09-08:
+    #   registered gates.jsonl : 1032 rows / 699 distinct -> 5 distinct start with `!`
+    #   spec bypass_checks     : 41588 rows / 958 distinct -> the same 5
+    # all five are `! grep`-shaped absence assertions and one is a secret scan. An
+    # earlier census of ONE repo's 204 bypass_checks found 0 and concluded this shape
+    # was unused; that was the wrong population (see ASK-1354).
+    #
+    # Stripping keeps all five registrable AND refuses `! <prose>`.
+    while probe_cmd.lstrip()[:1] == "!":
+        probe_cmd = probe_cmd.lstrip()[1:]
+        if not probe_cmd.strip():
+            raise ValueError(
+                "gate command is only a negation, so it runs no check.\n"
+                f"  command: {cmd[:160]}")
     first = probe_cmd.split()[0]
     probe = _sp.run(["bash", "-lc", f"command -v {shlex.quote(first)} >/dev/null 2>&1"],
                     capture_output=True, text=True)
