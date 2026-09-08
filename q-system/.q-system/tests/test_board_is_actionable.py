@@ -297,8 +297,15 @@ class TestAColumnThisBoardLacksIsNotAWholeLostMorning:
     def test_a_board_that_has_them_as_the_WRONG_TYPE_drops_them_too(self):
         board = dict(self.OLD_BOARD, Link="rich_text", Next="rich_text")
         keep, dropped = br._only_known(self._props(), board)
-        assert dropped == ("Link",), dropped
         assert "Next" in keep, sorted(keep)
+        assert len(dropped) == 1 and dropped[0].startswith("Link"), dropped
+
+    def test_a_wrongly_typed_column_is_named_as_present_not_missing(self):
+        """"cannot take the Link column" sends him looking for something that is
+        sitting right there. The message names both types instead (PR #332, minor)."""
+        board = dict(self.OLD_BOARD, Link="rich_text", Next="rich_text")
+        _, dropped = br._only_known(self._props(), board)
+        assert "it is rich_text" in dropped[0] and "this writes url" in dropped[0], dropped
 
     def test_a_board_with_them_keeps_them(self):
         board = dict(self.OLD_BOARD, Link="url", Next="rich_text")
@@ -422,6 +429,10 @@ class TestTheSchemaGuardIsActuallyWiredIntoTheRun:
 
         monkeypatch.setattr(br, "paint", spy_paint)
         monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {})
+        monkeypatch.setattr(br, "ensure_columns", lambda known, *a, **k: known)
+        def no_network(*a, **k):
+            raise AssertionError("a test tried to reach Notion")
+        monkeypatch.setattr(br, "_request", no_network)
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
         monkeypatch.delenv("KIPI_BRIEF_DRY_RUN", raising=False)
         tf = tmp_path / "notion-token"; tf.write_text("t", encoding="utf-8")
@@ -526,6 +537,10 @@ class TestTheIdentityRefusalFiresBeforeTheFirstQuery:
                             lambda *a, **k: {"Task": "title"})
         monkeypatch.setattr(br, "existing_rows",
                             lambda *a, **k: calls.append("queried") or {})
+        monkeypatch.setattr(br, "ensure_columns", lambda known, *a, **k: known)
+        def no_network(*a, **k):
+            raise AssertionError("a test tried to reach Notion")
+        monkeypatch.setattr(br, "_request", no_network)
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
         monkeypatch.delenv("KIPI_BRIEF_DRY_RUN", raising=False)
         tf = tmp_path / "notion-token"; tf.write_text("t", encoding="utf-8")
@@ -547,6 +562,15 @@ class TestTheMorningLineSaysWhatHappened:
     def _line(self, monkeypatch, tmp_path, counts):
         monkeypatch.setattr(br, "_schema_properties",
                             lambda *a, **k: {"Task": "title", "Item id": "rich_text"})
+        # NOTHING LEAVES THIS MACHINE. These tests delete the PYTEST_CURRENT_TEST guard
+        # to reach `collect`'s line builder, and `ensure_columns` would then fire a real
+        # authenticated PATCH at api.notion.com on every suite run (PR #332 reviewer,
+        # major). Every outbound seam is stubbed, and `_request` is replaced by one that
+        # RAISES so a new call site cannot quietly start talking to the network.
+        monkeypatch.setattr(br, "ensure_columns", lambda known, *a, **k: known)
+        def no_network(*a, **k):
+            raise AssertionError("a test tried to reach Notion")
+        monkeypatch.setattr(br, "_request", no_network)
         monkeypatch.setattr(br, "paint", lambda *a, **k: counts)
         seen = counts["wanted"] + counts["kept"] + counts["held"] - counts["deferred_new"]
         monkeypatch.setattr(br, "existing_rows",
@@ -621,7 +645,7 @@ class TestTheBoardHealsItsOwnOptionalColumns:
         """A board with no `Item id` is not one this module should quietly reshape."""
         assert "Item id" not in br.CREATABLE and "Task" not in br.CREATABLE
 
-    def test_the_runner_heals_before_it_checks_identity(self, monkeypatch, tmp_path):
+    def test_the_runner_checks_identity_before_it_heals(self, monkeypatch, tmp_path):
         order = []
         monkeypatch.setattr(br, "_schema_properties", lambda *a, **k: dict(self.OLD))
         monkeypatch.setattr(br, "ensure_columns",
@@ -638,5 +662,12 @@ class TestTheBoardHealsItsOwnOptionalColumns:
         monkeypatch.delenv("KIPI_BRIEF_DRY_RUN", raising=False)
         tf = tmp_path / "notion-token"; tf.write_text("t", encoding="utf-8")
         dbf = tmp_path / "notion-board-db"; dbf.write_text("d", encoding="utf-8")
+        def no_network(*a, **k):
+            raise AssertionError("a test tried to reach Notion")
+        monkeypatch.setattr(br, "_request", no_network)
         br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
-        assert order == ["heal", "identity"], order
+        # IDENTITY BEFORE HEAL. The first version of this test asserted the opposite
+        # and called it correct, so the mistake shipped with a guard of its own: two
+        # columns were PATCHed onto a database this module then rejected as not its
+        # board (PR #332 reviewer, major).
+        assert order == ["identity", "heal"], order

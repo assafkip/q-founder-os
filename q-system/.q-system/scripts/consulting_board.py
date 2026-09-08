@@ -111,8 +111,12 @@ _THEN_SEP = "·"
 #: The producer's own tail on that line: "+3 more, lowest-scoring, on the board".
 _MORE_SUMMARY = re.compile(r"^\+\s*\d+\s+more\b")
 #: "— 🔥 Portant (fire, v1 CRM: ...)" -- the person, out of the reach-out header's tail.
-#: A mail key built from sender+subject rather than a thread id. `collect_mail` uses
-#: "<sender>|<subject>" only when the model returned no id; a real id carries none.
+#: A mail key built from sender+subject rather than a thread id. NO PRODUCER EMITS ONE
+#: TODAY: that shape came from the model-era `collect_mail`, and ASK-1323 replaced it
+#: with a read of the consulting ledger, whose every row carries a real thread id. The
+#: pattern is kept because what it gates is an ARCHIVE authority (see the id-less
+#: branch in `buckets`), and a guard whose false branch is currently unreachable is
+#: cheap while the thing it protects is a deletion.
 _FALLBACK_KEY = re.compile(r"^[^|]+\|")
 #: `build_card`'s first line, always present. See `read_card` for why it decides.
 _BOOK_HEADER = re.compile(r"\*Your book today\*")
@@ -835,12 +839,18 @@ def buckets(now: dt.datetime, sources: dict, paths=None) -> dict:
                           "done": f"{label} reads again",
                           "bucket_reason": "error"})
             continue                      # scope deliberately NOT marked healthy
-        # AN ID-LESS ANSWER DOES NOT AUTHORISE ARCHIVING (round 13, major). When the
-        # model returns thread ids the key is the id; when it does not, the key falls
-        # back to sender+subject. Both are stable in themselves, but they are DIFFERENT
-        # ids for one thread, so a day where the model stops returning ids archives the
-        # row he pinned and recreates it at "Not started". The rows still paint; what
-        # is withheld is the authority to call the old ones gone.
+        # AN ID-LESS ANSWER DOES NOT AUTHORISE ARCHIVING (round 13, major). Written
+        # when a MODEL produced these rows: it returned a thread id most days and fell
+        # back to sender+subject otherwise, and those are two different ids for one
+        # thread, so the day it stopped returning ids the painter archived the row he
+        # had pinned and recreated it at "Not started".
+        #
+        # THAT PRODUCER IS GONE. ASK-1323 replaced it with a read of the consulting
+        # ledger, whose every row carries a real thread id, so this branch's false
+        # side is currently unreachable (PR #332 reviewer, minor: three copies of the
+        # old claim were still in the present tense). It stays because what it
+        # withholds is the authority to call rows GONE, and a cheap guard over a
+        # deletion outlives the producer that motivated it.
         if not any(_FALLBACK_KEY.match(getattr(r, "key", "") or "") for r in rows):
             healthy.add(f"inbox:{label}")
         for row in rows:

@@ -580,20 +580,30 @@ def _only_known(props: dict, known):
     """
     if known is None:
         return props, ()
-    keep, dropped = {}, []
+    # TWO LISTS ON PURPOSE. `names` is what the code reasons about; `shown` is what he
+    # reads. Annotating the single list broke the undroppable check below, because
+    # "Item id" is not "Item id (it is select, this writes rich_text)" and the identity
+    # refusal silently stopped firing for the wrong-type case. A display string is not
+    # an identifier.
+    keep, names, shown = {}, [], []
     for k, v in props.items():
         want = WRITES_TYPE.get(k)
         if k in known and (want is None or known[k] == want):
             keep[k] = v
-        else:
-            dropped.append(k)
-    hard = [k for k in UNDROPPABLE if k in dropped]
+            continue
+        names.append(k)
+        # PRESENT, WRONG TYPE. Naming it as absent sends him looking for something that
+        # is there; naming the types tells him the one edit that fixes it.
+        shown.append(f"{k} (it is {known[k]}, this writes {want})"
+                     if k in known else k)
+    dropped = tuple(s for _, s in sorted(zip(names, shown)))
+    hard = [k for k in UNDROPPABLE if k in names]
     if hard:
         raise MissingIdentityColumn(
             f"the board cannot take {', '.join(hard)}, which the painter identifies "
             "rows by. Writing rows without it would create pages this module can never "
             "find or archive again, one per row per run. Fix the board's columns.")
-    return keep, tuple(sorted(dropped))
+    return keep, dropped
 
 
 #: Columns this module writes that it will CREATE on a board that lacks them. The
@@ -618,6 +628,12 @@ def ensure_columns(known, token, db, opener=None, budget=None):
     if known is None:
         return None
     missing = {name: WRITES_TYPE[name] for name in CREATABLE if name not in known}
+    # A column PRESENT UNDER THE WRONG TYPE is deliberately not healed here (PR #332
+    # reviewer, minor). Creating an absent column adds nothing and loses nothing;
+    # retyping an existing one makes Notion convert every value in it, which is a data
+    # decision and not this module's to take. What was wrong was the message: it said
+    # the board "cannot take" the column, so he would go looking for something that is
+    # sitting right there. `_only_known`'s report now says which it is.
     if not missing:
         return known
     try:
@@ -856,15 +872,19 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
             # and `Next` would otherwise take a 400 on the first row and lose the
             # whole morning's paint to a column nobody noticed was missing.
             known = _schema_properties(token, db, opener, budget)
-            # Create what is missing BEFORE the identity check, so a board that only
-            # lacks the optional columns heals instead of reporting them every day.
-            known = ensure_columns(known, token, db, opener, budget)
-            # BEFORE THE FIRST QUERY, not inside the write loop. `existing_rows`
-            # filters on `Item id`, so a board without that column takes a raw 400
-            # from Notion before `_only_known` is ever reached and the remediation
-            # sentence never fires (round 10, minor). Checked here, the one failure a
-            # person can fix is the one they are told about.
+            # IDENTITY FIRST, THEN HEAL (PR #332 reviewer, major). The first cut had
+            # these the other way round, so a database this module then rejected as
+            # "not our board" had already had two columns PATCHed onto it. Deciding
+            # whether a thing is ours has to come before writing to it. Worse, the
+            # test that shipped with it asserted the wrong order and called it
+            # correct, which is how a mistake gets a guard of its own.
+            #
+            # `_refuse_without_identity` also has to run BEFORE the first query:
+            # `existing_rows` filters on `Item id`, so a board without that column
+            # takes a raw 400 from Notion before `_only_known` is ever reached and the
+            # remediation sentence never fires (#327 round 10, minor).
             _refuse_without_identity(known)
+            known = ensure_columns(known, token, db, opener, budget)
             counts = paint(buckets, token, db, opener, budget, known=known)
         dupes = {}
         seen = len(existing_rows(token, db, opener, dupes_out=dupes, budget=budget))
