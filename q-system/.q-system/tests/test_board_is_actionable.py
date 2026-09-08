@@ -603,7 +603,10 @@ class TestTheMorningLineSaysWhatHappened:
     def test_one_dropped_column_is_singular(self, monkeypatch, tmp_path):
         line = self._line(monkeypatch, tmp_path,
                           dict(self.COUNTS, dropped_columns=("Link",)))
-        assert "Link column" in line, line
+        # NOT `"Link column" in line`: that substring is inside "Link columns" too, so
+        # the plural branch survived the mutation (round 4, minor). Assert the exact end.
+        assert "the Link column, so those values were not written" in line, line
+        assert "columns" not in line, line
 
     def test_a_complete_board_says_nothing_about_columns(self, monkeypatch, tmp_path):
         line = self._line(monkeypatch, tmp_path,
@@ -637,47 +640,91 @@ class TestTheBoardHealsItsOwnOptionalColumns:
             return returns
         return fake
 
-    def test_a_missing_column_is_created_and_then_usable(self, monkeypatch):
+    def test_a_missing_column_is_created_and_then_usable(self, monkeypatch, tmp_path):
         sent = []
         after = {"properties": {n: {"type": t} for n, t in self.COMPLETE.items()}}
         monkeypatch.setattr(br, "_request", self._notion_patch(sent, after))
-        out, problems = br.ensure_columns(dict(self.OLD), "tok", "db")
-        assert problems == (), problems
+        # ITS OWN RECORD FILE. The real one lives beside the painter's lock, and a
+        # suite that writes there teaches the live job that he deleted things.
+        out, problems = br.ensure_columns(dict(self.OLD), "tok", "db",
+                                          record=tmp_path / "made.json")
+        assert problems and "added the" in problems[0], problems
         assert sent and sent[0][0] == "PATCH" and "/databases/db" in sent[0][1], sent
         assert set(sent[0][2]["properties"]) == {"Link", "Next"}, sent[0][2]
         assert sent[0][2]["properties"]["Link"] == {"url": {}}, sent[0][2]
         assert out["Link"] == "url" and out["Next"] == "rich_text", out
 
-    def test_a_complete_board_is_not_touched(self, monkeypatch):
+    def test_a_complete_board_is_not_touched(self, monkeypatch, tmp_path):
         sent = []
         monkeypatch.setattr(br, "_request",
                             lambda *a, **k: sent.append(a))
-        assert br.ensure_columns(dict(self.COMPLETE), "tok", "db") == (
-            self.COMPLETE, ())
+        assert br.ensure_columns(dict(self.COMPLETE), "tok", "db",
+                                 record=tmp_path / "made.json") == (self.COMPLETE, ())
         assert sent == [], sent
 
-    def test_a_create_notion_does_not_confirm_is_not_believed(self, monkeypatch):
+    def test_a_create_notion_does_not_confirm_is_not_believed(self, monkeypatch, tmp_path):
         """Synthesising the schema asserts the create took effect. If it did not, the
         next write carries the column anyway and takes the raw 400 this whole guard
         exists to prevent (PR #332 reviewer, minor)."""
         sent = []
         monkeypatch.setattr(br, "_request", self._notion_patch(sent, {"properties": {}}))
-        out, problems = br.ensure_columns(dict(self.OLD), "tok", "db")
+        out, problems = br.ensure_columns(dict(self.OLD), "tok", "db",
+                                          record=tmp_path / "made.json")
         assert "Link" not in out, out
-        assert problems and "unconfirmed" in problems[0], problems
+        assert any("unconfirmed" in x for x in problems), problems
 
-    def test_a_refused_creation_degrades_exactly_as_before(self, monkeypatch):
+    def test_a_refused_creation_degrades_exactly_as_before(self, monkeypatch, tmp_path):
         def boom(*a, **k):
             raise RuntimeError("notion said no")
         monkeypatch.setattr(br, "_request", boom)
-        out, problems = br.ensure_columns(dict(self.OLD), "tok", "db")
+        out, problems = br.ensure_columns(dict(self.OLD), "tok", "db",
+                                          record=tmp_path / "made.json")
         assert out == self.OLD
-        assert problems and "notion said no" in problems[0], problems
+        assert any("notion said no" in x for x in problems), problems
 
-    def test_an_unreadable_schema_creates_nothing(self, monkeypatch):
+    def test_a_refusal_carries_notions_own_words_not_just_the_status(self, monkeypatch, tmp_path):
+        """"HTTPError: 400 Bad Request" is the half that says nothing. Notion puts what
+        is actually wrong in the body, which is why this branch exists (round 4)."""
+        import io as _io
+        import urllib.error
+
+        def boom(*a, **k):
+            raise urllib.error.HTTPError(
+                "u", 400, "Bad Request", {},
+                _io.BytesIO(b'{"message": "Link is not a valid property name here"}'))
+        monkeypatch.setattr(br, "_request", boom)
+        _, problems = br.ensure_columns(dict(self.OLD), "tok", "db",
+                                        record=tmp_path / "made.json")
+        assert any("not a valid property name" in x for x in problems), problems
+
+    def test_a_column_he_deleted_is_not_put_back(self, monkeypatch, tmp_path):
+        """Re-creating it every morning gives him no way to say no. Same "his choice
+        wins" line the row painter holds, one level down (round 4, major)."""
+        rec = tmp_path / "made.json"
+        rec.write_text(json.dumps({"db": ["Link"]}), encoding="utf-8")
+        sent = []
+        after = {"properties": {n: {"type": ty} for n, ty in
+                                dict(self.OLD, Next="rich_text").items()}}
+        monkeypatch.setattr(br, "_request", self._notion_patch(sent, after))
+        out, problems = br.ensure_columns(dict(self.OLD), "tok", "db", record=rec)
+        asked = set(sent[0][2]["properties"])
+        assert "Link" not in asked and "Next" in asked, asked
+        assert any("your removal" in x for x in problems), problems
+
+    def test_a_column_never_created_here_is_still_offered(self, monkeypatch, tmp_path):
+        rec = tmp_path / "made.json"
+        rec.write_text(json.dumps({"other-board": ["Link"]}), encoding="utf-8")
+        sent = []
+        after = {"properties": {n: {"type": ty} for n, ty in self.COMPLETE.items()}}
+        monkeypatch.setattr(br, "_request", self._notion_patch(sent, after))
+        br.ensure_columns(dict(self.OLD), "tok", "db", record=rec)
+        assert "Link" in set(sent[0][2]["properties"]), sent
+
+    def test_an_unreadable_schema_creates_nothing(self, monkeypatch, tmp_path):
         sent = []
         monkeypatch.setattr(br, "_request", lambda *a, **k: sent.append(a))
-        assert br.ensure_columns(None, "tok", "db") == (None, ())
+        assert br.ensure_columns(None, "tok", "db",
+                                 record=tmp_path / "made.json") == (None, ())
         assert sent == [], sent
 
     def test_the_identity_columns_are_never_created(self):
@@ -693,15 +740,16 @@ class TestTheBoardHealsItsOwnOptionalColumns:
         assert set(br.CREATABLE) == {"Notes", "Domain", "Priority", "Source",
                                      "Bucket", "Status", "Link", "Next"}, br.CREATABLE
 
-    def test_a_board_missing_notes_and_bucket_is_healed_too(self, monkeypatch):
+    def test_a_board_missing_notes_and_bucket_is_healed_too(self, monkeypatch, tmp_path):
         bare = {"Task": "title", "Item id": "rich_text"}
         sent = []
         after = {"properties": {n: {"type": t} for n, t in br.WRITES_TYPE.items()}}
         monkeypatch.setattr(br, "_request", self._notion_patch(sent, after))
-        out, problems = br.ensure_columns(dict(bare), "tok", "db")
+        out, problems = br.ensure_columns(dict(bare), "tok", "db",
+                                          record=tmp_path / "made.json")
         asked = set(sent[0][2]["properties"])
         assert {"Notes", "Bucket"} <= asked, asked
-        assert problems == () and out["Notes"] == "rich_text", (out, problems)
+        assert out["Notes"] == "rich_text", out
 
     def test_the_runner_checks_identity_before_it_heals(self, monkeypatch, tmp_path):
         order = []
@@ -766,8 +814,8 @@ class TestAFailedColumnCreationReachesTheLine:
 
     def test_a_refusal_is_named_on_the_line(self, monkeypatch, tmp_path):
         line = self._line(monkeypatch, tmp_path, ("HTTPError: 403 restricted",))
-        assert "could not add a column" in line and "403 restricted" in line, line
+        assert "403 restricted" in line, line
 
     def test_a_clean_run_says_nothing_about_it(self, monkeypatch, tmp_path):
         line = self._line(monkeypatch, tmp_path, ())
-        assert "could not add a column" not in line, line
+        assert "403" not in line and "restricted" not in line, line

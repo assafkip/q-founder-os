@@ -618,7 +618,38 @@ def _only_known(props: dict, known):
 CREATABLE = tuple(n for n in WRITES_TYPE if n not in UNDROPPABLE)
 
 
-def ensure_columns(known, token, db, opener=None, budget=None):
+#: Columns this module has created before, per board. A column in here that is now
+#: ABSENT was deleted by a person, and this module does not put it back.
+COLUMNS_MADE = STATE_DIR / "board-columns-created.json"
+
+
+def _columns_made(db, path=None):
+    try:
+        return set((json.loads(Path(path or COLUMNS_MADE).read_text("utf-8")) or {}).get(db) or [])
+    except (OSError, ValueError):
+        return set()
+
+
+def _remember_columns(db, names, path=None):
+    """Append to the record. A failure here is not fatal: the worst case is offering to
+    create a column he removed a second time, which is the behaviour before the record
+    existed, and it is still said out loud on the line."""
+    p = Path(path or COLUMNS_MADE)
+    try:
+        data = json.loads(p.read_text("utf-8")) or {}
+    except (OSError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    data[db] = sorted(set(data.get(db) or []) | set(names))
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(data, indent=1, sort_keys=True), "utf-8")
+    except OSError:
+        pass
+
+
+def ensure_columns(known, token, db, opener=None, budget=None, record=None):
     """Add the optional columns this board is missing. Returns (schema, problems).
 
     THE FEATURE WAS DEAD ON EVERY BOARD BUT ONE (PR reviewer round 12, major). Nothing
@@ -634,14 +665,25 @@ def ensure_columns(known, token, db, opener=None, budget=None):
     if known is None:
         return None, ()
     missing = {name: WRITES_TYPE[name] for name in CREATABLE if name not in known}
+    # A COLUMN HE DELETED IS NOT A COLUMN THAT IS MISSING (PR #332 reviewer round 4,
+    # major). Without this the module re-created it every single morning and never said
+    # so: he would remove a column he did not want and find it back the next day, with
+    # no way to make it stop. That is the same "his choice wins" line the row painter
+    # holds everywhere else, one level down at the schema.
+    made_before = _columns_made(db, record)
+    removed = sorted(n for n in missing if n in made_before)
+    for n in removed:
+        del missing[n]
     # A column PRESENT UNDER THE WRONG TYPE is deliberately not healed here (PR #332
     # reviewer, minor). Creating an absent column adds nothing and loses nothing;
     # retyping an existing one makes Notion convert every value in it, which is a data
     # decision and not this module's to take. What was wrong was the message: it said
     # the board "cannot take" the column, so he would go looking for something that is
     # sitting right there. `_only_known`'s report now says which it is.
+    told = tuple(f"{n} was created here before and is gone now, so it is treated as "
+                 "your removal and is not being put back" for n in removed)
     if not missing:
-        return known, ()
+        return known, told
     try:
         data = _request(token, "PATCH", f"/databases/{db}",
                         {"properties": {n: {t: {}} for n, t in missing.items()}},
@@ -651,7 +693,16 @@ def ensure_columns(known, token, db, opener=None, budget=None):
         # the same sentence, so he could not tell "this board has no Link column" from
         # "I tried to add one and Notion said no", and only the second is about
         # permissions or a token. The reason is carried back and said.
-        return known, ((f"{type(exc).__name__}: {exc}")[:160],)
+        #
+        # AND THE BODY, NOT JUST THE STATUS LINE (round 4, minor). "HTTPError: 400 Bad
+        # Request" is the half that says nothing; Notion puts what is actually wrong in
+        # the response body, which is the whole reason this branch exists.
+        detail = ""
+        try:
+            detail = " " + exc.read().decode("utf-8", "replace")[:200]
+        except Exception:
+            pass
+        return known, told + ((f"{type(exc).__name__}: {exc}{detail}")[:300],)
     # WHAT NOTION RETURNED, not what we asked for (PR #332 reviewer, minor). Synthesising
     # `dict(known, **missing)` asserts the create took effect; if it did not, the next
     # write carries the column anyway and takes the raw 400 this whole guard exists to
@@ -659,9 +710,17 @@ def ensure_columns(known, token, db, opener=None, budget=None):
     # properties are the answer.
     fresh = (data or {}).get("properties")
     if isinstance(fresh, dict) and fresh:
-        return {n: (p or {}).get("type") for n, p in fresh.items()}, ()
-    return known, ("the schema PATCH returned no properties, so the new columns are "
-                   "unconfirmed and were not written",)
+        made = sorted(n for n in missing if n in fresh)
+        if made:
+            _remember_columns(db, made, record)
+        # SAID OUT LOUD (round 4, major). Adding columns to his board is a change to
+        # his board, and a change he is not told about is one he cannot disagree with.
+        return ({n: (p or {}).get("type") for n, p in fresh.items()},
+                told + ((f"added the {', '.join(made)} "
+                         + ("columns" if len(made) > 1 else "column")
+                         + " to this board",) if made else ()))
+    return known, told + ("the schema PATCH returned no properties, so the new columns "
+                          "are unconfirmed and were not written",)
 
 
 def _refuse_without_identity(known):
@@ -951,8 +1010,8 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
             f"{counts['kept']} kept (source quiet), {counts['pinned']} yours (untouched), "
             f"{counts['held']} yours (source stopped reporting it), "
             "read-back ok")
-    for problem in counts.get("column_problems") or ():
-        line += f"; could not add a column: {problem}"
+    for note in counts.get("column_problems") or ():
+        line += f"; {note}"
     if counts["dropped_columns"]:
         # NEVER SILENT. The filter stops a missing column aborting the paint; it must
         # not also hide that the rows went out without it. A board missing `Link` wrote
