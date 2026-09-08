@@ -675,10 +675,22 @@ def _remember_columns(db, names, path=None):
     of it found a test reaching something live and each was fixed by hand; a hand fix
     protects the tests that exist today. This one protects the ones nobody has written.
     """
-    if path is None and os.environ.get("PYTEST_CURRENT_TEST"):
+    if path is None:
+        # NO AMBIENT DEFAULT. The first version of this guard refused only when
+        # PYTEST_CURRENT_TEST was set, and every test in this suite that reaches
+        # `collect` deletes that variable to get past the board's own chokepoint -- so
+        # the guard was bypassed by the exact idiom that caused the problem it was
+        # written for, and I had already described it to the founder as a mechanism
+        # rather than a discipline (PR #332 reviewer round 9, minor).
+        #
+        # There is no environment to read now: the live path is reachable only by a
+        # caller that names it, which is `collect` and nothing else. A test that
+        # forgets `record=` fails the same way on any machine, in any environment,
+        # whether or not pytest is announcing itself.
         raise AssertionError(
-            "a test tried to write the live column record; pass record=<tmp path>")
-    p = Path(path or COLUMNS_MADE)
+            "no record path given. Production passes record=COLUMNS_MADE explicitly; "
+            "a test passes its own tmp path. There is no default.")
+    p = Path(path)
     try:
         data = json.loads(p.read_text("utf-8")) or {}
     except (OSError, ValueError):
@@ -1050,7 +1062,9 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
             # takes a raw 400 from Notion before `_only_known` is ever reached and the
             # remediation sentence never fires (#327 round 10, minor).
             _refuse_without_identity(known)
-            known, column_problems = ensure_columns(known, token, db, opener, budget)
+            # The live record is named HERE, by the one caller that should touch it.
+            known, column_problems = ensure_columns(known, token, db, opener, budget,
+                                                    record=COLUMNS_MADE)
             counts = paint(buckets, token, db, opener, budget, known=known)
             counts["column_problems"] = column_problems
         dupes = {}

@@ -898,10 +898,46 @@ class TestNoTestCanWriteTheLiveColumnRecord:
     A hand fix protects the tests that exist; this protects the ones nobody has written
     yet (PR #332 reviewer round 7, minor)."""
 
-    def test_writing_without_a_record_path_raises_under_pytest(self):
+    def test_writing_without_a_record_path_always_raises(self, monkeypatch):
+        """NOT "under pytest". The first guard read PYTEST_CURRENT_TEST, and every test
+        here that reaches `collect` deletes that variable to get past the board's own
+        chokepoint, so the guard was bypassed by the exact idiom that caused the problem
+        (round 9, minor). With no ambient default there is no environment to defeat."""
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
         with pytest.raises(AssertionError) as e:
             br._remember_columns("db", ["Link"])
-        assert "live column record" in str(e.value)
+        assert "no default" in str(e.value)
+
+    def test_production_names_the_live_path_itself(self, monkeypatch, tmp_path):
+        """The one caller allowed to touch the live record names it, so the guard above
+        cannot break production. Asserted by WATCHING the call, not by grepping the
+        source: the first version counted the string `record=COLUMNS_MADE` and found
+        two, because the guard's own error message contains that sentence. A source
+        substring is not a behaviour."""
+        seen = {}
+        monkeypatch.setattr(br, "_schema_properties",
+                            lambda *a, **k: {"Task": "title", "Item id": "rich_text"})
+
+        def spy(known, token, db, opener=None, budget=None, record=None):
+            seen["record"] = record
+            return known, ()
+
+        monkeypatch.setattr(br, "ensure_columns", spy)
+        monkeypatch.setattr(br, "paint", lambda *a, **k: {
+            "created": 0, "updated": 0, "archived": 0, "kept": 0, "held": 0,
+            "wanted": 0, "moved": 0, "pinned": 0, "over_cap": 0, "unchanged": 0,
+            "deferred": 0, "deferred_new": 0, "dropped_columns": ()})
+        monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {})
+        def no_network(*a, **k):
+            raise AssertionError("a test tried to reach Notion")
+        monkeypatch.setattr(br, "_request", no_network)
+        monkeypatch.setattr(br, "LOCK_FILE", tmp_path / "board-rows.lock")
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.delenv("KIPI_BRIEF_DRY_RUN", raising=False)
+        tf = tmp_path / "notion-token"; tf.write_text("t", encoding="utf-8")
+        dbf = tmp_path / "notion-board-db"; dbf.write_text("d", encoding="utf-8")
+        br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
+        assert seen.get("record") == br.COLUMNS_MADE, seen
 
     def test_a_private_path_is_allowed(self, tmp_path):
         rec = tmp_path / "made.json"
