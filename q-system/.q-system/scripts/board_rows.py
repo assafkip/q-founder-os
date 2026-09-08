@@ -564,6 +564,17 @@ WRITES_TYPE = {"Task": "title", "Item id": "rich_text", "Notes": "rich_text",
 #: that cannot take them stops the paint instead of half-writing it.
 UNDROPPABLE = ("Item id", "Task")
 
+#: Columns whose ABSENCE breaks the board rather than costing one value on a row. These
+#: are reported every run even when he removed them deliberately, because the failure is
+#: silent otherwise and this file's whole posture is that a silent half-working board is
+#: worse than a loud broken one.
+STRUCTURAL_COST = {
+    "Notes": ("without it no row carries its `scope=` line, so nothing is ever "
+              "archived and stale rows accumulate with no run able to clear them"),
+    "Bucket": ("without it every row lands in none of the three sections and is "
+               "invisible on the board"),
+}
+
 
 class MissingIdentityColumn(RuntimeError):
     """The board cannot take a column the painter cannot work without."""
@@ -622,9 +633,6 @@ CREATABLE = tuple(n for n in WRITES_TYPE if n not in UNDROPPABLE)
 #: ABSENT was deleted by a person, and this module does not put it back.
 COLUMNS_MADE = STATE_DIR / "board-columns-created.json"
 
-#: Per board, the columns HE removed after this module created them. Read by the
-#: dropped-columns report so his own choice is not also listed as a board fault.
-_chosen_absent: dict = {}
 
 
 def _columns_made(db, path=None):
@@ -691,19 +699,30 @@ def ensure_columns(known, token, db, opener=None, budget=None, record=None):
     removed = sorted(n for n in missing if n in made_before)
     for n in removed:
         del missing[n]
-    # NAMED ONCE, AS HIS CHOICE. The dropped-columns sentence also lists these, so the
-    # line said the same column twice: once as his removal and once as something the
-    # board "cannot take", on a line already near 900 characters (round 5, minor). A
-    # choice he made is not a fault to report back to him.
-    _chosen_absent[db] = set(removed)
+
     # A column PRESENT UNDER THE WRONG TYPE is deliberately not healed here (PR #332
     # reviewer, minor). Creating an absent column adds nothing and loses nothing;
     # retyping an existing one makes Notion convert every value in it, which is a data
     # decision and not this module's to take. What was wrong was the message: it said
     # the board "cannot take" the column, so he would go looking for something that is
     # sitting right there. `_only_known`'s report now says which it is.
-    told = tuple(f"{n} was created here before and is gone now, so it is treated as "
-                 "your removal and is not being put back" for n in removed)
+    # A REMOVAL HE CAN AFFORD IS SILENT; ONE HE CANNOT IS SAID EVERY RUN.
+    #
+    # Round 5 tried to solve the double-naming by filtering these out of the
+    # dropped-columns sentence through a module global. That was worse than the problem
+    # twice over (round 6): the global was never cleared and unioned across every board
+    # id, so the report cross-contaminated and the suite went order-dependent; and it
+    # silenced the warning for `Notes` and `Bucket`, whose absence stops archiving
+    # entirely and hides every row from his three sections, WHILE the line still ended
+    # "read-back ok". Silent degradation is the one thing this file exists to refuse.
+    #
+    # The real distinction is consequence, and it needs no state at all. Losing `Link`
+    # or `Next` costs a value on a row and nothing else, so his removal of one is his
+    # business and is not mentioned again. Losing `Notes` or `Bucket` breaks the board,
+    # so it is named every single run, with what it costs, until he puts it back.
+    told = tuple(
+        f"{n} is gone and this module created it, so it is treated as your removal; "
+        + STRUCTURAL_COST[n] for n in removed if n in STRUCTURAL_COST)
     if not missing:
         return known, told
     try:
@@ -1037,9 +1056,6 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
             "read-back ok")
     for note in counts.get("column_problems") or ():
         line += f"; {note}"
-    chosen = set().union(*_chosen_absent.values()) if _chosen_absent else set()
-    counts["dropped_columns"] = tuple(
-        d for d in counts["dropped_columns"] if d.split(" (")[0] not in chosen)
     if counts["dropped_columns"]:
         # NEVER SILENT. The filter stops a missing column aborting the paint; it must
         # not also hide that the rows went out without it. A board missing `Link` wrote

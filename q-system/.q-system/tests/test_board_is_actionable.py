@@ -709,7 +709,42 @@ class TestTheBoardHealsItsOwnOptionalColumns:
         out, problems = br.ensure_columns(dict(self.OLD), "tok", "db", record=rec)
         asked = set(sent[0][2]["properties"])
         assert "Link" not in asked and "Next" in asked, asked
-        assert any("your removal" in x for x in problems), problems
+        # SILENT, because losing Link costs one value on a row and nothing else. Saying
+        # it every morning forever would be nagging him about his own decision.
+        assert not any("your removal" in x for x in problems), problems
+
+    def test_a_structural_column_he_deleted_is_named_every_run(self, monkeypatch, tmp_path):
+        """Losing `Notes` stops archiving entirely and losing `Bucket` hides every row.
+        Round 5 filtered those warnings out and the line still said "read-back ok",
+        which is silent degradation (round 6, major)."""
+        rec = tmp_path / "made.json"
+        rec.write_text(json.dumps({"db": ["Notes", "Bucket"]}), encoding="utf-8")
+        bare = {"Task": "title", "Item id": "rich_text"}
+        sent = []
+        after = {"properties": {n: {"type": ty} for n, ty in br.WRITES_TYPE.items()
+                                if n not in ("Notes", "Bucket")}}
+        monkeypatch.setattr(br, "_request", self._notion_patch(sent, after))
+        _, problems = br.ensure_columns(dict(bare), "tok", "db", record=rec)
+        asked = set(sent[0][2]["properties"])
+        assert "Notes" not in asked and "Bucket" not in asked, asked
+        joined = " ".join(problems)
+        assert "nothing is ever archived" in joined, problems
+        assert "invisible on the board" in joined, problems
+
+    def test_no_module_state_leaks_between_boards(self, monkeypatch, tmp_path):
+        """The round-5 fix kept this in a module global that was never cleared and was
+        unioned across every board id, so one board's report contaminated another's and
+        the suite went order-dependent (round 6, minor)."""
+        rec = tmp_path / "made.json"
+        rec.write_text(json.dumps({"board-a": ["Notes"]}), encoding="utf-8")
+        after = {"properties": {n: {"type": ty} for n, ty in br.WRITES_TYPE.items()}}
+        monkeypatch.setattr(br, "_request", self._notion_patch([], after))
+        _, a = br.ensure_columns({"Task": "title", "Item id": "rich_text"},
+                                 "tok", "board-a", record=rec)
+        _, b = br.ensure_columns({"Task": "title", "Item id": "rich_text"},
+                                 "tok", "board-b", record=rec)
+        assert any("archived" in x for x in a), a
+        assert not any("archived" in x for x in b), b
 
     def test_a_column_never_created_here_is_still_offered(self, monkeypatch, tmp_path):
         rec = tmp_path / "made.json"
