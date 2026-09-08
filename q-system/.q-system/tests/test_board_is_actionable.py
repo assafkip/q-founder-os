@@ -481,7 +481,10 @@ class TestADeadLinkIsWorseThanNoLink:
         assert cb.gmail_link("mail:1a06eb5b0b03759f") == (
             "https://mail.google.com/mail/u/0/#all/1a06eb5b0b03759f")
 
-    def test_the_fallback_key_shape_gets_no_link(self):
+    def test_a_key_that_is_not_a_thread_id_gets_no_link(self):
+        """A CONSTRUCTED shape, deliberately: no producer emits one today (the model-era
+        collector that could was removed by ASK-1323). The guard is here so a future
+        producer meets it instead of shipping dead links first."""
         assert cb.gmail_link("mail:someone@example.test|Re: a subject") is None
 
     def test_an_empty_or_odd_id_gets_no_link(self):
@@ -530,3 +533,47 @@ class TestTheIdentityRefusalFiresBeforeTheFirstQuery:
         rows, err = br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
         assert calls == [], "it queried the board before refusing"
         assert rows == [] and "identifies rows by" in err, err
+
+
+class TestTheMorningLineSaysWhatHappened:
+    """The dropped-columns sentence and the held count are what the founder actually
+    reads. Neither was asserted anywhere, so deleting either left the suite green
+    (PR reviewer round 11, minor)."""
+
+    COUNTS = {"created": 1, "updated": 0, "archived": 0, "kept": 0, "held": 2,
+              "wanted": 1, "moved": 0, "pinned": 0, "over_cap": 0, "unchanged": 0,
+              "deferred": 0, "deferred_new": 0, "dropped_columns": ("Link", "Next")}
+
+    def _line(self, monkeypatch, tmp_path, counts):
+        monkeypatch.setattr(br, "_schema_properties",
+                            lambda *a, **k: {"Task": "title", "Item id": "rich_text"})
+        monkeypatch.setattr(br, "paint", lambda *a, **k: counts)
+        seen = counts["wanted"] + counts["kept"] + counts["held"] - counts["deferred_new"]
+        monkeypatch.setattr(br, "existing_rows",
+                            lambda *a, **k: {f"cb:{i}": {} for i in range(seen)})
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.delenv("KIPI_BRIEF_DRY_RUN", raising=False)
+        tf = tmp_path / "notion-token"; tf.write_text("t", encoding="utf-8")
+        dbf = tmp_path / "notion-board-db"; dbf.write_text("d", encoding="utf-8")
+        rows, err = br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
+        assert err is None, err
+        return rows[0]
+
+    def test_the_columns_it_could_not_write_are_named(self, monkeypatch, tmp_path):
+        line = self._line(monkeypatch, tmp_path, dict(self.COUNTS))
+        assert "cannot take" in line and "Link" in line and "Next" in line, line
+        assert "columns" in line, line
+
+    def test_one_dropped_column_is_singular(self, monkeypatch, tmp_path):
+        line = self._line(monkeypatch, tmp_path,
+                          dict(self.COUNTS, dropped_columns=("Link",)))
+        assert "Link column" in line, line
+
+    def test_a_complete_board_says_nothing_about_columns(self, monkeypatch, tmp_path):
+        line = self._line(monkeypatch, tmp_path,
+                          dict(self.COUNTS, dropped_columns=()))
+        assert "cannot take" not in line, line
+
+    def test_held_rows_are_reported_on_the_line(self, monkeypatch, tmp_path):
+        line = self._line(monkeypatch, tmp_path, dict(self.COUNTS))
+        assert "2 yours (source stopped reporting it)" in line, line
