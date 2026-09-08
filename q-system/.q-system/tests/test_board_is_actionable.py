@@ -428,3 +428,45 @@ class TestTheSchemaGuardIsActuallyWiredIntoTheRun:
         dbf = tmp_path / "notion-board-db"; dbf.write_text("d", encoding="utf-8")
         br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
         assert seen.get("known") == {"Task": "title", "Item id": "rich_text"}, seen
+
+
+class TestTheCardLineDoesNotPointAtRowsThatAreNotThere:
+    """"...and N more on the board" counted every row past the display cap, including
+    ⚪ and 🟢 rows that no longer reach the board at all. A pointer to a place the thing
+    is not is worse than no pointer (PR reviewer round 5, minor; round 9 asked for the
+    test that stops it reverting)."""
+
+    def _card(self, tmp_path, lines):
+        paths = _paths(tmp_path)
+        paths["card"].write_text(
+            "*Your book today* - 2026-09-07\n" + "\n".join(lines), encoding="utf-8")
+        return paths
+
+    def _many(self, health, n):
+        return [f"{health} *Client {i}* · something" for i in range(n)]
+
+    def test_rows_past_the_cap_that_reach_the_board_are_counted_as_on_the_board(self, tmp_path):
+        over = cb.MAX_CLIENT_ROWS + 3
+        paths = self._card(tmp_path, self._many("🔴", over))
+        rows, err = cb.collect(NOW, {}, paths)
+        assert err is None, err
+        assert any("more on the board" in r for r in rows), rows
+        assert not any("ball is not with you" in r for r in rows), rows
+
+    def test_rows_past_the_cap_that_never_reach_it_are_counted_separately(self, tmp_path):
+        over = cb.MAX_CLIENT_ROWS + 3
+        paths = self._card(tmp_path, self._many("⚪", over))
+        rows, err = cb.collect(NOW, {}, paths)
+        assert err is None, err
+        assert not any("more on the board" in r for r in rows), rows
+        assert any("ball is not with you" in r for r in rows), rows
+
+    def test_the_two_counts_do_not_double_count_one_row(self, tmp_path):
+        half = cb.MAX_CLIENT_ROWS
+        paths = self._card(tmp_path, self._many("🔴", half) + self._many("⚪", 4))
+        rows, err = cb.collect(NOW, {}, paths)
+        assert err is None, err
+        board = [r for r in rows if "more on the board" in r]
+        quiet = [r for r in rows if "ball is not with you" in r]
+        assert not board, board
+        assert quiet and "4" in quiet[0], quiet

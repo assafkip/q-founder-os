@@ -822,6 +822,13 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
         # call refuses. Partial writes up to that point are ordinary rows the next
         # paint reconciles; what cannot happen is a write after the brief moved on.
         return [], f"board write timed out: {exc}; no further write lands"
+    except MissingIdentityColumn as exc:
+        # ITS OWN ARM, ahead of the generic one (PR reviewer round 9, minor). This is
+        # the one failure here that a person can actually fix, and the whole point of
+        # raising it is the sentence it carries. Falling through to the generic arm
+        # printed "MissingIdentityColumn" and threw the remediation away, which is the
+        # class-name-instead-of-help shape this file refuses everywhere else.
+        return [], str(exc)
     except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError) as exc:
         return [], f"board write failed: {type(exc).__name__}: {exc}"
 
