@@ -1164,6 +1164,20 @@ def _enforce_spine_contract(paths, fm: dict, marker: dict, issue_id: str) -> str
             import prd_runner as _prd_runner
             from config import load as _load_config
             cfg = _load_config(paths.repo_root)
+            # LIFECYCLE IS EXPLICIT, NEVER DEFAULTED. Scar 2026-08-24 (ASK-1038):
+            # this call omitted `lifecycle=`, so it took LEGACY_GATE_LIFECYCLE,
+            # which is "historical-receipt" -- the one value `gates run` filters
+            # OUT before executing. The only producer of gates was writing the
+            # one lifecycle the only consumer refuses to run, so `gates run`
+            # printed "all 0 regression gates green" against a 47-gate registry
+            # and had executed nothing since 2026-07-26. 47 closeouts registered
+            # a permanent proof; all 47 were inert from the moment they landed.
+            #
+            # A bypass_check IS a permanent regression proof -- that is what the
+            # registry section header calls it -- so `regression` is the correct
+            # value and it is passed here rather than relied on as a default.
+            # "legacy" in the constant's name reads as "applies to old rows" to
+            # every reviewer, which is exactly why nobody caught it for 29 days.
             out = _prd_runner.gate_register(
                 cfg, prd_id=marker["prd_id"], issue_id=issue_id,
                 command=bypass_check, lifecycle="regression")
