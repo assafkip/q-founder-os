@@ -1166,7 +1166,7 @@ def _enforce_spine_contract(paths, fm: dict, marker: dict, issue_id: str) -> str
             cfg = _load_config(paths.repo_root)
             out = _prd_runner.gate_register(
                 cfg, prd_id=marker["prd_id"], issue_id=issue_id,
-                command=bypass_check)
+                command=bypass_check, lifecycle="regression")
         except Exception as exc:
             return (f"cannot close {issue_id}: bypass_check gate registration "
                     f"failed ({exc}) — the permanent registry must record it "

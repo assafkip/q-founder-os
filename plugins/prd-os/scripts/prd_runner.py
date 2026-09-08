@@ -46,6 +46,7 @@ import subprocess
 import tempfile
 import os
 import re
+import shlex
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1154,6 +1155,49 @@ def _gate_lifecycle(record: dict) -> str:
     return lifecycle
 
 
+def _reject_unrunnable_gate(command: str) -> None:
+    """Refuse a gate whose command cannot run. Validated AT THE DOOR.
+
+    Scar 2026-08-24 (ASK-1040), measured by executing all 47 registered gates:
+    12 were not runnable at all. SEVEN held PROSE in the command slot -- the
+    shell was being asked to run `check:the`, `check:adding`, `asserting` --
+    because somebody wrote a DESCRIPTION of the check where the check goes.
+    Three were shell syntax errors. Registration accepted every one of them
+    without a word, and each was then recorded as permanent protection.
+
+    A gate that cannot execute is worse than no gate: it is counted, reported,
+    and believed. The registry is append-only, so a bad row is close to
+    permanent -- which is exactly why the check belongs here and not downstream.
+
+    NOT validated here: whether the command TESTS anything real. `true` is a
+    legal gate and a useless one. This refuses the unrunnable, not the useless;
+    the zero-collecting pytest class is its own item.
+    """
+    cmd = (command or "").strip()
+    if not cmd:
+        raise ValueError("gate command is empty; a gate that runs nothing is not a gate")
+    import shutil
+    import subprocess as _sp
+    # 1. Does it parse? Catches the unterminated-heredoc class.
+    syntax = _sp.run(["bash", "-n", "-c", cmd], capture_output=True, text=True)
+    if syntax.returncode != 0:
+        raise ValueError(
+            f"gate command is not valid shell: {syntax.stderr.strip()[:200]}\n"
+            f"  command: {cmd[:160]}")
+    # 2. Is the first word a real command? Catches the prose class, which is the
+    #    one that actually happened seven times. Builtins resolve too, so
+    #    `cd x && ...` passes; `check:the ...` does not.
+    first = cmd.split()[0]
+    probe = _sp.run(["bash", "-lc", f"command -v {shlex.quote(first)} >/dev/null 2>&1"],
+                    capture_output=True, text=True)
+    if probe.returncode != 0 and not shutil.which(first):
+        raise ValueError(
+            f"gate command does not start with a runnable command: {first!r}. "
+            "This is the prose-in-the-command-slot class (ASK-1040): write the "
+            "CHECK here, not a description of it.\n"
+            f"  command: {cmd[:160]}")
+
+
 def gate_register(
     cfg: Config,
     *,
@@ -1171,6 +1215,7 @@ def gate_register(
             f"invalid gate lifecycle {lifecycle!r}; "
             f"expected one of {', '.join(GATE_LIFECYCLES)}"
         )
+    _reject_unrunnable_gate(command)
     gate_id = f"{issue_id}-{_hashlib.sha256(command.encode()).hexdigest()[:8]}"
     path = _gates_path(cfg)
     if path.is_file():
@@ -2752,6 +2797,7 @@ def cmd_gates(cfg: Config, args) -> int:
             "other lifecycles are retained as non-current evidence\n"
         )
         return 2
+    registered_total = len(records)
     records = [
         record for record in records
         if record["lifecycle"] == "regression"
@@ -2890,7 +2936,19 @@ def cmd_gates(cfg: Config, args) -> int:
         for gid, tail in failures:
             sys.stderr.write(f"GATE RED: {gid}\n{tail}\n")
         return 1
-    print(f"all {len(records)} regression gates green; "
+    if not records and registered_total:
+        # AN EMPTY EXECUTED SET IS NOT A PASS, and it must never be printed as
+        # one. Scar 2026-08-24 (ASK-1038): this line said "all 0 regression
+        # gates green" against a 47-gate registry, and the sentence was TRUE --
+        # vacuously, because the closeout registrar wrote every gate as
+        # historical-receipt, the one lifecycle filtered out just above. Exit 0
+        # was read as "the gates are green" for 29 days while nothing ran.
+        # A count of zero is now stated as the anomaly it is.
+        print(f"[WARN] gates: {registered_total} gate(s) registered, NONE "
+              f"executable -- 0 have lifecycle 'regression', so no regression "
+              f"check ran. Exit 0 below covers the spillover verdict ONLY.")
+    print(f"all {len(records)} regression gates green "
+          f"({registered_total} registered); "
           f"{len(blocking)} blocking spillover item(s)")
     return 0
 
