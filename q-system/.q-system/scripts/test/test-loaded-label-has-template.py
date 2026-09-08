@@ -42,10 +42,12 @@ Run: python3 q-system/.q-system/scripts/test/test-loaded-label-has-template.py
 Exit 0 = pass. Exit 1 = a loaded label has no template and no allowlist entry.
 """
 
+import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -79,16 +81,33 @@ ALLOWLIST = {
 def loaded_labels():
     """Labels launchd currently has bootstrapped, for this prefix.
 
-    None (not an empty list) when there is no launchd to ask. CI runs on Linux,
-    where `launchctl` does not exist: an empty set there would read as "no loaded
-    label lacks a template" and this check would report a clean pass about a
-    population it never saw. Distinguishing the two is the whole point.
+    None (not an empty list) when launchd could not be ASKED. An empty set would
+    read as "no loaded label lacks a template" and this check would report a clean
+    pass about a population it never saw. Distinguishing the two is the whole
+    point, and there are three ways to fail to ask, not one.
+
+    The first cut guarded only on `shutil.which`, which is the Linux-CI case. That
+    is not enough, and the reviewer proved it on PR #326 round 1 by running this
+    file inside the codex review sandbox:
+
+        launchctl_rc=1  launchctl_stdout=''  launchctl_stderr=''
+        test_rc=0
+        loaded com.kipi. labels ........ 0
+        ok   every loaded com.kipi. label has a committed template or a dated exemption
+
+    The binary was on PATH and the CALL failed, so the guard never fired and a
+    checker whose whole job is this failure class committed it. Hence: the binary
+    must exist, the call must exit 0, AND it must return output. `launchctl list`
+    on a live session always prints a header row, so empty stdout at rc 0 is a
+    session this process cannot see rather than a machine with no jobs.
     """
     if shutil.which("launchctl") is None:
         return None
-    out = subprocess.run(["launchctl", "list"], capture_output=True, text=True,
-                         timeout=60).stdout
-    return sorted(set(re.findall(r"com\.kipi\.[A-Za-z0-9_.-]+", out)))
+    r = subprocess.run(["launchctl", "list"], capture_output=True, text=True,
+                       timeout=60)
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    return sorted(set(re.findall(r"com\.kipi\.[A-Za-z0-9_.-]+", r.stdout)))
 
 
 def committed_labels():
@@ -112,10 +131,42 @@ def committed_labels():
     return sorted(set(labels))
 
 
+def selftest_failed_launchctl_is_not_an_empty_inventory():
+    """The guard that PR #326 round 1 caught missing, held permanently.
+
+    A stub launchctl that exits 1 while sitting on PATH must produce None, not an
+    empty list. Runs on every invocation because it is one subprocess and the
+    alternative is a guard nobody executes until the day it is already wrong.
+    """
+    work = tempfile.mkdtemp(prefix="loaded-label-selftest-")
+    try:
+        bindir = Path(work) / "bin"
+        bindir.mkdir()
+        stub = bindir / "launchctl"
+        stub.write_text("#!/bin/bash\nexit 1\n")
+        stub.chmod(0o755)
+        saved = os.environ.get("PATH", "")
+        os.environ["PATH"] = "%s:/usr/bin:/bin" % bindir
+        try:
+            assert shutil.which("launchctl") == str(stub), (
+                "PATH not sealed, so this self-test proves nothing")
+            assert loaded_labels() is None, (
+                "REGRESSION: a failed launchctl call is being read as an empty "
+                "loaded-label inventory, which reports coverage over a population "
+                "that was never obtained")
+        finally:
+            os.environ["PATH"] = saved
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def main():
+    selftest_failed_launchctl_is_not_an_empty_inventory()
+    print("ok   self-test: a failed launchctl is not an empty inventory")
     loaded = loaded_labels()
     if loaded is None:
-        print("SKIP no launchctl on this host, so there is no loaded-label "
+        print("SKIP launchd could not be asked on this host (no launchctl, a "
+              "non-zero exit, or no output), so there is no loaded-label "
               "population to check. This says nothing about the founder's "
               "machine; it says this host cannot answer the question.")
         return 0
