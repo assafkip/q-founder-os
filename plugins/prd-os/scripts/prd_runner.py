@@ -1233,6 +1233,12 @@ def _reject_unrunnable_gate(command: str) -> None:
     while stripped[:1] == "!":
         stripped = stripped[1:].lstrip()
         if not stripped:
+            # NOT DEAD CODE, though it looks it on macOS. `bash -n -c '!'` is a
+            # syntax error under bash 3.2 (so step 1 refuses first) and PARSES
+            # under the bash 5.x that CI runs, where this is the only thing
+            # standing between a bare `!` and `stripped.split()[0]` on an empty
+            # string. CI proved it by failing on a test that had pinned the macOS
+            # door. Platform-split behaviour, kept deliberately.
             raise ValueError(
                 "gate command is only a negation, so it runs no check.\n"
                 f"  command: {cmd[:160]}")

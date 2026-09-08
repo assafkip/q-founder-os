@@ -167,14 +167,26 @@ def test_a_NEGATED_prose_command_is_refused(repo):
     mod = _runner_module()
     with pytest.raises(ValueError, match="does not start with a runnable command"):
         mod._reject_unrunnable_gate("! check:the ledger is append-only")
-    # A BARE `!` is refused, but by bash's own parser at step 1, not by the
-    # negation branch -- `bash -n -c '!'` is a syntax error. Asserting the
-    # branch's own wording here failed, and the honest fix is to assert the
-    # OUTCOME and name which guard actually produces it. The branch stays as
-    # belt-and-braces so the strip loop cannot hand an empty string to
-    # `.split()[0]`; it is deliberately not claimed to be covered.
-    with pytest.raises(ValueError, match="not valid shell"):
+    # A BARE `!` IS REFUSED ON BOTH PLATFORMS, BY DIFFERENT GUARDS, and pinning
+    # either one is how this test went red in CI while passing locally.
+    #
+    #   macOS, bash 3.2.57  : `bash -n -c '!'` is a SYNTAX ERROR
+    #                         -> step 1 refuses with "not valid shell"
+    #   CI, Linux bash 5.x  : `bash -n -c '!'` PARSES
+    #                         -> the negation branch refuses with "only a negation"
+    #
+    # Measured, after CI failed on exactly this: 'Expected regex: not valid shell /
+    # Actual message: gate command is only a negation'. The previous comment here
+    # called that branch unreachable belt-and-braces. That was WRONG -- on the
+    # platform CI actually runs, it is the live guard, and the version of this
+    # comment that called it dead code would have justified deleting it.
+    #
+    # So the assertion is on the OUTCOME (refused, with a reason naming the input)
+    # rather than on which of the two doors closed.
+    with pytest.raises(ValueError) as bare:
         mod._reject_unrunnable_gate("!")
+    assert "not valid shell" in str(bare.value) or "only a negation" in str(bare.value), \
+        f"a bare negation must be refused with a reason, got: {bare.value}"
     # and a genuinely negated REAL command still passes, so the fix is not a ban
     mod._reject_unrunnable_gate("! false")
 
