@@ -309,6 +309,14 @@ cd kipi-system && claude
 
 Setup walks you through who you are, what you work on, how you write, and who you know. Takes about 20 minutes. After that the system runs.
 
+The scheduled jobs are a separate step. Nothing above arms them:
+
+```bash
+./kipi install-jobs
+```
+
+`install-plist.sh --all` enumerates every committed `com.kipi.*.plist` with `git ls-files`, renders each one against your checkout, loads it, and prints `N installed, N skipped, N failed (of N committed)`. Two jobs (`com.kipi.lessons-daily`, `com.kipi.lessons-drift`) are skipped outside the skeleton by design, because they shell the fleet updater; the run names them when it skips them. It exits non-zero and names any committed job it could not install, so a partial install is not silence.
+
 ---
 
 ## Commands
