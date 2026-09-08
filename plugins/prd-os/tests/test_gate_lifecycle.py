@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -125,6 +126,87 @@ def test_gate_register_validates_and_persists_lifecycle(repo):
             command="true",
             lifecycle="sometimes",
         )
+
+
+@pytest.mark.parametrize("cmd", [
+    # The two shapes that live specs in this repo actually use. Both are refused by
+    # a raw `cmd.split()[0]` probe and both are run fine by bash.
+    "PYTHONPATH=plugins/kipi-core/kipi-mcp/src python3 -m pytest -q tests/test_paths.py",
+    "PYTHONPATH=. python3 -m pytest plugins/prd-os/tests -q",
+    "(cd plugins/prd-os && python3 -m pytest -q)",
+    "FOO=1 BAR=2 true",
+    "{ true; }",
+])
+def test_a_command_bash_can_run_is_not_called_prose(cmd):
+    """The door must not refuse a shape the shell executes (PR #330 review, MAJOR 1).
+
+    This is not hypothetical and it is not cosmetic. `issue_runner` RUNS the
+    bypass_check and requires exit 0 BEFORE it registers, so by the time this guard
+    sees the command it is PROVEN runnable -- and issue_runner turns any raise here
+    into a hard `cannot close`. Census over all 204 decoded bypass_checks in
+    .prd-os/issues/: 16 refused, 2 of them this false-positive class. An unattended
+    closeout died on a check that had just gone green, blaming prose.
+
+    The first token of `PYTHONPATH=x python3 ...` is an ASSIGNMENT, and of
+    `(cd x && y)` is shell GRAMMAR. Neither is a command name.
+    """
+    _runner_module()._reject_unrunnable_gate(cmd)
+
+
+def test_prose_is_STILL_refused_after_the_assignment_fix():
+    """The negative half: widening the door must not open it (MAJOR 1 fix control).
+
+    An assignment-looking prefix must not become a way to smuggle prose past the
+    guard, and prose that merely follows an assignment is still prose.
+    """
+    mod = _runner_module()
+    for bad in ("check:the ledger is append-only",
+                "PYTHONPATH=. check:the ledger is append-only",
+                "asserting the gate runs"):
+        with pytest.raises(ValueError, match="does not start with a runnable command"):
+            mod._reject_unrunnable_gate(bad)
+    # An assignment with no command runs no check, and says so in its own words.
+    with pytest.raises(ValueError, match="only environment assignments"):
+        mod._reject_unrunnable_gate("PYTHONPATH=.")
+
+
+def test_re_registering_an_existing_gate_is_a_no_op_not_a_raise(repo):
+    """Re-close must stay possible (PR #330 review, MAJOR 2).
+
+    gate_id is issue_id + sha256(command), so re-closing an issue with the same
+    bypass_check resolves to an existing row. Validating the command BEFORE the
+    idempotency lookup turned that no-op into a raise, and issue_runner converts
+    any raise into `cannot close` -- breaking a workflow issue_runner itself
+    documents ("spec closed once, reopened, amended, closed again").
+
+    Registered here with a command the door accepts, then re-registered, which is
+    the path a real re-close takes.
+    """
+    module = _runner_module()
+    cfg = module.load_config(repo)
+    first = module.gate_register(cfg, prd_id="prd-x", issue_id="issue-recl",
+                                 command="true", lifecycle="regression")
+    assert first["registered"] is True
+    again = module.gate_register(cfg, prd_id="prd-x", issue_id="issue-recl",
+                                 command="true", lifecycle="regression")
+    assert again == {"gate_id": first["gate_id"], "registered": False}
+
+
+def test_a_lifecycle_conflict_names_its_recovery(repo):
+    """A dead-end error at 3am is a defect (PR #330 review, MAJOR 2).
+
+    Every gate this fleet's closeout wrote before the lifecycle fix took
+    LEGACY_GATE_LIFECYCLE, so the FIRST re-close of any such issue hits this
+    branch. The recovery exists but lives outside the closeout flow, so the
+    message has to carry it.
+    """
+    module = _runner_module()
+    cfg = module.load_config(repo)
+    module.gate_register(cfg, prd_id="prd-x", issue_id="issue-conf",
+                         command="true", lifecycle="historical-receipt")
+    with pytest.raises(ValueError, match="migrate_gate_lifecycle.py"):
+        module.gate_register(cfg, prd_id="prd-x", issue_id="issue-conf",
+                             command="true", lifecycle="regression")
 
 
 def test_gate_register_ACTUALLY_CALLS_the_unrunnable_guard(repo):
@@ -292,13 +374,24 @@ def test_the_closeout_registrar_asks_for_regression_at_the_call_site(repo):
     which reads to every reviewer as "applies to rows written before the field
     existed". It was in fact the live default for every new registration. A test
     on the function's default would have passed throughout the outage.
+
+    EVERY call site, not `src.index(...)` (review of PR #330, MINOR 3). The first
+    version inspected only the first match plus 260 characters, so a SECOND
+    registrar added later with no lifecycle kept it green. There is exactly one
+    call site today, which is what made that a latent hole rather than a live one
+    -- and exactly the condition under which nobody notices.
     """
     src = (PLUGIN_ROOT.parent / "kipi-dsse" / "scripts" / "issue_runner.py").read_text()
-    i = src.index("_prd_runner.gate_register(")
-    call = src[i:i + 260]
-    assert 'lifecycle="regression"' in call, (
-        "the closeout registrar must name its lifecycle explicitly; "
-        f"call site reads:\n{call}")
+    starts = [m.start() for m in re.finditer(r"_prd_runner\.gate_register\(", src)]
+    assert starts, "no gate_register call site found at all -- the test lost its subject"
+    unlifecycled = [
+        src[i:i + 260] for i in starts
+        if 'lifecycle="regression"' not in src[i:i + 260]
+    ]
+    assert not unlifecycled, (
+        f"{len(unlifecycled)} of {len(starts)} closeout registrar call site(s) do not "
+        "name their lifecycle, so they take LEGACY_GATE_LIFECYCLE and `gates run` "
+        "filters them out:\n" + "\n---\n".join(unlifecycled))
 
 
 # ---------------------------------------------------------------------------

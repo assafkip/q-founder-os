@@ -1187,7 +1187,48 @@ def _reject_unrunnable_gate(command: str) -> None:
     # 2. Is the first word a real command? Catches the prose class, which is the
     #    one that actually happened seven times. Builtins resolve too, so
     #    `cd x && ...` passes; `check:the ...` does not.
-    first = cmd.split()[0]
+    #
+    # THE RAW FIRST TOKEN IS NOT THE COMMAND NAME, and assuming it was made this
+    # guard refuse commands bash runs perfectly (review of PR #330, MAJOR 1,
+    # reproduced against real specs in this repo). Two shapes:
+    #
+    #   PYTHONPATH=src python3 -m pytest ...   -> first token is an ASSIGNMENT
+    #   (cd plugins/prd-os && pytest -q)       -> first token is a SUBSHELL open
+    #
+    # Census over all 204 decoded bypass_checks in .prd-os/issues/: 16 refused, 2
+    # of them this false-positive class (srsa-authoritative-path-contract.md,
+    # srsa-check-repairs-survived-merge.md). That is not a cosmetic miss --
+    # issue_runner RUNS the bypass_check and requires exit 0 BEFORE registering,
+    # so the command is PROVEN runnable and then refused at the door, and
+    # issue_runner turns any exception here into a hard `cannot close`. An
+    # unattended closeout died on a check that had just gone green, with an error
+    # blaming prose.
+    #
+    # Leading assignments are stripped, and a command opening a group or subshell
+    # is accepted on bash's own verdict: step 1 already parsed it with `bash -n`,
+    # which is a stronger statement about `(cd x && y)` than any token probe.
+    probe_cmd = cmd
+    while True:
+        head = probe_cmd.split(None, 1)
+        if not head:
+            break
+        # NAME=value, the POSIX assignment prefix. Deliberately strict about the
+        # NAME half so `check:the=thing` prose cannot masquerade as one.
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", head[0]):
+            if len(head) == 1:
+                # An assignment and nothing else runs no check at all.
+                raise ValueError(
+                    "gate command is only environment assignments, so it runs "
+                    f"no check.\n  command: {cmd[:160]}")
+            probe_cmd = head[1]
+            continue
+        break
+    stripped = probe_cmd.lstrip()
+    # `(`, `{`, `!` and a leading redirect open shell GRAMMAR, not a command name.
+    # `bash -n` above already accepted the whole line, which is the real check.
+    if stripped[:1] in ("(", "{", "!", "<", ">"):
+        return
+    first = stripped.split()[0]
     probe = _sp.run(["bash", "-lc", f"command -v {shlex.quote(first)} >/dev/null 2>&1"],
                     capture_output=True, text=True)
     if probe.returncode != 0 and not shutil.which(first):
@@ -1215,7 +1256,15 @@ def gate_register(
             f"invalid gate lifecycle {lifecycle!r}; "
             f"expected one of {', '.join(GATE_LIFECYCLES)}"
         )
-    _reject_unrunnable_gate(command)
+    # THE DOOR IS CHECKED AFTER IDEMPOTENCY, NOT BEFORE (review of PR #330, MAJOR 2).
+    # gate_id is issue_id + sha256(command), so a RE-CLOSE of the same issue with the
+    # same bypass_check resolves to a row that already exists and must be a no-op.
+    # Validating first turned that no-op into a raise, and issue_runner converts any
+    # raise here into `cannot close` -- so tightening the door would have broken
+    # re-close, a workflow issue_runner documents ("spec closed once, reopened,
+    # amended, closed again"). A row already in the registry got past whatever door
+    # existed when it was written; re-litigating it at read time is not this guard's
+    # job. New rows are still validated below.
     gate_id = f"{issue_id}-{_hashlib.sha256(command.encode()).hexdigest()[:8]}"
     path = _gates_path(cfg)
     if path.is_file():
@@ -1225,13 +1274,30 @@ def gate_register(
                 if existing.get("gate_id") == gate_id:
                     existing_lifecycle = _gate_lifecycle(existing)
                     if existing_lifecycle != lifecycle:
+                        # NAME THE RECOVERY. Every gate this fleet's closeout wrote
+                        # before the lifecycle fix took LEGACY_GATE_LIFECYCLE, so the
+                        # FIRST re-close of any such issue lands here, and the caller
+                        # (issue_runner) turns it into a bare `cannot close`. The
+                        # recovery exists and lives outside the closeout flow; an
+                        # error that does not name it is a dead end at 3am.
                         raise ValueError(
                             f"gate {gate_id!r} already registered as "
-                            f"{existing_lifecycle!r}, not {lifecycle!r}"
+                            f"{existing_lifecycle!r}, not {lifecycle!r}. "
+                            "The registry is append-only, so this is not edited in "
+                            "place: run `python3 plugins/prd-os/scripts/"
+                            f"migrate_gate_lifecycle.py --regression {gate_id} "
+                            "--apply`, then close again."
                         )
                     return {"gate_id": gate_id, "registered": False}
             except json.JSONDecodeError:
                 continue
+    # THE DOOR, for a genuinely NEW row only. Everything above this line either
+    # returned a no-op or raised on a lifecycle conflict, so an already-permanent
+    # gate never reaches it -- which is the whole point of the ordering (MAJOR 2).
+    # This line is what test_gate_register_ACTUALLY_CALLS_the_unrunnable_guard
+    # defends; deleting it while re-ordering is exactly the mistake that test
+    # caught during the review fix, 2026-09-07.
+    _reject_unrunnable_gate(command)
     record = {"gate_id": gate_id, "prd_id": prd_id, "issue_id": issue_id,
               "command": command,
               "lifecycle": lifecycle,
