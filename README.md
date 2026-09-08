@@ -323,20 +323,48 @@ The scheduled jobs are a separate step. Nothing above arms them:
 
 ---
 
+## What else is in the box
+
+The pages above are the knowledge half. The rest of the repo, with the command that counts each one:
+
+- **A CLI with 23 verbs** (`grep -cE '^  [a-z][a-z0-9|_-]*\)' kipi`). `./kipi help` prints them. `check` runs the validation harness. `list` shows every copy. `health` finds dark or failing jobs, double schedules and open spillover. `work` and `converge` take a ready issue to an approved pull request. `judgment` freezes the context behind a triage decision so it can be replayed.
+- **A local MCP server with 73 tools** (`grep -c '@mcp.tool' plugins/kipi-core/kipi-mcp/src/kipi_mcp/server.py`): deterministic linters and scorers, morning-routine step logging, follow-up loop tracking, backup, export, import.
+- **21 namespaced slash commands**, listed above. Six in `kipi-core`, six in `kipi-dsse`, nine in `prd-os`.
+- **65 hook entries** in `settings-template.json` (`grep -o '"command": "[^"]*"' settings-template.json | wc -l`), plus seven more in the plugins' own `hooks.json`. Every copy gets the same switches, because they ship as one file.
+- **Six plugins** under `plugins/`, all six listed in `.claude-plugin/marketplace.json`.
+- **16 launchd jobs** committed as plists. `./kipi install-jobs` enumerates them with `git ls-files`, so a plist outside the scripts directory is still reached; run `bash q-system/.q-system/scripts/install-plist.sh` with no arguments to see the label list it will install.
+
+---
+
 ## Commands
 
 Optional. Most usage is just talking to the system in Claude Code.
 
-| Command | What it does |
+Two kinds, and the difference matters when you type one.
+
+The `/q-*` names are **conventions**, not registered slash commands. No file under a `commands/` directory backs them. They are documented in `q-system/.q-system/commands.md`, the model reads that file, and saying one puts the session in that mode.
+
+| Convention | What it does |
 |---|---|
-| `/q-debrief` | Extract insights from a conversation or paste a transcript |
+| `/q-debrief` | Extract insights from a conversation. Pasting a transcript runs it without being asked |
 | `/q-draft` | Quick email, DM, or content draft in your voice |
 | `/q-engage` | Generate engagement on someone else's post |
 | `/q-research` | Citation-only research mode |
-| `/q-morning` | The day brief: one message with your calendar, mail needing an answer, and your board |
+| `/q-morning` | The day brief: your calendar, mail needing an answer, your board. Also runs itself at 07:40 as the `com.kipi.morning-brief` job |
 | `/q-wrap` | End-of-day health check |
 | `/q-handoff` | Save context for next session |
-| `/wiring-check` | End-of-task gate: prove every change is connected |
+
+The **registered** commands ship inside the plugins and are namespaced. Three of the six plugins carry them. `find plugins/*/commands -name '*.md'` lists all 21; the table names the shapes rather than every row, because the list is one command away and a front page is not a manifest.
+
+| Command | What it does |
+|---|---|
+| `/kipi-core:wiring-check` | End-of-task gate: prove every change is connected |
+| `/kipi-core:rca-start`, `/kipi-core:rca-check` | Scaffold a root-cause analysis, then lint it against the template |
+| `/kipi-core:say` | Read the last answer back as audio |
+| `/kipi-core:voice-refresh` | Rebuild the voice model from new meeting transcripts |
+| `/kipi-core:linear-drain` | File the issues that were captured while offline |
+| nine `/prd-os:*` | Rough idea to reviewed PRD to one issue spec per unit of work |
+| six `/kipi-dsse:*` | Execute one issue under scope enforcement, with receipts |
 
 ---
 
@@ -370,7 +398,8 @@ If you don't, you still get an AI that doesn't make you decide who to contact, w
 - `.env`, credentials, and key files blocked from read/write
 - PreToolUse hooks intercept dangerous operations
 - No secrets in committed files
-- `sudo` and `git push --force` denied by default, and the recursive remove denied at the filesystem root and on dot directories. The wider destructive-command guard (recursive removes anywhere, hard resets, branch deletion, the fleet-wide sync) is a shipped hook script that a person wires per machine. It refuses, prints a one-time approval token, and only a human shell can supply it.
+- Nine Bash denials, identical in both shipped settings files: `sudo`, force-push, hard reset, rebase, world-writable chmod, piped `curl` and `wget` installers, and the recursive remove at the filesystem root and on dot directories. Read the list yourself in the `permissions.deny` block of `settings-template.json`.
+- The wider destructive-command guard (recursive removes anywhere, branch deletion, the fleet-wide sync, with a one-time approval token only a human shell can supply) runs on my machine and is **not shipped here in a form you can switch on**. The repo carries one copy, `q-system/.q-system/tests/fixtures/destructive-op-deny.reference.sh`, non-executable and named `.reference.` on purpose so it cannot be mistaken for the live gate. No installer writes it to a hook path: `install-capability-token.sh` patches a hook that already exists and exits without one when it does not. Read it and wire your own, or run without it.
 
 ---
 
