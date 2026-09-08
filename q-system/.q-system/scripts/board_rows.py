@@ -630,8 +630,9 @@ def paint(buckets: dict, token, db, opener=None, budget=None, known=None) -> dic
                 continue
             _request(token, "POST", "/pages",
                      {"parent": {"database_id": db},
-                      "properties": _properties(item, bucket, iid, include_bucket=True,
-                                                status="Not started")},
+                      "properties": _only_known(
+                          _properties(item, bucket, iid, include_bucket=True,
+                                      status="Not started"), known)},
                      opener, budget)
             created += 1
         else:
@@ -640,8 +641,14 @@ def paint(buckets: dict, token, db, opener=None, budget=None, known=None) -> dic
             # `_bucket_decision` and the module docstring for how his drag is told from
             # our own stale paint.
             write, record, pin = _bucket_decision(page, bucket)
-            props = _properties(item, record, iid, include_bucket=write,
-                                record_bucket=record, pinned=pin)
+            # FILTERED BEFORE THE COMPARISON, not after (PR reviewer round 6, minor).
+            # Comparing the full property set against a board that cannot hold `Link`
+            # made the row differ forever: it was PATCHed every run, `unchanged` stayed
+            # at zero, and the write budget went on rewriting values nobody changed.
+            # What is compared has to be what is written.
+            props = _only_known(
+                _properties(item, record, iid, include_bucket=write,
+                            record_bucket=record, pinned=pin), known)
             pinned += 1 if pin else 0
             if _already_holds(page, props):
                 unchanged += 1
@@ -649,7 +656,7 @@ def paint(buckets: dict, token, db, opener=None, budget=None, known=None) -> dic
             if out_of_write_budget():
                 deferred += 1
                 continue
-            _request(token, "PATCH", f"/pages/{page['id']}", {"properties": _only_known(props, known)},
+            _request(token, "PATCH", f"/pages/{page['id']}", {"properties": props},
                      opener, budget)
             updated += 1
             moved += 1 if write else 0

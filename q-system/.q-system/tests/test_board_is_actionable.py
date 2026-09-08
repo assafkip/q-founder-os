@@ -275,6 +275,25 @@ class TestAColumnThisBoardLacksIsNotAWholeLostMorning:
         old_board = {"Task", "Item id", "Notes", "Domain", "Priority", "Source"}
         assert set(br._only_known(props, old_board)) == old_board, sorted(props)
 
+    def test_the_create_path_is_filtered_too(self, monkeypatch):
+        """The first fix filtered the PATCH and not the POST, so a board lacking the
+        column still took a 400 on its first NEW row and abandoned the whole paint.
+        The patch printed "write sites filtered: 1" and nobody asked whether there were
+        two (PR reviewer round 6, major)."""
+        sent = []
+        monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {})
+        monkeypatch.setattr(br, "_request",
+                            lambda tok, m, path, body, op=None, bud=None: sent.append((m, path, body)))
+        old_board = {"Task", "Item id", "Notes", "Domain", "Priority", "Source",
+                     "Bucket", "Status"}
+        br.paint({"top_of_mind": [dict(self.ITEM, scope="card")], "this_week": [],
+                  "inbox": [], "healthy_scopes": {"card"}},
+                 "tok", "db", known=old_board)
+        posts = [s for s in sent if s[0] == "POST"]
+        assert posts, sent
+        written = set(posts[0][2]["properties"])
+        assert "Link" not in written and "Next" not in written, sorted(written)
+
     def test_a_board_with_them_keeps_them(self):
         props = br._properties(self.ITEM, "Inbox", "cb:x", False)
         assert br._only_known(props, set(props)) == props

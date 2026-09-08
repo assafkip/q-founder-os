@@ -211,8 +211,14 @@ class TestRound3:
         is such a term: it is on the board, so leaving it out reported a mismatch every
         run after any pinned row went quiet. This asserts the property -- every
         on-board counter is added, and the deferred-create one is subtracted -- rather
-        than one spelling of it. `collect` refuses to run under pytest by design, so
-        the sum cannot be driven end to end from here.
+        than one spelling of it.
+
+        A SOURCE READ, and the reason is not "collect cannot run under pytest" (PR
+        reviewer round 6, minor: three tests in this file drive it, and that claim was
+        simply false). It is that the sum lives inline in `collect`, between a paint
+        and a read-back, so reaching it end to end means standing up a fake Notion for
+        both halves in order to assert one arithmetic expression. The expression is the
+        thing that can go wrong, and this reads it directly.
         """
         src = (SCRIPTS / "board_rows.py").read_text(encoding="utf-8")
         m = re.search(r"expected = \(?(.+?)\n\s*if seen != expected:", src, re.S)
