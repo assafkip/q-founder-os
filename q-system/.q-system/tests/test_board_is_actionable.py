@@ -709,8 +709,10 @@ class TestTheBoardHealsItsOwnOptionalColumns:
         out, problems = br.ensure_columns(dict(self.OLD), "tok", "db", record=rec)
         asked = set(sent[0][2]["properties"])
         assert "Link" not in asked and "Next" in asked, asked
-        # SILENT, because losing Link costs one value on a row and nothing else. Saying
-        # it every morning forever would be nagging him about his own decision.
+        # NO SECOND SENTENCE. Losing Link costs one value on a row, so it earns no
+        # explanation of itself every morning. The ordinary "was not written" report
+        # still names it, exactly as it names any other column, and asserting silence
+        # here would have been asserting something false (round 7, minor).
         assert not any("your removal" in x for x in problems), problems
 
     def test_a_structural_column_he_deleted_is_named_every_run(self, monkeypatch, tmp_path):
@@ -889,3 +891,50 @@ class TestACorruptRecordDoesNotKillTheBoardSection:
         rec = tmp_path / "made.json"
         rec.write_text(json.dumps({"db": ["Link", "Next"]}), encoding="utf-8")
         assert br._columns_made("db", rec) == {"Link", "Next"}
+
+
+class TestNoTestCanWriteTheLiveColumnRecord:
+    """Three rounds of this PR found a test reaching something live, each fixed by hand.
+    A hand fix protects the tests that exist; this protects the ones nobody has written
+    yet (PR #332 reviewer round 7, minor)."""
+
+    def test_writing_without_a_record_path_raises_under_pytest(self):
+        with pytest.raises(AssertionError) as e:
+            br._remember_columns("db", ["Link"])
+        assert "live column record" in str(e.value)
+
+    def test_a_private_path_is_allowed(self, tmp_path):
+        rec = tmp_path / "made.json"
+        br._remember_columns("db", ["Link"], rec)
+        assert json.loads(rec.read_text())["db"] == ["Link"]
+
+    def test_the_live_record_does_not_exist_after_this_suite(self):
+        assert not br.COLUMNS_MADE.exists(), (
+            f"the suite wrote {br.COLUMNS_MADE}, which the 07:40 job reads")
+
+
+class TestARefusedCreateStillNamesWhatItCosts:
+    """The consequence belongs to the ABSENCE, not to the reason for it. It was
+    attached only to his deletion, so a board where Notion refused to create `Notes`
+    heard about the refusal and never that nothing would be archived (round 7)."""
+
+    BARE = {"Task": "title", "Item id": "rich_text"}
+
+    def test_a_refusal_names_the_cost(self, monkeypatch, tmp_path):
+        def boom(*a, **k):
+            raise RuntimeError("no permission")
+        monkeypatch.setattr(br, "_request", boom)
+        _, problems = br.ensure_columns(dict(self.BARE), "tok", "db",
+                                        record=tmp_path / "made.json")
+        joined = " ".join(problems)
+        assert "no permission" in joined, problems
+        assert "nothing is ever archived" in joined, problems
+        assert "invisible on the board" in joined, problems
+
+    def test_an_unconfirmed_create_names_the_cost(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(br, "_request",
+                            lambda *a, **k: {"properties": {}})
+        _, problems = br.ensure_columns(dict(self.BARE), "tok", "db",
+                                        record=tmp_path / "made.json")
+        joined = " ".join(problems)
+        assert "unconfirmed" in joined and "nothing is ever archived" in joined, problems

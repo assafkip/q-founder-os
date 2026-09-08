@@ -658,7 +658,19 @@ def _columns_made(db, path=None):
 def _remember_columns(db, names, path=None):
     """Append to the record. A failure here is not fatal: the worst case is offering to
     create a column he removed a second time, which is the behaviour before the record
-    existed, and it is still said out loud on the line."""
+    existed, and it is still said out loud on the line.
+
+    THE LIVE RECORD IS NEVER WRITTEN BY A TEST, and that is a chokepoint rather than a
+    rule someone remembers (PR #332 reviewer round 7, minor). `collect` has had this
+    guard for the board itself; this file did not, so a test that simply forgot
+    `record=` wrote into ~/.config/kipi and taught the 07:40 job that he had deleted
+    columns he never touched. That happened, once, in this PR. Three separate rounds
+    of it found a test reaching something live and each was fixed by hand; a hand fix
+    protects the tests that exist today. This one protects the ones nobody has written.
+    """
+    if path is None and os.environ.get("PYTEST_CURRENT_TEST"):
+        raise AssertionError(
+            "a test tried to write the live column record; pass record=<tmp path>")
     p = Path(path or COLUMNS_MADE)
     try:
         data = json.loads(p.read_text("utf-8")) or {}
@@ -716,10 +728,16 @@ def ensure_columns(known, token, db, opener=None, budget=None, record=None):
     # entirely and hides every row from his three sections, WHILE the line still ended
     # "read-back ok". Silent degradation is the one thing this file exists to refuse.
     #
-    # The real distinction is consequence, and it needs no state at all. Losing `Link`
-    # or `Next` costs a value on a row and nothing else, so his removal of one is his
-    # business and is not mentioned again. Losing `Notes` or `Bucket` breaks the board,
-    # so it is named every single run, with what it costs, until he puts it back.
+    # The real distinction is consequence, and it needs no state at all. Losing `Notes`
+    # or `Bucket` breaks the board, so it is named every run, with what it costs, until
+    # he puts it back.
+    #
+    # NOT SILENCE, ONE MENTION (round 7, minor: the previous comment and its test both
+    # claimed silence and the dropped-columns sentence still named the column every
+    # run, so the claim was simply false). Losing `Link` or `Next` costs one value on a
+    # row, so it earns no SECOND sentence explaining itself, and the report that the
+    # value was not written stands as it does for any other column. Suppressing that
+    # too is what round 5 did, and it hid `Notes` and `Bucket` with it.
     told = tuple(
         f"{n} is gone and this module created it, so it is treated as your removal; "
         + STRUCTURAL_COST[n] for n in removed if n in STRUCTURAL_COST)
@@ -743,7 +761,13 @@ def ensure_columns(known, token, db, opener=None, budget=None, record=None):
             detail = " " + exc.read().decode("utf-8", "replace")[:200]
         except Exception:
             pass
-        return known, told + ((f"{type(exc).__name__}: {exc}{detail}")[:300],)
+        # THE CONSEQUENCE BELONGS TO THE ABSENCE, NOT TO THE REASON (round 7, minor).
+        # It was attached only to his deletion, so a board where Notion REFUSED to
+        # create `Notes` reported the refusal and never that nothing would be archived,
+        # which is the half he needs.
+        cost = tuple(f"{n}: {STRUCTURAL_COST[n]}" for n in sorted(missing)
+                     if n in STRUCTURAL_COST)
+        return known, told + ((f"{type(exc).__name__}: {exc}{detail}")[:300],) + cost
     # WHAT NOTION RETURNED, not what we asked for (PR #332 reviewer, minor). Synthesising
     # `dict(known, **missing)` asserts the create took effect; if it did not, the next
     # write carries the column anyway and takes the raw 400 this whole guard exists to
@@ -760,8 +784,10 @@ def ensure_columns(known, token, db, opener=None, budget=None, record=None):
                 told + ((f"added the {', '.join(made)} "
                          + ("columns" if len(made) > 1 else "column")
                          + " to this board",) if made else ()))
+    unconfirmed = tuple(f"{n}: {STRUCTURAL_COST[n]}" for n in sorted(missing)
+                        if n in STRUCTURAL_COST)
     return known, told + ("the schema PATCH returned no properties, so the new columns "
-                          "are unconfirmed and were not written",)
+                          "are unconfirmed and were not written",) + unconfirmed
 
 
 def _refuse_without_identity(known):
