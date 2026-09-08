@@ -198,27 +198,26 @@ class TestHisPlacementSurvivesTheProducerDroppingTheRow:
         # `held`, not `kept`: a quiet source and a row he pinned whose source is
         # healthy are different facts and the morning line reports both.
         assert counts["held"] == 1 and counts["kept"] == 0, counts
-        assert counts["stamped"] == 1, counts
         assert not [s for s in sent if s[2].get("archived")], sent
 
-    def test_a_long_note_keeps_the_stamp_and_loses_free_text_instead(self, monkeypatch):
-        """Truncating the whole string dropped the stamp off the end, so the row was
-        re-PATCHed identically every morning (PR reviewer round 3, minor)."""
-        long_note = ("x" * (br.NOTE_CAP - 40)) + "\nscope=card\nbucket=This Week\npinned=1"
-        page = self._page("cb:gone", long_note)
-        sent = []
+    def test_a_held_row_is_a_term_of_the_read_back_sum(self, monkeypatch):
+        """A held row IS on the board. Leaving it out of the sum made the proof report
+        a mismatch every run once any pinned row's producer went quiet, which is the
+        false-alarm shape that trains him to ignore the word (PR reviewer round 4)."""
+        page = self._page("cb:gone", "Done signal: x\nscope=card\nbucket=This Week\npinned=1")
         monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {"cb:gone": page})
-        monkeypatch.setattr(br, "_request",
-                            lambda tok, m, path, body, op=None, bud=None: sent.append((m, path, body)))
-        br.paint({"top_of_mind": [], "this_week": [], "inbox": [],
-                  "healthy_scopes": {"card"}}, "tok", "db")
-        written = sent[0][2]["properties"]["Notes"]["rich_text"][0]["text"]["content"]
-        assert br.STALE_LINE in written, written[-120:]
-        assert len(written) <= br.NOTE_CAP, len(written)
+        monkeypatch.setattr(br, "_request", lambda *a, **k: None)
+        counts = br.paint({"top_of_mind": [], "this_week": [], "inbox": [],
+                           "healthy_scopes": {"card"}}, "tok", "db")
+        expected = (counts["wanted"] + counts["kept"] + counts["held"]
+                    - counts["deferred_new"])
+        assert expected == 1, counts
+        assert counts["held"] == 1 and counts["kept"] == 0, counts
 
-    def test_a_kept_pinned_row_is_told_its_source_went_quiet(self, monkeypatch):
-        """Keeping it silently would be sp-7720fce9 again: a row no run can clear.
-        The stamp gives him an exit he can see. (PR reviewer round 2, major.)"""
+    def test_nothing_is_written_to_a_held_row(self, monkeypatch):
+        """The first answer to 'a pinned row has no exit' wrote a stamp into its Notes,
+        and truncating the note to fit deleted `pinned=1` itself. Nothing is written
+        now; his exit is his own archive."""
         page = self._page("cb:gone", "Done signal: x\nscope=card\nbucket=This Week\npinned=1")
         sent = []
         monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {"cb:gone": page})
@@ -226,22 +225,7 @@ class TestHisPlacementSurvivesTheProducerDroppingTheRow:
                             lambda tok, m, path, body, op=None, bud=None: sent.append((m, path, body)))
         br.paint({"top_of_mind": [], "this_week": [], "inbox": [],
                   "healthy_scopes": {"card"}}, "tok", "db")
-        wrote = [s for s in sent if "Notes" in (s[2].get("properties") or {})]
-        assert len(wrote) == 1, sent
-        assert br.STALE_LINE in wrote[0][2]["properties"]["Notes"]["rich_text"][0]["text"]["content"]
-
-    def test_the_stamp_is_written_once_not_every_run(self, monkeypatch):
-        page = self._page("cb:gone",
-                          f"Done signal: x\nscope=card\nbucket=This Week\npinned=1\n{br.STALE_LINE}")
-        sent = []
-        monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {"cb:gone": page})
-        monkeypatch.setattr(br, "_request",
-                            lambda tok, m, path, body, op=None, bud=None: sent.append((m, path, body)))
-        counts = br.paint({"top_of_mind": [], "this_week": [], "inbox": [],
-                           "healthy_scopes": {"card"}}, "tok", "db")
         assert sent == [], sent
-        assert counts["archived"] == 0 and counts["held"] == 1, counts
-        assert counts["stamped"] == 0, counts
 
     def test_an_unpinned_row_the_producer_dropped_is_still_archived(self, monkeypatch):
         page = self._page("cb:gone", "Done signal: x\nscope=card\nbucket=This Week")

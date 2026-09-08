@@ -244,11 +244,6 @@ BUCKET_PREFIX = "bucket="
 #: bucket. One flag rather than an inference, because the inference is what would
 #: silently expire (see `_bucket_decision`).
 PINNED_LINE = "pinned=1"
-#: Stamped on a PINNED row once its producer stops emitting it. His placement wins, so
-#: the row is kept; without a word on it, "kept" and "still live" look identical and the
-#: board grows rows nothing can clear, which is exactly sp-7720fce9. The line is plain
-#: English because he is the one who reads it and the one who decides.
-STALE_LINE = "its source no longer reports this row; archive it when you are done"
 #: The note's machinery lines are short and fixed; the free text is capped so they
 #: always fit. Before this the whole note was truncated at the end, so a long detail
 #: could push `scope=` off and the row read back as an unknown scope: kept forever,
@@ -579,8 +574,10 @@ def paint(buckets: dict, token, db, opener=None, budget=None) -> dict:
     #: Rows HE pinned whose producer went quiet: kept because he placed them, and
     #: counted apart from `kept` (a quiet source) and `pinned` (a live row he moved),
     #: because the morning line reports all three and they are three different facts.
-    #: `stamped` is the subset that was told so this run, which is once per row ever.
-    held = stamped = 0
+    #: It is a term of the read-back sum below: a held row IS on the board, so leaving
+    #: it out made the proof report a mismatch every run after any pinned row's
+    #: producer went quiet (PR reviewer round 4, major).
+    held = 0
     deferred_new = 0
 
     def out_of_write_budget() -> bool:
@@ -648,32 +645,21 @@ def paint(buckets: dict, token, db, opener=None, budget=None) -> dict:
             # lines out of the board (DEC-34) makes that flip ordinary rather than
             # rare, which is how the reviewer found it.
             #
-            # AND IT IS STAMPED ONCE, so keeping it is not the same permanence defect
-            # in a nicer coat (PR reviewer round 2, major: "a pinned row has no exit
-            # from the board"). Keeping it silently would recreate sp-7720fce9, the
-            # thirteen rows no run could ever clear, which had to be archived by hand.
-            # The row stays because he placed it; the stamp says its source stopped
-            # reporting it, so the exit is his and he can see that he has one. Written
-            # once: the next run finds the line already there and skips the write.
-            # COUNTED AS ITS OWN THING (PR reviewer round 3, minor). Folding these
-            # into `kept` and `pinned` made the morning line say "kept (source quiet),
-            # yours (untouched)" about a row whose source was healthy and which this
-            # loop had just written. A count that describes the wrong event is worse
-            # than no count: it is read as a reassurance.
+            # HIS EXIT IS HIS OWN ARCHIVE, and that is the whole answer to "a pinned
+            # row has no exit" (PR reviewer round 2, major). The first answer was a
+            # stamp written into the row's Notes saying its source had gone quiet. It
+            # cost three findings across two rounds and the last of them was serious:
+            # the note's machinery lines (`scope=`, `bucket=`, `pinned=`) live at the
+            # END, so truncating the note to make room for the stamp deleted the pin
+            # the stamp existed to protect. The file already warns about exactly that
+            # above NOTE_CAP, and the fix walked into it anyway.
+            #
+            # A row he pinned is a row he placed. This module's contract is that the
+            # machine never moves or removes it; removing it is his, in the UI, the
+            # same exit he has for every other row he ever pinned. Counted as `held`
+            # rather than folded into `kept`, because `kept` means the SOURCE went
+            # quiet and this source answered fine.
             held += 1
-            note = _note_of(page)
-            if STALE_LINE not in note and not out_of_write_budget():
-                # THE FREE TEXT IS WHAT GETS CUT, NEVER THE STAMP (PR reviewer round 3,
-                # minor). Truncating the whole string at NOTE_CAP dropped the stamp off
-                # the end of a long note, so `STALE_LINE not in note` stayed true and
-                # the row was re-PATCHed identically every morning: a silent write loop
-                # wearing a write-once comment. Same reasoning as `_note_body`, where
-                # truncating from the end would drop `scope=` first.
-                head = note[:max(0, NOTE_CAP - len(STALE_LINE) - 1)].rstrip()
-                _request(token, "PATCH", f"/pages/{page['id']}",
-                         {"properties": {"Notes": {"rich_text": [{"text": {"content":
-                          f"{head}\n{STALE_LINE}"}}]}}}, opener, budget)
-                stamped += 1
             continue
         if out_of_write_budget():
             # An unarchived row is on the board, so it counts as kept for the read-back
@@ -685,7 +671,7 @@ def paint(buckets: dict, token, db, opener=None, budget=None) -> dict:
         archived += 1
 
     return {"created": created, "updated": updated, "archived": archived,
-            "held": held, "stamped": stamped,
+            "held": held,
             "kept": kept, "wanted": len(wanted), "moved": moved, "pinned": pinned,
             "over_cap": over_cap, "unchanged": unchanged, "deferred": deferred,
             # Rows we WANTED but never created: they are not on the board, so the
@@ -749,17 +735,19 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
     # board and deliberately not in `wanted`. Round 3 (major): comparing `seen` to
     # `wanted` alone made every quiet source report a false read-back mismatch and mark
     # the whole brief degraded, which would have trained him to ignore the word.
-    expected = counts["wanted"] + counts["kept"] - counts["deferred_new"]
+    expected = (counts["wanted"] + counts["kept"] + counts["held"]
+                - counts["deferred_new"])
     if seen != expected:
         # The write-only-integration scar: a PATCH that returns 200 is not proof the
         # board holds what we think. The read-back is the proof.
         return [], (f"read-back mismatch: expected {expected} row(s) "
                     f"({counts['wanted']} written + {counts['kept']} kept from a quiet "
-                    f"source), board shows {seen}")
+                    f"source + {counts['held']} held for you), board shows {seen}")
     line = (f"board: {counts['created']} new, {counts['updated']} refreshed, "
             f"{counts['unchanged']} unchanged, "
             f"{counts['moved']} rebucketed, {counts['archived']} cleared, "
             f"{counts['kept']} kept (source quiet), {counts['pinned']} yours (untouched), "
+            f"{counts['held']} yours (source stopped reporting it), "
             "read-back ok")
     if counts["over_cap"]:
         line += f"; {counts['over_cap']} row(s) over the {BUDGET_ROWS}-row cap, not written"
