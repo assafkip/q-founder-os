@@ -357,6 +357,19 @@ class TestTheBriefReadsTheCardBeforeTheCardIsWritten:
         assert err is None, err
         assert any("yesterday's card" in r for r in rows), rows
 
+    def test_a_heartbeat_cannot_declare_itself_yesterdays(self, tmp_path):
+        """PR #335 reviewer round 3, nit. The flag this function SETS was also readable
+        from the file it judges, so a heartbeat carrying the key would have labelled a
+        fresh card as yesterday's on every client row."""
+        paths = _tree(tmp_path)
+        beat = json.loads(paths["heartbeat"].read_text())
+        beat["card_is_yesterdays"] = True
+        paths["heartbeat"].write_text(json.dumps(beat))
+        b = cb.buckets(self.EARLY, {}, paths)
+        card_rows = [r for r in b["top_of_mind"] if r["scope"] == "card"]
+        assert card_rows
+        assert not any("yesterday's card" in r["detail"] for r in card_rows), card_rows
+
     def test_a_fresh_card_is_labelled_with_nothing(self, tmp_path):
         """The marker is not decoration. On a normal day it must be absent, or it stops
         carrying information."""

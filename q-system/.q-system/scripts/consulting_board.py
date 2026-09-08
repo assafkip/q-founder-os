@@ -80,10 +80,18 @@ MAX_CLIENT_ROWS = 6
 #: ~/Library/LaunchAgents said 07:00, forty minutes early, and never picked up the
 #: committed 07:40. Measured in ~/.config/kipi/logs/morning-brief.out.log: the refusal
 #: fired on the 09-05 and 09-07 runs, and today-card.md was last written 09-07 07:30.
-#: The cost was a P0 "Your book: COULD NOT READ" row painted on his board every morning
-#: and cleared by nothing, because the hourly repaint has no scheduler. The drift is
-#: fixed by reinstalling the template; nothing detects the NEXT one, which is
-#: sp-de7afcff.
+#: The cost was a P0 "Your book: COULD NOT READ" row painted on his board every morning.
+#:
+#: I SAID IT WAS "CLEARED BY NOTHING" AND THAT WAS WRONG (PR #335 reviewer round 3,
+#: minor). `com.kipi.morning-inbox` commits twelve repaints a day, 08:05 to 19:05, and
+#: the 08:05 one archives that row. What was true is narrower and worse: that job was
+#: not installed on his machine AT ALL, no plist in ~/Library/LaunchAgents and no
+#: launchctl entry, so on his machine nothing repainted and the row stood all day. I
+#: read the machine, the reviewer read the repo, and the gap between them is the
+#: defect twice over. Both are installed now.
+#:
+#: TWO JOBS, ONE FAILURE MODE: the brief drifted to a stale schedule and the repaint was
+#: missing outright. Nothing detects either, which is sp-de7afcff.
 #:
 #: THIS WINDOW IS NOT THAT FIX and does not pretend to be. It is what an early run
 #: should DO: use the newest card there is and label it, rather than paint a P0 he
@@ -342,6 +350,15 @@ def read_heartbeat(now: dt.datetime, paths=None) -> tuple[dict, str | None]:
         beat = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         return {}, f"could not read {path.name}: {exc}"
+    if not isinstance(beat, dict):
+        return {}, f"{path.name} is not an object"
+    # A CONTROL FLAG MUST NOT BE READABLE FROM THE THING IT JUDGES (PR #335 reviewer
+    # round 3, nit). This function SETS `card_is_yesterdays` below and callers trust it
+    # to label the board. It is also a key in a file this function parses, so a
+    # heartbeat carrying it would have labelled a perfectly fresh card as yesterday's,
+    # on the Slack line and on every client row. Stripped on the way in, so the only
+    # writer is the verdict twenty lines down.
+    beat.pop("card_is_yesterdays", None)
 
     if beat.get("crash"):
         return beat, f"the 07:30 state card crashed: {beat['crash']}"
