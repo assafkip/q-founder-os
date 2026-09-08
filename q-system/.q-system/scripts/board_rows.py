@@ -596,6 +596,39 @@ def _only_known(props: dict, known):
     return keep, tuple(sorted(dropped))
 
 
+#: Columns this module writes that it will CREATE on a board that lacks them. The
+#: identity columns are NOT here on purpose: a board with no `Item id` is not a board
+#: this module should quietly reshape, it is a board someone should look at.
+CREATABLE = ("Link", "Next")
+
+
+def ensure_columns(known, token, db, opener=None, budget=None):
+    """Add the optional columns this board is missing. Returns the schema to use.
+
+    THE FEATURE WAS DEAD ON EVERY BOARD BUT ONE (PR reviewer round 12, major). Nothing
+    created `Link`, so `_only_known` dropped it on every run and the morning line said
+    the board could not take it and named no way to change that. The column had been
+    added by hand, once, on the founder's own board; a fresh instance would have
+    reported the same sentence every morning forever. Silent degradation with a
+    permanent explanation is not a fix.
+
+    Failure is not fatal: on a refusal the schema is returned unchanged and the drop
+    path reports it, which is exactly the behaviour before this existed.
+    """
+    if known is None:
+        return None
+    missing = {name: WRITES_TYPE[name] for name in CREATABLE if name not in known}
+    if not missing:
+        return known
+    try:
+        _request(token, "PATCH", f"/databases/{db}",
+                 {"properties": {n: {t: {}} for n, t in missing.items()}},
+                 opener, budget)
+    except Exception:
+        return known           # reported as dropped, same as before
+    return dict(known, **missing)
+
+
 def _refuse_without_identity(known):
     """Raise when the board cannot take a column the painter works by. `known` None
     (schema unreadable) is not a verdict about the columns, so it passes."""
@@ -823,6 +856,9 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
             # and `Next` would otherwise take a 400 on the first row and lose the
             # whole morning's paint to a column nobody noticed was missing.
             known = _schema_properties(token, db, opener, budget)
+            # Create what is missing BEFORE the identity check, so a board that only
+            # lacks the optional columns heals instead of reporting them every day.
+            known = ensure_columns(known, token, db, opener, budget)
             # BEFORE THE FIRST QUERY, not inside the write loop. `existing_rows`
             # filters on `Item id`, so a board without that column takes a raw 400
             # from Notion before `_only_known` is ever reached and the remediation

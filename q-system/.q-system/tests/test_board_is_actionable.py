@@ -481,7 +481,10 @@ class TestADeadLinkIsWorseThanNoLink:
         assert cb.gmail_link("mail:1a06eb5b0b03759f") == (
             "https://mail.google.com/mail/u/0/#all/1a06eb5b0b03759f")
 
-    def test_the_fallback_key_shape_gets_no_link(self):
+    def test_a_key_that_is_not_a_thread_id_gets_no_link(self):
+        """A CONSTRUCTED shape, deliberately: no producer emits one today (the model-era
+        collector that could was removed by ASK-1323). The guard is here so a future
+        producer meets it instead of shipping dead links first."""
         assert cb.gmail_link("mail:someone@example.test|Re: a subject") is None
 
     def test_an_empty_or_odd_id_gets_no_link(self):
@@ -530,3 +533,110 @@ class TestTheIdentityRefusalFiresBeforeTheFirstQuery:
         rows, err = br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
         assert calls == [], "it queried the board before refusing"
         assert rows == [] and "identifies rows by" in err, err
+
+
+class TestTheMorningLineSaysWhatHappened:
+    """The dropped-columns sentence and the held count are what the founder actually
+    reads. Neither was asserted anywhere, so deleting either left the suite green
+    (PR reviewer round 11, minor)."""
+
+    COUNTS = {"created": 1, "updated": 0, "archived": 0, "kept": 0, "held": 2,
+              "wanted": 1, "moved": 0, "pinned": 0, "over_cap": 0, "unchanged": 0,
+              "deferred": 0, "deferred_new": 0, "dropped_columns": ("Link", "Next")}
+
+    def _line(self, monkeypatch, tmp_path, counts):
+        monkeypatch.setattr(br, "_schema_properties",
+                            lambda *a, **k: {"Task": "title", "Item id": "rich_text"})
+        monkeypatch.setattr(br, "paint", lambda *a, **k: counts)
+        seen = counts["wanted"] + counts["kept"] + counts["held"] - counts["deferred_new"]
+        monkeypatch.setattr(br, "existing_rows",
+                            lambda *a, **k: {f"cb:{i}": {} for i in range(seen)})
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.delenv("KIPI_BRIEF_DRY_RUN", raising=False)
+        tf = tmp_path / "notion-token"; tf.write_text("t", encoding="utf-8")
+        dbf = tmp_path / "notion-board-db"; dbf.write_text("d", encoding="utf-8")
+        rows, err = br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
+        assert err is None, err
+        return rows[0]
+
+    def test_the_columns_it_could_not_write_are_named(self, monkeypatch, tmp_path):
+        line = self._line(monkeypatch, tmp_path, dict(self.COUNTS))
+        assert "cannot take" in line and "Link" in line and "Next" in line, line
+        assert "columns" in line, line
+
+    def test_one_dropped_column_is_singular(self, monkeypatch, tmp_path):
+        line = self._line(monkeypatch, tmp_path,
+                          dict(self.COUNTS, dropped_columns=("Link",)))
+        assert "Link column" in line, line
+
+    def test_a_complete_board_says_nothing_about_columns(self, monkeypatch, tmp_path):
+        line = self._line(monkeypatch, tmp_path,
+                          dict(self.COUNTS, dropped_columns=()))
+        assert "cannot take" not in line, line
+
+    def test_held_rows_are_reported_on_the_line(self, monkeypatch, tmp_path):
+        line = self._line(monkeypatch, tmp_path, dict(self.COUNTS))
+        assert "2 yours (source stopped reporting it)" in line, line
+
+
+class TestTheBoardHealsItsOwnOptionalColumns:
+    """Nothing created `Link`, so on every board but the one patched by hand it was
+    dropped on each run and the line said the board could not take it, forever, with
+    no way given to change that (PR reviewer round 12, major)."""
+
+    OLD = {"Task": "title", "Item id": "rich_text", "Notes": "rich_text",
+           "Domain": "multi_select", "Priority": "select", "Source": "select"}
+
+    def test_a_missing_column_is_created_and_then_usable(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr(br, "_request",
+                            lambda tok, m, path, body, op=None, bud=None: sent.append((m, path, body)))
+        out = br.ensure_columns(dict(self.OLD), "tok", "db")
+        assert sent and sent[0][0] == "PATCH" and "/databases/db" in sent[0][1], sent
+        assert set(sent[0][2]["properties"]) == {"Link", "Next"}, sent[0][2]
+        assert sent[0][2]["properties"]["Link"] == {"url": {}}, sent[0][2]
+        assert out["Link"] == "url" and out["Next"] == "rich_text", out
+
+    def test_a_complete_board_is_not_touched(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr(br, "_request",
+                            lambda *a, **k: sent.append(a))
+        board = dict(self.OLD, Link="url", Next="rich_text")
+        assert br.ensure_columns(dict(board), "tok", "db") == board
+        assert sent == [], sent
+
+    def test_a_refused_creation_degrades_exactly_as_before(self, monkeypatch):
+        def boom(*a, **k):
+            raise RuntimeError("notion said no")
+        monkeypatch.setattr(br, "_request", boom)
+        assert br.ensure_columns(dict(self.OLD), "tok", "db") == self.OLD
+
+    def test_an_unreadable_schema_creates_nothing(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr(br, "_request", lambda *a, **k: sent.append(a))
+        assert br.ensure_columns(None, "tok", "db") is None
+        assert sent == [], sent
+
+    def test_the_identity_columns_are_never_created(self):
+        """A board with no `Item id` is not one this module should quietly reshape."""
+        assert "Item id" not in br.CREATABLE and "Task" not in br.CREATABLE
+
+    def test_the_runner_heals_before_it_checks_identity(self, monkeypatch, tmp_path):
+        order = []
+        monkeypatch.setattr(br, "_schema_properties", lambda *a, **k: dict(self.OLD))
+        monkeypatch.setattr(br, "ensure_columns",
+                            lambda known, *a, **k: order.append("heal") or dict(
+                                known, Link="url", Next="rich_text"))
+        monkeypatch.setattr(br, "_refuse_without_identity",
+                            lambda known: order.append("identity"))
+        monkeypatch.setattr(br, "paint", lambda *a, **k: {
+            "created": 0, "updated": 0, "archived": 0, "kept": 0, "held": 0,
+            "wanted": 0, "moved": 0, "pinned": 0, "over_cap": 0, "unchanged": 0,
+            "deferred": 0, "deferred_new": 0, "dropped_columns": ()})
+        monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {})
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.delenv("KIPI_BRIEF_DRY_RUN", raising=False)
+        tf = tmp_path / "notion-token"; tf.write_text("t", encoding="utf-8")
+        dbf = tmp_path / "notion-board-db"; dbf.write_text("d", encoding="utf-8")
+        br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
+        assert order == ["heal", "identity"], order
