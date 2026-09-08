@@ -578,13 +578,26 @@ PRIORITY_BY_HEALTH = {
 #: AUDHD rule A2 (next physical action) is the same requirement from the other side.
 DONE_DEFAULT = "you have acted on it"
 DONE_BY_KIND = {
-    "client": "you sent the thing you promised",
+    # NOT "you sent the thing you promised". DEC-30, founder-directed 2026-09-06
+    # ("nothing should be mine - Sana is the human"): the promises behind a client
+    # line are Sana's build queue, and a done signal addressed to him made them read
+    # as his to send. What is left for him on a client row is the act no agent can
+    # perform, or the ball moving to their side.
+    "client": "you did the act only you can do, or it moved to their side",
     "reach": "you sent the message",
 }
 #: A GTM step whose plan text carries no "done looks like". Deliberately vague,
 #: because inventing a specific completion test for a step nobody wrote one for would
 #: be this module making up the plan.
 DONE_GTM_FALLBACK = "the step is done or you wrote down why it did not happen"
+#: A row he cannot start from is not a task. The mail producer's key IS the Gmail
+#: thread id (`morning-brief.collect_mail` emits `mail:<thread id>`), so the link needs
+#: no new plumbing and no second source of truth: it is derived from the id the row
+#: already carries. Founder's standing rule: if he cannot copy-paste it, click it or
+#: check it off, it does not belong. Measured 2026-09-07: not one row on the board
+#: carried a URL, including the P0 intro he had to go find in Gmail by hand.
+GMAIL_THREAD = "https://mail.google.com/mail/u/0/#all/"
+
 DONE_BY_SOURCE = {
     "Gmail": "you replied in the thread",
     "GroupMe": "you answered in the chat",
@@ -685,7 +698,20 @@ def buckets(now: dt.datetime, sources: dict, paths=None) -> dict:
         # not emitted by `state_card.py`, the only producer this reads -- `board_sync`
         # uses it on the Clients board -- so this makes two tables in this file agree
         # rather than changing a live path. `_CLIENT_LINE` has always parsed it.
-        (top if row["health"] in ("🔴", "🟠", "📞") else week).append(item)
+        # ⚪ AND 🟢 NEVER REACH THE BOARD. Founder-directed 2026-09-07, verbatim:
+        # *"remove sana stuff from the board"*. ⚪ is "their move" or "Sana owes n" and
+        # 🟢 is "nothing to do"; neither is an act he can perform, so a row for one is
+        # a to-do he cannot start. He still sees them on the Slack card, which is
+        # DEC-30's design and does not change. Measured that evening: five ⚪ rows sat
+        # in This Week carrying his done signal over Sana's build work. DEC-34.
+        if row["health"] in ("⚪", "🟢"):
+            continue
+        # EVERYTHING THE CARD SURFACES IS TOP OF MIND, and This Week is no longer
+        # written from the card. The section's own text says it is his and that
+        # nothing fills it automatically; eleven machine rows were in it on
+        # 2026-09-07. A board where every section is machine-written has no place
+        # that represents a decision he made, and the drag is the point.
+        top.append(item)
 
     # The dates failing is reported ONCE, as its own row, never as a line stapled to
     # every client. A test proves this module still delivers with no registry in the
@@ -789,6 +815,11 @@ def buckets(now: dt.datetime, sources: dict, paths=None) -> dict:
                     "Every inbox producer must emit morning-brief.Row(line, key); "
                     "keying on the rendered line is the PR #296 rounds 1-4 defect.")
             inbox.append({"title": text, "key": key, "detail": "",
+                          "link": (GMAIL_THREAD + key.split(":", 1)[1]
+                                   if label == "Gmail" and key.startswith("mail:")
+                                   else None),
+                          "next": ("Open the thread and reply."
+                                   if label == "Gmail" else "Answer in the chat."),
                           "source": label, "scope": f"inbox:{label}",
                           # Inbox rows are things a person is waiting on. P2: below a
                           # client he owes something to and below a broken source, above

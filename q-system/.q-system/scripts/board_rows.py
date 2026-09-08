@@ -381,10 +381,17 @@ def _properties(item, bucket, iid, include_bucket: bool, *, status=None,
     # actionable; `scope=` and `bucket=` are machinery the painter reads back and
     # belong last.
     done = (item.get("done") or "").strip()
+    detail = (item.get("detail") or "").strip()
     note = ""
     if done:
         note += f"Done signal: {done}\n"
-    note += (item.get("detail") or "")[:1500]
+    # THE DETAIL IS NOT THE DONE SIGNAL REPEATED. Measured on the live board
+    # 2026-09-07: 6 of 12 rows carried "Done signal: X" followed by X character for
+    # character, because the GTM producer passes `done_looks_like` as both. The column
+    # truncates in his table view, so what he read was the opening fragment of a
+    # sentence he was about to read again.
+    if detail and detail != done:
+        note += detail[:1500]
     tail = f"{SCOPE_PREFIX}{item.get('scope') or 'card'}"
     tail += f"\n{BUCKET_PREFIX}{record_bucket if record_bucket is not None else bucket}"
     if pinned:
@@ -403,6 +410,17 @@ def _properties(item, bucket, iid, include_bucket: bool, *, status=None,
         # filtered on -- which is the only thing a domain column is for.
         "Domain": {"multi_select": [{"name": item.get("domain") or "Consulting"}]},
     }
+    # LINK AND NEXT ARE WRITTEN ONLY WHEN THE PRODUCER SUPPLIES THEM, never blanked.
+    # A row whose producer knows neither keeps whatever a human put there; clearing it
+    # every morning would make the two columns useless on exactly the rows that needed
+    # a person to fill them. Same posture as Size, which this module deliberately does
+    # not write (see the note above `buckets`).
+    link = item.get("link")
+    if link:
+        props["Link"] = {"url": str(link)[:2000]}
+    nxt = item.get("next")
+    if nxt:
+        props["Next"] = {"rich_text": [{"text": {"content": str(nxt)[:1900]}}]}
     priority = item.get("priority")
     if priority:
         props["Priority"] = {"select": {"name": priority}}
