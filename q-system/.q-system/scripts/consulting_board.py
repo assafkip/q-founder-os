@@ -695,15 +695,22 @@ def buckets(now: dt.datetime, sources: dict, paths=None) -> dict:
         phrase = my_side_phrase(rec, now) if rec else ""
         if phrase:
             item["detail"] = f"{item['detail']}\n{phrase}" if item["detail"] else phrase
-        # 🔴, 🟠 and 📞 are today. Everything else is this week. The split is the card's
-        # own health verdict, not a rule invented here.
+        # THERE IS NO LONGER A TODAY / THIS-WEEK SPLIT HERE, and the comment that
+        # described one is gone with it (PR reviewer round 3, minor). Every dot the
+        # card surfaces to this board is Top of Mind; the two that are not acts he can
+        # perform do not reach the board at all. What the dot still decides is
+        # PRIORITY_BY_HEALTH, which is the card's own verdict translated, never a
+        # second judgement made here.
         #
-        # 🟠 joined the today group in round 7 (minor): PRIORITY_BY_HEALTH calls it P0
-        # "answer them: a person is waiting on a reply" while this line sent it to This
-        # Week, so one module said today and not-today about the same row. The dot is
-        # not emitted by `state_card.py`, the only producer this reads -- `board_sync`
-        # uses it on the Clients board -- so this makes two tables in this file agree
-        # rather than changing a live path. `_CLIENT_LINE` has always parsed it.
+        # THE KNOWN COST, taken deliberately (PR reviewer round 3, major). A client
+        # going ⚪ drops its row from `wanted`, so an UNPINNED one is archived, and the
+        # flip back creates a fresh page at Status "Not started", losing a status he
+        # had set. Kept anyway: he asked for these rows gone in as many words, Status
+        # was measured unused on 2026-09-07 (12 of 12 rows read "Not started", the
+        # painter writes it create-only and nothing else moves it), and the only fix
+        # that preserves it is restoring the archived page instead of creating a new
+        # one, which needs the archived id kept somewhere because Notion's query
+        # returns no archived rows. That is real and is captured, not forgotten.
         # ⚪ AND 🟢 NEVER REACH THE BOARD. Founder-directed 2026-09-07, verbatim:
         # *"remove sana stuff from the board"*. ⚪ is "their move" or "Sana owes n" and
         # 🟢 is "nothing to do"; neither is an act he can perform, so a row for one is

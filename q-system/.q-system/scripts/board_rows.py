@@ -421,6 +421,13 @@ def _properties(item, bucket, iid, include_bucket: bool, *, status=None,
         # filtered on -- which is the only thing a domain column is for.
         "Domain": {"multi_select": [{"name": item.get("domain") or "Consulting"}]},
     }
+    # NO PRODUCER EMITS `next` TODAY and that is the point (PR reviewer round 3, nit).
+    # The constant one the inbox lane briefly had restated DONE_BY_SOURCE and was cut in
+    # round 1. The column is filled BY HAND, per row, in his own words -- which is the
+    # half of an actionable row nothing here can know -- and this writer's whole job for
+    # it is to refuse to blank what he wrote. A producer that learns a real next step
+    # later needs no change here.
+    #
     # LINK AND NEXT ARE WRITTEN ONLY WHEN THE PRODUCER SUPPLIES THEM, never blanked.
     # A row whose producer knows neither keeps whatever a human put there; clearing it
     # every morning would make the two columns useless on exactly the rows that needed
@@ -569,6 +576,11 @@ def paint(buckets: dict, token, db, opener=None, budget=None) -> dict:
 
     have = existing_rows(token, db, opener, budget=budget)
     created = updated = archived = moved = pinned = unchanged = deferred = 0
+    #: Rows HE pinned whose producer went quiet: kept because he placed them, and
+    #: counted apart from `kept` (a quiet source) and `pinned` (a live row he moved),
+    #: because the morning line reports all three and they are three different facts.
+    #: `stamped` is the subset that was told so this run, which is once per row ever.
+    held = stamped = 0
     deferred_new = 0
 
     def out_of_write_budget() -> bool:
@@ -643,14 +655,25 @@ def paint(buckets: dict, token, db, opener=None, budget=None) -> dict:
             # The row stays because he placed it; the stamp says its source stopped
             # reporting it, so the exit is his and he can see that he has one. Written
             # once: the next run finds the line already there and skips the write.
-            kept += 1
-            pinned += 1
+            # COUNTED AS ITS OWN THING (PR reviewer round 3, minor). Folding these
+            # into `kept` and `pinned` made the morning line say "kept (source quiet),
+            # yours (untouched)" about a row whose source was healthy and which this
+            # loop had just written. A count that describes the wrong event is worse
+            # than no count: it is read as a reassurance.
+            held += 1
             note = _note_of(page)
             if STALE_LINE not in note and not out_of_write_budget():
+                # THE FREE TEXT IS WHAT GETS CUT, NEVER THE STAMP (PR reviewer round 3,
+                # minor). Truncating the whole string at NOTE_CAP dropped the stamp off
+                # the end of a long note, so `STALE_LINE not in note` stayed true and
+                # the row was re-PATCHed identically every morning: a silent write loop
+                # wearing a write-once comment. Same reasoning as `_note_body`, where
+                # truncating from the end would drop `scope=` first.
+                head = note[:max(0, NOTE_CAP - len(STALE_LINE) - 1)].rstrip()
                 _request(token, "PATCH", f"/pages/{page['id']}",
                          {"properties": {"Notes": {"rich_text": [{"text": {"content":
-                          f"{note}\n{STALE_LINE}"[:NOTE_CAP]}}]}}}, opener, budget)
-                updated += 1
+                          f"{head}\n{STALE_LINE}"}}]}}}, opener, budget)
+                stamped += 1
             continue
         if out_of_write_budget():
             # An unarchived row is on the board, so it counts as kept for the read-back
@@ -662,6 +685,7 @@ def paint(buckets: dict, token, db, opener=None, budget=None) -> dict:
         archived += 1
 
     return {"created": created, "updated": updated, "archived": archived,
+            "held": held, "stamped": stamped,
             "kept": kept, "wanted": len(wanted), "moved": moved, "pinned": pinned,
             "over_cap": over_cap, "unchanged": unchanged, "deferred": deferred,
             # Rows we WANTED but never created: they are not on the board, so the
