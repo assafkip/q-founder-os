@@ -244,6 +244,11 @@ BUCKET_PREFIX = "bucket="
 #: bucket. One flag rather than an inference, because the inference is what would
 #: silently expire (see `_bucket_decision`).
 PINNED_LINE = "pinned=1"
+#: Stamped on a PINNED row once its producer stops emitting it. His placement wins, so
+#: the row is kept; without a word on it, "kept" and "still live" look identical and the
+#: board grows rows nothing can clear, which is exactly sp-7720fce9. The line is plain
+#: English because he is the one who reads it and the one who decides.
+STALE_LINE = "its source no longer reports this row; archive it when you are done"
 #: The note's machinery lines are short and fixed; the free text is capped so they
 #: always fit. Before this the whole note was truncated at the end, so a long detail
 #: could push `scope=` off and the row read back as an unknown scope: kept forever,
@@ -630,8 +635,22 @@ def paint(buckets: dict, token, db, opener=None, budget=None) -> dict:
             # at "Not started" when the producer came back. Filtering white client
             # lines out of the board (DEC-34) makes that flip ordinary rather than
             # rare, which is how the reviewer found it.
+            #
+            # AND IT IS STAMPED ONCE, so keeping it is not the same permanence defect
+            # in a nicer coat (PR reviewer round 2, major: "a pinned row has no exit
+            # from the board"). Keeping it silently would recreate sp-7720fce9, the
+            # thirteen rows no run could ever clear, which had to be archived by hand.
+            # The row stays because he placed it; the stamp says its source stopped
+            # reporting it, so the exit is his and he can see that he has one. Written
+            # once: the next run finds the line already there and skips the write.
             kept += 1
             pinned += 1
+            note = _note_of(page)
+            if STALE_LINE not in note and not out_of_write_budget():
+                _request(token, "PATCH", f"/pages/{page['id']}",
+                         {"properties": {"Notes": {"rich_text": [{"text": {"content":
+                          f"{note}\n{STALE_LINE}"[:NOTE_CAP]}}]}}}, opener, budget)
+                updated += 1
             continue
         if out_of_write_budget():
             # An unarchived row is on the board, so it counts as kept for the read-back

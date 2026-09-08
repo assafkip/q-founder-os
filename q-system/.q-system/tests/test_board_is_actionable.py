@@ -198,6 +198,32 @@ class TestHisPlacementSurvivesTheProducerDroppingTheRow:
         assert counts["kept"] == 1, counts
         assert not [s for s in sent if s[2].get("archived")], sent
 
+    def test_a_kept_pinned_row_is_told_its_source_went_quiet(self, monkeypatch):
+        """Keeping it silently would be sp-7720fce9 again: a row no run can clear.
+        The stamp gives him an exit he can see. (PR reviewer round 2, major.)"""
+        page = self._page("cb:gone", "Done signal: x\nscope=card\nbucket=This Week\npinned=1")
+        sent = []
+        monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {"cb:gone": page})
+        monkeypatch.setattr(br, "_request",
+                            lambda tok, m, path, body, op=None, bud=None: sent.append((m, path, body)))
+        br.paint({"top_of_mind": [], "this_week": [], "inbox": [],
+                  "healthy_scopes": {"card"}}, "tok", "db")
+        wrote = [s for s in sent if "Notes" in (s[2].get("properties") or {})]
+        assert len(wrote) == 1, sent
+        assert br.STALE_LINE in wrote[0][2]["properties"]["Notes"]["rich_text"][0]["text"]["content"]
+
+    def test_the_stamp_is_written_once_not_every_run(self, monkeypatch):
+        page = self._page("cb:gone",
+                          f"Done signal: x\nscope=card\nbucket=This Week\npinned=1\n{br.STALE_LINE}")
+        sent = []
+        monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {"cb:gone": page})
+        monkeypatch.setattr(br, "_request",
+                            lambda tok, m, path, body, op=None, bud=None: sent.append((m, path, body)))
+        counts = br.paint({"top_of_mind": [], "this_week": [], "inbox": [],
+                           "healthy_scopes": {"card"}}, "tok", "db")
+        assert sent == [], sent
+        assert counts["archived"] == 0 and counts["kept"] == 1, counts
+
     def test_an_unpinned_row_the_producer_dropped_is_still_archived(self, monkeypatch):
         page = self._page("cb:gone", "Done signal: x\nscope=card\nbucket=This Week")
         sent = []
