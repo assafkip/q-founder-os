@@ -918,7 +918,12 @@ class TestNoTestCanWriteTheLiveColumnRecord:
         monkeypatch.setattr(br, "_schema_properties",
                             lambda *a, **k: {"Task": "title", "Item id": "rich_text"})
 
-        def spy(known, token, db, opener=None, budget=None, record=None):
+        # KEYWORD-ONLY, exactly as `ensure_columns` declares it (round 4, minor). The
+        # loose version accepted a positional `record`, so a `collect` that passed it
+        # positionally kept this test green while the real function raised TypeError,
+        # which no `collect` arm catches: the board section would die at 07:40 with a
+        # bare type name. A spy looser than its subject cannot see a regression.
+        def spy(known, token, db, opener=None, budget=None, *, record):
             seen["record"] = record
             return known, ()
 
@@ -939,19 +944,57 @@ class TestNoTestCanWriteTheLiveColumnRecord:
         br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
         assert seen.get("record") == br.COLUMNS_MADE, seen
 
-    def test_the_live_path_is_refused_even_when_collect_names_it(self, monkeypatch):
+    def test_the_live_path_is_refused_when_a_caller_names_it(self, monkeypatch, tmp_path):
         """THE REGRESSION THIS GUARD EXISTS FOR. Requiring an explicit `record=` closed
         the direct callers and opened the one that mattered: `collect` names
         COLUMNS_MADE itself, so any test reaching `collect` sailed through a check the
         previous commit would have failed (round 3, major). The signal is `sys.modules`,
         because every collect-level test here deletes PYTEST_CURRENT_TEST to get past
-        the board's own chokepoint."""
+        the board's own chokepoint.
+
+        _LIVE_RECORD IS REDIRECTED HERE, and that is the whole point (round 4, minor).
+        The first version handed the founder's real file to the subject and trusted the
+        subject to refuse it, so a regressed guard did not fail this test, it wrote his
+        config and then reported a missing exception. The reviewer reproduced exactly
+        that. A test whose failure mode is the incident it guards is the shape this PR
+        argues against. The guard is pure path equality, so pointing both ends at tmp
+        exercises identical logic and a regression writes tmp instead of home."""
+        monkeypatch.setattr(br, "_LIVE_RECORD", tmp_path / "live.json")
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
         with pytest.raises(AssertionError) as e:
             br._remember_columns("db", ["Link"], br._LIVE_RECORD)
         assert "live column record" in str(e.value)
         with pytest.raises(AssertionError):
             br._columns_made("db", br._LIVE_RECORD)
+        assert not (tmp_path / "live.json").exists(), "the refusal still wrote the file"
+
+    def test_the_guard_fires_through_collect_itself(self, monkeypatch, tmp_path):
+        """The axis the name promised and the body never drove (round 4, nit). The test
+        above calls the two leaf functions directly; nothing exercised the guard through
+        `collect`, which is the caller the round-3 major was about.
+
+        On his machine COLUMNS_MADE and _LIVE_RECORD are the same path. Pointing both at
+        one tmp file reproduces that identity without going near his config, so `collect`
+        names the live record exactly the way production does and the guard fires from
+        inside `ensure_columns`, at its `_columns_made` read."""
+        live = tmp_path / "made.json"
+        monkeypatch.setattr(br, "_LIVE_RECORD", live)
+        monkeypatch.setattr(br, "COLUMNS_MADE", live)
+        monkeypatch.setattr(br, "_schema_properties",
+                            lambda *a, **k: {"Task": "title", "Item id": "rich_text"})
+        monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {})
+        def no_network(*a, **k):
+            raise AssertionError("a test tried to reach Notion")
+        monkeypatch.setattr(br, "_request", no_network)
+        monkeypatch.setattr(br, "LOCK_FILE", tmp_path / "board-rows.lock")
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.delenv("KIPI_BRIEF_DRY_RUN", raising=False)
+        tf = tmp_path / "notion-token"; tf.write_text("t", encoding="utf-8")
+        dbf = tmp_path / "notion-board-db"; dbf.write_text("d", encoding="utf-8")
+        with pytest.raises(AssertionError) as e:
+            br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
+        assert "live column record" in str(e.value)
+        assert not live.exists(), "collect reached the live record and wrote it"
 
     def test_redirecting_columns_made_is_how_a_test_opts_in(self, monkeypatch, tmp_path):
         """The escape hatch is the same one LOCK_FILE already uses, so the habit is
