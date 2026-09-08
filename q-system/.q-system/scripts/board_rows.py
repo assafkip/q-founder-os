@@ -71,6 +71,7 @@ import fcntl
 import hashlib
 import json
 import os
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -638,7 +639,48 @@ CREATABLE = tuple(n for n in WRITES_TYPE if n not in UNDROPPABLE)
 
 #: Columns this module has created before, per board. A column in here that is now
 #: ABSENT was deleted by a person, and this module does not put it back.
-COLUMNS_MADE = STATE_DIR / "board-columns-created.json"
+#: ONE literal, because the guard below is path equality against it (PR #334 reviewer
+#: round 5, minor). Written twice, renaming the file moved COLUMNS_MADE and left
+#: _LIVE_RECORD pointing at a name nothing uses. The guard would then match nothing,
+#: refuse nothing, and all 85 board tests would stay green while the protection was
+#: gone. A duplicated literal is a silent off switch.
+_RECORD_NAME = "board-columns-created.json"
+COLUMNS_MADE = STATE_DIR / _RECORD_NAME
+
+#: THE REAL LOCATION, frozen. Production reads `COLUMNS_MADE`, which a test may redirect
+#: to tmp to opt in; this one is the fixed answer to "am I about to touch the founder's
+#: live file". Two tests DO monkeypatch it, and that is the sanctioned way to exercise
+#: the guard without handing it his real path (round 5, minor: the comment here used to
+#: claim nothing redirected it, which those same two tests contradicted).
+_LIVE_RECORD = STATE_DIR / _RECORD_NAME
+
+
+def _refuse_live_record_under_test(path):
+    """Refuse the founder's real record file while a test is running.
+
+    THE GUARD HAS TO SURVIVE `collect` NAMING THE PATH (PR #334 reviewer round 3,
+    major). Requiring an explicit `record=` closed the direct callers and opened the
+    one that mattered: `collect` names COLUMNS_MADE itself, so any test reaching
+    `collect` sailed through a check the previous commit would have failed. My fix made
+    the exact incident case worse while the commit message said it was closed.
+
+    And it cannot key on PYTEST_CURRENT_TEST, because every collect-level test in this
+    suite deletes that variable to get past the board's own chokepoint. `sys.modules`
+    is the honest signal: pytest is imported for the whole run and no test removes it.
+    A test that wants this path redirects `COLUMNS_MADE`, which is what the others
+    already do for `LOCK_FILE`.
+    """
+    if "pytest" not in sys.modules:
+        return
+    try:
+        same = Path(path).resolve() == _LIVE_RECORD.resolve()
+    except OSError:
+        same = str(path) == str(_LIVE_RECORD)
+    if same:
+        raise AssertionError(
+            f"a test reached the live column record at {_LIVE_RECORD}. Redirect it "
+            "with monkeypatch.setattr(board_rows, 'COLUMNS_MADE', tmp_path / ...), "
+            "the way LOCK_FILE is redirected.")
 
 
 
@@ -652,8 +694,17 @@ def _columns_made(db, path=None):
     is the safe answer: the worst it costs is offering a column he removed once more,
     and that is said on the line.
     """
+    # NO AMBIENT DEFAULT ON THE READ EITHER (PR #334 reviewer, minor). The write lost
+    # its default and the comment said there was none left; the read still had one, so
+    # a caller that omitted `record=` quietly consulted the live file while the module
+    # claimed that could not happen. Half a chokepoint described as a whole one.
+    if path is None:
+        raise AssertionError(
+            "no record path given. Production passes record=COLUMNS_MADE explicitly; "
+            "a test passes its own tmp path. There is no default.")
+    _refuse_live_record_under_test(path)
     try:
-        data = json.loads(Path(path or COLUMNS_MADE).read_text("utf-8"))
+        data = json.loads(Path(path).read_text("utf-8"))
     except (OSError, ValueError):
         return set()
     if not isinstance(data, dict):
@@ -663,9 +714,18 @@ def _columns_made(db, path=None):
 
 
 def _remember_columns(db, names, path=None):
-    """Append to the record. A failure here is not fatal: the worst case is offering to
-    create a column he removed a second time, which is the behaviour before the record
-    existed, and it is still said out loud on the line.
+    """Append to the record.
+
+    A WRITE failure is not fatal: an OSError is swallowed and the worst case is
+    offering to create a column he removed a second time, which is the behaviour
+    before the record existed, and it is still said out loud on the line.
+
+    A MISSING PATH is a different thing and is fatal on purpose (PR #334 reviewer,
+    minor: the old docstring said "a failure here is not fatal" flatly, while the
+    AssertionError below escapes every except arm in `collect` and takes the whole
+    board section with it). That is the intent. A caller that forgot `record=` is a
+    programming error, it only reaches this line in a test, and a loud failure in the
+    suite is exactly what stops it reaching his machine.
 
     THE LIVE RECORD IS NEVER WRITTEN BY A TEST, and that is a chokepoint rather than a
     rule someone remembers (PR #332 reviewer round 7, minor). `collect` has had this
@@ -675,10 +735,23 @@ def _remember_columns(db, names, path=None):
     of it found a test reaching something live and each was fixed by hand; a hand fix
     protects the tests that exist today. This one protects the ones nobody has written.
     """
-    if path is None and os.environ.get("PYTEST_CURRENT_TEST"):
+    if path is None:
+        # NO AMBIENT DEFAULT. The first version of this guard refused only when
+        # PYTEST_CURRENT_TEST was set, and every test in this suite that reaches
+        # `collect` deletes that variable to get past the board's own chokepoint -- so
+        # the guard was bypassed by the exact idiom that caused the problem it was
+        # written for, and I had already described it to the founder as a mechanism
+        # rather than a discipline (PR #332 reviewer round 9, minor).
+        #
+        # There is no environment to read now: the live path is reachable only by a
+        # caller that names it, which is `collect` and nothing else. A test that
+        # forgets `record=` fails the same way on any machine, in any environment,
+        # whether or not pytest is announcing itself.
         raise AssertionError(
-            "a test tried to write the live column record; pass record=<tmp path>")
-    p = Path(path or COLUMNS_MADE)
+            "no record path given. Production passes record=COLUMNS_MADE explicitly; "
+            "a test passes its own tmp path. There is no default.")
+    _refuse_live_record_under_test(path)
+    p = Path(path)
     try:
         data = json.loads(p.read_text("utf-8")) or {}
     except (OSError, ValueError):
@@ -693,8 +766,21 @@ def _remember_columns(db, names, path=None):
         pass
 
 
-def ensure_columns(known, token, db, opener=None, budget=None, record=None):
+def ensure_columns(known, token, db, opener=None, budget=None, *, record):
     """Add the optional columns this board is missing. Returns (schema, problems).
+
+    `record` IS REQUIRED, and keyword-only so it cannot be passed by accident (PR #334
+    reviewer round 2, minor). The inner reader and writer both refuse a missing path,
+    and this signature still offered `record=None`, so the refusal arrived from two
+    frames down as an AssertionError no `collect` arm catches, instead of from the call
+    a person was looking at. A default whose only outcome is a crash is not a default.
+    `opener` and `budget` keep theirs: those are genuinely optional and every test in
+    the suite omits them.
+
+    A REFUSED OR UNCONFIRMED CREATE is not fatal and degrades with its reason on the
+    line. A missing `record` is a programming error and is meant to be loud; the old
+    docstring flattened both into "failure here is not fatal", which was true of one of
+    them.
 
     THE FEATURE WAS DEAD ON EVERY BOARD BUT ONE (PR reviewer round 12, major). Nothing
     created `Link`, so `_only_known` dropped it on every run and the morning line said
@@ -1050,7 +1136,9 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
             # takes a raw 400 from Notion before `_only_known` is ever reached and the
             # remediation sentence never fires (#327 round 10, minor).
             _refuse_without_identity(known)
-            known, column_problems = ensure_columns(known, token, db, opener, budget)
+            # The live record is named HERE, by the one caller that should touch it.
+            known, column_problems = ensure_columns(known, token, db, opener, budget,
+                                                    record=COLUMNS_MADE)
             counts = paint(buckets, token, db, opener, budget, known=known)
             counts["column_problems"] = column_problems
         dupes = {}
