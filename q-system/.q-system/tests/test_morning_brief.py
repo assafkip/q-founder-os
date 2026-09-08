@@ -980,8 +980,9 @@ def test_no_hourly_slot_fires_before_the_card_it_mirrors():
     here would be a second copy of the schedule to drift.
 
     THIS DOCSTRING USED TO CALL THE BRIEF'S SLOT "after the card is written" AND IT IS
-    NOT. The brief runs at 07:00 and the card at 07:30, so the brief reads the card
-    thirty minutes before it exists. That belief was load-bearing here and wrong, and
+    NOT, or rather it is only true of the COMMITTED 07:40 slot and was false of the
+    copy loaded on the founder's machine, which had drifted to 07:00 and read the card
+    thirty minutes before it existed. That belief was load-bearing here and wrong, and
     the cost was a P0 alarm row painted on his board every morning. `read_heartbeat`
     now accepts yesterday's card BEFORE 07:30, because it is the newest one there is,
     and labels it; after 07:30 the same card is a real failure and still refused. The

@@ -64,9 +64,11 @@ the card is STILL yesterday's), this writes no rows at all and returns that erro
 Mirroring a stale source onto a board that looks fresh is the one failure that would
 make him act on a wrong number.
 
-Before 07:30 a card stamped yesterday is NOT an error, because the brief runs at 07:00
-and yesterday's is the newest one there is. Those rows paint, and each one carries "from
-yesterday's card" in its detail so the board never looks fresher than its source.
+Before 07:30 a card stamped yesterday is NOT an error, because yesterday's is then the
+newest one there is. The committed brief slot is 07:40, AFTER the card, so on the shipped
+schedule this never happens; it happens on a hand run, or on a machine whose job has
+drifted early, which is what it was built for. Those rows paint, and each one carries
+"from yesterday's card" in its detail so the board never looks fresher than its source.
 """
 from __future__ import annotations
 

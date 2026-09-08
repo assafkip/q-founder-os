@@ -26,9 +26,10 @@ reasons it is struck, and the second is the expensive one:
 
 ## STALENESS IS AN ERROR, never a quiet mirror
 
-The card is written at 07:30 and THIS RUNS AT 07:00, thirty minutes before it. That
-inversion is real, it is not a typo, and the old text here asserted the opposite. See
-CARD_WRITTEN_AT.
+The card is written at 07:30 and this repo COMMITS the brief at 07:40, after it. The
+old text here said "runs after it" and was right about the intent; what it could not say
+is that the LOADED job on the founder's machine had drifted to 07:00 and ran forty
+minutes early for four days. See CARD_WRITTEN_AT.
 
 So a card stamped yesterday is two different facts depending on the hour. Before 07:30
 it is simply the newest card that exists, and it is used and LABELLED as yesterday's, on
@@ -371,8 +372,8 @@ def read_heartbeat(now: dt.datetime, paths=None) -> tuple[dict, str | None]:
 
     # YESTERDAY'S CARD IS THE NEWEST ONE THAT EXISTS BEFORE 07:30, and calling the
     # newest card a failure is not a refusal, it is a clock error. The old rule was
-    # date equality, so at 07:00 it refused a card that was working perfectly and had
-    # simply not been rewritten yet. What it protected against is real and is kept:
+    # date equality, so on the drifted 07:00 run it refused a card that was working
+    # perfectly and had simply not been rewritten yet. What it protected against is real and is kept:
     # yesterday's book must never be presented AS today's, so the caller labels it.
     #
     # AFTER 07:30 THE SAME CARD IS A GENUINE FAILURE, and still refused. That is the

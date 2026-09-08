@@ -281,10 +281,10 @@ class TestOnlyOnePainterAtATime:
 class TestTheBriefReadsTheCardBeforeTheCardIsWritten:
     """THE CLOCK ERROR, and it cost him a P0 row every single morning.
 
-    `com.kipi.morning-brief` runs at 07:00 PT. `io.askconsulting.ask-crm-state-card`
-    writes the card at 07:30 PT. The freshness rule was date equality, so at 07:00 the
-    card was ALWAYS stamped yesterday, always refused, and the painter always added
-    "Your book: COULD NOT READ" at P0. Nothing cleared it, because the hourly repaint
+`com.kipi.morning-brief` COMMITS 07:40 PT, after the 07:30 card, and the loaded copy
+    on the founder's machine had drifted to 07:00. The freshness rule was date equality,
+    so on that drifted run the card was ALWAYS stamped yesterday, always refused, and the
+    painter always added "Your book: COULD NOT READ" at P0. Nothing cleared it, because the hourly repaint
     has no scheduler. Measured in morning-brief.out.log on the 09-05 and 09-07 runs.
 
     Refusing the newest card that exists is not a refusal, it is a clock error. What
