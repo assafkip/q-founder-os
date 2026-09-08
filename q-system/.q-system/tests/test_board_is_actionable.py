@@ -429,10 +429,14 @@ class TestTheSchemaGuardIsActuallyWiredIntoTheRun:
 
         monkeypatch.setattr(br, "paint", spy_paint)
         monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {})
-        monkeypatch.setattr(br, "ensure_columns", lambda known, *a, **k: known)
+        monkeypatch.setattr(br, "ensure_columns", lambda known, *a, **k: (known, ()))
         def no_network(*a, **k):
             raise AssertionError("a test tried to reach Notion")
         monkeypatch.setattr(br, "_request", no_network)
+        # NOT THE PRODUCTION LOCK (PR #332 reviewer, major). `collect` takes a flock on
+        # ~/.config/kipi/board-rows.lock, the same file the live painter holds, so the
+        # suite and the 07:40 job could each block the other. Tests get their own.
+        monkeypatch.setattr(br, "LOCK_FILE", tmp_path / "board-rows.lock")
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
         monkeypatch.delenv("KIPI_BRIEF_DRY_RUN", raising=False)
         tf = tmp_path / "notion-token"; tf.write_text("t", encoding="utf-8")
@@ -537,10 +541,14 @@ class TestTheIdentityRefusalFiresBeforeTheFirstQuery:
                             lambda *a, **k: {"Task": "title"})
         monkeypatch.setattr(br, "existing_rows",
                             lambda *a, **k: calls.append("queried") or {})
-        monkeypatch.setattr(br, "ensure_columns", lambda known, *a, **k: known)
+        monkeypatch.setattr(br, "ensure_columns", lambda known, *a, **k: (known, ()))
         def no_network(*a, **k):
             raise AssertionError("a test tried to reach Notion")
         monkeypatch.setattr(br, "_request", no_network)
+        # NOT THE PRODUCTION LOCK (PR #332 reviewer, major). `collect` takes a flock on
+        # ~/.config/kipi/board-rows.lock, the same file the live painter holds, so the
+        # suite and the 07:40 job could each block the other. Tests get their own.
+        monkeypatch.setattr(br, "LOCK_FILE", tmp_path / "board-rows.lock")
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
         monkeypatch.delenv("KIPI_BRIEF_DRY_RUN", raising=False)
         tf = tmp_path / "notion-token"; tf.write_text("t", encoding="utf-8")
@@ -567,10 +575,14 @@ class TestTheMorningLineSaysWhatHappened:
         # authenticated PATCH at api.notion.com on every suite run (PR #332 reviewer,
         # major). Every outbound seam is stubbed, and `_request` is replaced by one that
         # RAISES so a new call site cannot quietly start talking to the network.
-        monkeypatch.setattr(br, "ensure_columns", lambda known, *a, **k: known)
+        monkeypatch.setattr(br, "ensure_columns", lambda known, *a, **k: (known, ()))
         def no_network(*a, **k):
             raise AssertionError("a test tried to reach Notion")
         monkeypatch.setattr(br, "_request", no_network)
+        # NOT THE PRODUCTION LOCK (PR #332 reviewer, major). `collect` takes a flock on
+        # ~/.config/kipi/board-rows.lock, the same file the live painter holds, so the
+        # suite and the 07:40 job could each block the other. Tests get their own.
+        monkeypatch.setattr(br, "LOCK_FILE", tmp_path / "board-rows.lock")
         monkeypatch.setattr(br, "paint", lambda *a, **k: counts)
         seen = counts["wanted"] + counts["kept"] + counts["held"] - counts["deferred_new"]
         monkeypatch.setattr(br, "existing_rows",
@@ -611,11 +623,22 @@ class TestTheBoardHealsItsOwnOptionalColumns:
     OLD = {"Task": "title", "Item id": "rich_text", "Notes": "rich_text",
            "Domain": "multi_select", "Priority": "select", "Source": "select"}
 
+    def _notion_patch(self, sent, returns):
+        """Notion answers a schema PATCH with the whole database. The fake has to as
+        well: returning None made this module refuse to believe its own create, which
+        is the correct new behaviour and the reason this fake got more honest."""
+        def fake(tok, m, path, body, op=None, bud=None):
+            sent.append((m, path, body))
+            return returns
+        return fake
+
     def test_a_missing_column_is_created_and_then_usable(self, monkeypatch):
         sent = []
-        monkeypatch.setattr(br, "_request",
-                            lambda tok, m, path, body, op=None, bud=None: sent.append((m, path, body)))
-        out = br.ensure_columns(dict(self.OLD), "tok", "db")
+        after = {"properties": {n: {"type": t} for n, t in
+                                dict(self.OLD, Link="url", Next="rich_text").items()}}
+        monkeypatch.setattr(br, "_request", self._notion_patch(sent, after))
+        out, problems = br.ensure_columns(dict(self.OLD), "tok", "db")
+        assert problems == (), problems
         assert sent and sent[0][0] == "PATCH" and "/databases/db" in sent[0][1], sent
         assert set(sent[0][2]["properties"]) == {"Link", "Next"}, sent[0][2]
         assert sent[0][2]["properties"]["Link"] == {"url": {}}, sent[0][2]
@@ -626,19 +649,31 @@ class TestTheBoardHealsItsOwnOptionalColumns:
         monkeypatch.setattr(br, "_request",
                             lambda *a, **k: sent.append(a))
         board = dict(self.OLD, Link="url", Next="rich_text")
-        assert br.ensure_columns(dict(board), "tok", "db") == board
+        assert br.ensure_columns(dict(board), "tok", "db") == (board, ())
         assert sent == [], sent
+
+    def test_a_create_notion_does_not_confirm_is_not_believed(self, monkeypatch):
+        """Synthesising the schema asserts the create took effect. If it did not, the
+        next write carries the column anyway and takes the raw 400 this whole guard
+        exists to prevent (PR #332 reviewer, minor)."""
+        sent = []
+        monkeypatch.setattr(br, "_request", self._notion_patch(sent, {"properties": {}}))
+        out, problems = br.ensure_columns(dict(self.OLD), "tok", "db")
+        assert "Link" not in out, out
+        assert problems and "unconfirmed" in problems[0], problems
 
     def test_a_refused_creation_degrades_exactly_as_before(self, monkeypatch):
         def boom(*a, **k):
             raise RuntimeError("notion said no")
         monkeypatch.setattr(br, "_request", boom)
-        assert br.ensure_columns(dict(self.OLD), "tok", "db") == self.OLD
+        out, problems = br.ensure_columns(dict(self.OLD), "tok", "db")
+        assert out == self.OLD
+        assert problems and "notion said no" in problems[0], problems
 
     def test_an_unreadable_schema_creates_nothing(self, monkeypatch):
         sent = []
         monkeypatch.setattr(br, "_request", lambda *a, **k: sent.append(a))
-        assert br.ensure_columns(None, "tok", "db") is None
+        assert br.ensure_columns(None, "tok", "db") == (None, ())
         assert sent == [], sent
 
     def test_the_identity_columns_are_never_created(self):
@@ -649,8 +684,8 @@ class TestTheBoardHealsItsOwnOptionalColumns:
         order = []
         monkeypatch.setattr(br, "_schema_properties", lambda *a, **k: dict(self.OLD))
         monkeypatch.setattr(br, "ensure_columns",
-                            lambda known, *a, **k: order.append("heal") or dict(
-                                known, Link="url", Next="rich_text"))
+                            lambda known, *a, **k: (order.append("heal") or dict(
+                                known, Link="url", Next="rich_text"), ()))
         monkeypatch.setattr(br, "_refuse_without_identity",
                             lambda known: order.append("identity"))
         monkeypatch.setattr(br, "paint", lambda *a, **k: {
@@ -665,6 +700,10 @@ class TestTheBoardHealsItsOwnOptionalColumns:
         def no_network(*a, **k):
             raise AssertionError("a test tried to reach Notion")
         monkeypatch.setattr(br, "_request", no_network)
+        # NOT THE PRODUCTION LOCK (PR #332 reviewer, major). `collect` takes a flock on
+        # ~/.config/kipi/board-rows.lock, the same file the live painter holds, so the
+        # suite and the 07:40 job could each block the other. Tests get their own.
+        monkeypatch.setattr(br, "LOCK_FILE", tmp_path / "board-rows.lock")
         br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
         # IDENTITY BEFORE HEAL. The first version of this test asserted the opposite
         # and called it correct, so the mistake shipped with a guard of its own: two

@@ -613,7 +613,7 @@ CREATABLE = ("Link", "Next")
 
 
 def ensure_columns(known, token, db, opener=None, budget=None):
-    """Add the optional columns this board is missing. Returns the schema to use.
+    """Add the optional columns this board is missing. Returns (schema, problems).
 
     THE FEATURE WAS DEAD ON EVERY BOARD BUT ONE (PR reviewer round 12, major). Nothing
     created `Link`, so `_only_known` dropped it on every run and the morning line said
@@ -626,7 +626,7 @@ def ensure_columns(known, token, db, opener=None, budget=None):
     path reports it, which is exactly the behaviour before this existed.
     """
     if known is None:
-        return None
+        return None, ()
     missing = {name: WRITES_TYPE[name] for name in CREATABLE if name not in known}
     # A column PRESENT UNDER THE WRONG TYPE is deliberately not healed here (PR #332
     # reviewer, minor). Creating an absent column adds nothing and loses nothing;
@@ -635,14 +635,27 @@ def ensure_columns(known, token, db, opener=None, budget=None):
     # the board "cannot take" the column, so he would go looking for something that is
     # sitting right there. `_only_known`'s report now says which it is.
     if not missing:
-        return known
+        return known, ()
     try:
-        _request(token, "PATCH", f"/databases/{db}",
-                 {"properties": {n: {t: {}} for n, t in missing.items()}},
-                 opener, budget)
-    except Exception:
-        return known           # reported as dropped, same as before
-    return dict(known, **missing)
+        data = _request(token, "PATCH", f"/databases/{db}",
+                        {"properties": {n: {t: {}} for n, t in missing.items()}},
+                        opener, budget)
+    except Exception as exc:
+        # A REFUSAL IS NOT AN ABSENCE (PR #332 reviewer, minor). Both used to end in
+        # the same sentence, so he could not tell "this board has no Link column" from
+        # "I tried to add one and Notion said no", and only the second is about
+        # permissions or a token. The reason is carried back and said.
+        return known, ((f"{type(exc).__name__}: {exc}")[:160],)
+    # WHAT NOTION RETURNED, not what we asked for (PR #332 reviewer, minor). Synthesising
+    # `dict(known, **missing)` asserts the create took effect; if it did not, the next
+    # write carries the column anyway and takes the raw 400 this whole guard exists to
+    # prevent, losing the morning's paint. The PATCH response is the database, so its
+    # properties are the answer.
+    fresh = (data or {}).get("properties")
+    if isinstance(fresh, dict) and fresh:
+        return {n: (p or {}).get("type") for n, p in fresh.items()}, ()
+    return known, ("the schema PATCH returned no properties, so the new columns are "
+                   "unconfirmed and were not written",)
 
 
 def _refuse_without_identity(known):
@@ -884,8 +897,9 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
             # takes a raw 400 from Notion before `_only_known` is ever reached and the
             # remediation sentence never fires (#327 round 10, minor).
             _refuse_without_identity(known)
-            known = ensure_columns(known, token, db, opener, budget)
+            known, column_problems = ensure_columns(known, token, db, opener, budget)
             counts = paint(buckets, token, db, opener, budget, known=known)
+            counts["column_problems"] = column_problems
         dupes = {}
         seen = len(existing_rows(token, db, opener, dupes_out=dupes, budget=budget))
         return counts, dupes, seen
@@ -931,6 +945,8 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
             f"{counts['kept']} kept (source quiet), {counts['pinned']} yours (untouched), "
             f"{counts['held']} yours (source stopped reporting it), "
             "read-back ok")
+    for problem in counts.get("column_problems") or ():
+        line += f"; could not add a column: {problem}"
     if counts["dropped_columns"]:
         # NEVER SILENT. The filter stops a missing column aborting the paint; it must
         # not also hide that the rows went out without it. A board missing `Link` wrote
