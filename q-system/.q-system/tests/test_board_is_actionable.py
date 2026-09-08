@@ -297,8 +297,15 @@ class TestAColumnThisBoardLacksIsNotAWholeLostMorning:
     def test_a_board_that_has_them_as_the_WRONG_TYPE_drops_them_too(self):
         board = dict(self.OLD_BOARD, Link="rich_text", Next="rich_text")
         keep, dropped = br._only_known(self._props(), board)
-        assert dropped == ("Link",), dropped
         assert "Next" in keep, sorted(keep)
+        assert len(dropped) == 1 and dropped[0].startswith("Link"), dropped
+
+    def test_a_wrongly_typed_column_is_named_as_present_not_missing(self):
+        """"cannot take the Link column" sends him looking for something that is
+        sitting right there. The message names both types instead (PR #332, minor)."""
+        board = dict(self.OLD_BOARD, Link="rich_text", Next="rich_text")
+        _, dropped = br._only_known(self._props(), board)
+        assert "it is rich_text" in dropped[0] and "this writes url" in dropped[0], dropped
 
     def test_a_board_with_them_keeps_them(self):
         board = dict(self.OLD_BOARD, Link="url", Next="rich_text")
@@ -422,6 +429,14 @@ class TestTheSchemaGuardIsActuallyWiredIntoTheRun:
 
         monkeypatch.setattr(br, "paint", spy_paint)
         monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {})
+        monkeypatch.setattr(br, "ensure_columns", lambda known, *a, **k: (known, ()))
+        def no_network(*a, **k):
+            raise AssertionError("a test tried to reach Notion")
+        monkeypatch.setattr(br, "_request", no_network)
+        # NOT THE PRODUCTION LOCK (PR #332 reviewer, major). `collect` takes a flock on
+        # ~/.config/kipi/board-rows.lock, the same file the live painter holds, so the
+        # suite and the 07:40 job could each block the other. Tests get their own.
+        monkeypatch.setattr(br, "LOCK_FILE", tmp_path / "board-rows.lock")
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
         monkeypatch.delenv("KIPI_BRIEF_DRY_RUN", raising=False)
         tf = tmp_path / "notion-token"; tf.write_text("t", encoding="utf-8")
@@ -481,7 +496,10 @@ class TestADeadLinkIsWorseThanNoLink:
         assert cb.gmail_link("mail:1a06eb5b0b03759f") == (
             "https://mail.google.com/mail/u/0/#all/1a06eb5b0b03759f")
 
-    def test_the_fallback_key_shape_gets_no_link(self):
+    def test_a_key_that_is_not_a_thread_id_gets_no_link(self):
+        """A CONSTRUCTED shape, deliberately: no producer emits one today (the model-era
+        collector that could was removed by ASK-1323). The guard is here so a future
+        producer meets it instead of shipping dead links first."""
         assert cb.gmail_link("mail:someone@example.test|Re: a subject") is None
 
     def test_an_empty_or_odd_id_gets_no_link(self):
@@ -523,6 +541,14 @@ class TestTheIdentityRefusalFiresBeforeTheFirstQuery:
                             lambda *a, **k: {"Task": "title"})
         monkeypatch.setattr(br, "existing_rows",
                             lambda *a, **k: calls.append("queried") or {})
+        monkeypatch.setattr(br, "ensure_columns", lambda known, *a, **k: (known, ()))
+        def no_network(*a, **k):
+            raise AssertionError("a test tried to reach Notion")
+        monkeypatch.setattr(br, "_request", no_network)
+        # NOT THE PRODUCTION LOCK (PR #332 reviewer, major). `collect` takes a flock on
+        # ~/.config/kipi/board-rows.lock, the same file the live painter holds, so the
+        # suite and the 07:40 job could each block the other. Tests get their own.
+        monkeypatch.setattr(br, "LOCK_FILE", tmp_path / "board-rows.lock")
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
         monkeypatch.delenv("KIPI_BRIEF_DRY_RUN", raising=False)
         tf = tmp_path / "notion-token"; tf.write_text("t", encoding="utf-8")
@@ -530,3 +556,403 @@ class TestTheIdentityRefusalFiresBeforeTheFirstQuery:
         rows, err = br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
         assert calls == [], "it queried the board before refusing"
         assert rows == [] and "identifies rows by" in err, err
+
+
+class TestTheMorningLineSaysWhatHappened:
+    """The dropped-columns sentence and the held count are what the founder actually
+    reads. Neither was asserted anywhere, so deleting either left the suite green
+    (PR reviewer round 11, minor)."""
+
+    COUNTS = {"created": 1, "updated": 0, "archived": 0, "kept": 0, "held": 2,
+              "wanted": 1, "moved": 0, "pinned": 0, "over_cap": 0, "unchanged": 0,
+              "deferred": 0, "deferred_new": 0, "dropped_columns": ("Link", "Next")}
+
+    def _line(self, monkeypatch, tmp_path, counts):
+        monkeypatch.setattr(br, "_schema_properties",
+                            lambda *a, **k: {"Task": "title", "Item id": "rich_text"})
+        # NOTHING LEAVES THIS MACHINE. These tests delete the PYTEST_CURRENT_TEST guard
+        # to reach `collect`'s line builder, and `ensure_columns` would then fire a real
+        # authenticated PATCH at api.notion.com on every suite run (PR #332 reviewer,
+        # major). Every outbound seam is stubbed, and `_request` is replaced by one that
+        # RAISES so a new call site cannot quietly start talking to the network.
+        monkeypatch.setattr(br, "ensure_columns", lambda known, *a, **k: (known, ()))
+        def no_network(*a, **k):
+            raise AssertionError("a test tried to reach Notion")
+        monkeypatch.setattr(br, "_request", no_network)
+        # NOT THE PRODUCTION LOCK (PR #332 reviewer, major). `collect` takes a flock on
+        # ~/.config/kipi/board-rows.lock, the same file the live painter holds, so the
+        # suite and the 07:40 job could each block the other. Tests get their own.
+        monkeypatch.setattr(br, "LOCK_FILE", tmp_path / "board-rows.lock")
+        monkeypatch.setattr(br, "paint", lambda *a, **k: counts)
+        seen = counts["wanted"] + counts["kept"] + counts["held"] - counts["deferred_new"]
+        monkeypatch.setattr(br, "existing_rows",
+                            lambda *a, **k: {f"cb:{i}": {} for i in range(seen)})
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.delenv("KIPI_BRIEF_DRY_RUN", raising=False)
+        tf = tmp_path / "notion-token"; tf.write_text("t", encoding="utf-8")
+        dbf = tmp_path / "notion-board-db"; dbf.write_text("d", encoding="utf-8")
+        rows, err = br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
+        assert err is None, err
+        return rows[0]
+
+    def test_the_columns_it_could_not_write_are_named(self, monkeypatch, tmp_path):
+        line = self._line(monkeypatch, tmp_path, dict(self.COUNTS))
+        assert "cannot take" in line and "Link" in line and "Next" in line, line
+        assert "columns" in line, line
+
+    def test_one_dropped_column_is_singular(self, monkeypatch, tmp_path):
+        line = self._line(monkeypatch, tmp_path,
+                          dict(self.COUNTS, dropped_columns=("Link",)))
+        # NOT `"Link column" in line`: that substring is inside "Link columns" too, so
+        # the plural branch survived the mutation (round 4, minor). Assert the exact end.
+        assert "the Link column, so those values were not written" in line, line
+        assert "columns" not in line, line
+
+    def test_a_complete_board_says_nothing_about_columns(self, monkeypatch, tmp_path):
+        line = self._line(monkeypatch, tmp_path,
+                          dict(self.COUNTS, dropped_columns=()))
+        assert "cannot take" not in line, line
+
+    def test_held_rows_are_reported_on_the_line(self, monkeypatch, tmp_path):
+        line = self._line(monkeypatch, tmp_path, dict(self.COUNTS))
+        assert "2 yours (source stopped reporting it)" in line, line
+
+
+class TestTheBoardHealsItsOwnOptionalColumns:
+    """Nothing created `Link`, so on every board but the one patched by hand it was
+    dropped on each run and the line said the board could not take it, forever, with
+    no way given to change that (PR reviewer round 12, major)."""
+
+    #: A board from before Link and Next existed: everything else, right types. Written
+    #: out BY HAND rather than derived from WRITES_TYPE, so a column added there and
+    #: forgotten in CREATABLE cannot quietly make this fixture agree with itself.
+    OLD = {"Task": "title", "Item id": "rich_text", "Notes": "rich_text",
+           "Domain": "multi_select", "Priority": "select", "Source": "select",
+           "Bucket": "select", "Status": "select"}
+    COMPLETE = dict(OLD, Link="url", Next="rich_text")
+
+    def _notion_patch(self, sent, returns):
+        """Notion answers a schema PATCH with the whole database. The fake has to as
+        well: returning None made this module refuse to believe its own create, which
+        is the correct new behaviour and the reason this fake got more honest."""
+        def fake(tok, m, path, body, op=None, bud=None):
+            sent.append((m, path, body))
+            return returns
+        return fake
+
+    def test_a_missing_column_is_created_and_then_usable(self, monkeypatch, tmp_path):
+        sent = []
+        after = {"properties": {n: {"type": t} for n, t in self.COMPLETE.items()}}
+        monkeypatch.setattr(br, "_request", self._notion_patch(sent, after))
+        # ITS OWN RECORD FILE. The real one lives beside the painter's lock, and a
+        # suite that writes there teaches the live job that he deleted things.
+        out, problems = br.ensure_columns(dict(self.OLD), "tok", "db",
+                                          record=tmp_path / "made.json")
+        assert problems and "added the" in problems[0], problems
+        assert sent and sent[0][0] == "PATCH" and "/databases/db" in sent[0][1], sent
+        assert set(sent[0][2]["properties"]) == {"Link", "Next"}, sent[0][2]
+        assert sent[0][2]["properties"]["Link"] == {"url": {}}, sent[0][2]
+        assert out["Link"] == "url" and out["Next"] == "rich_text", out
+
+    def test_a_complete_board_is_not_touched(self, monkeypatch, tmp_path):
+        sent = []
+        monkeypatch.setattr(br, "_request",
+                            lambda *a, **k: sent.append(a))
+        assert br.ensure_columns(dict(self.COMPLETE), "tok", "db",
+                                 record=tmp_path / "made.json") == (self.COMPLETE, ())
+        assert sent == [], sent
+
+    def test_a_create_notion_does_not_confirm_is_not_believed(self, monkeypatch, tmp_path):
+        """Synthesising the schema asserts the create took effect. If it did not, the
+        next write carries the column anyway and takes the raw 400 this whole guard
+        exists to prevent (PR #332 reviewer, minor)."""
+        sent = []
+        monkeypatch.setattr(br, "_request", self._notion_patch(sent, {"properties": {}}))
+        out, problems = br.ensure_columns(dict(self.OLD), "tok", "db",
+                                          record=tmp_path / "made.json")
+        assert "Link" not in out, out
+        assert any("unconfirmed" in x for x in problems), problems
+
+    def test_a_refused_creation_degrades_exactly_as_before(self, monkeypatch, tmp_path):
+        def boom(*a, **k):
+            raise RuntimeError("notion said no")
+        monkeypatch.setattr(br, "_request", boom)
+        out, problems = br.ensure_columns(dict(self.OLD), "tok", "db",
+                                          record=tmp_path / "made.json")
+        assert out == self.OLD
+        assert any("notion said no" in x for x in problems), problems
+
+    def test_a_refusal_carries_notions_own_words_not_just_the_status(self, monkeypatch, tmp_path):
+        """"HTTPError: 400 Bad Request" is the half that says nothing. Notion puts what
+        is actually wrong in the body, which is why this branch exists (round 4)."""
+        import io as _io
+        import urllib.error
+
+        def boom(*a, **k):
+            raise urllib.error.HTTPError(
+                "u", 400, "Bad Request", {},
+                _io.BytesIO(b'{"message": "Link is not a valid property name here"}'))
+        monkeypatch.setattr(br, "_request", boom)
+        _, problems = br.ensure_columns(dict(self.OLD), "tok", "db",
+                                        record=tmp_path / "made.json")
+        assert any("not a valid property name" in x for x in problems), problems
+
+    def test_a_column_he_deleted_is_not_put_back(self, monkeypatch, tmp_path):
+        """Re-creating it every morning gives him no way to say no. Same "his choice
+        wins" line the row painter holds, one level down (round 4, major)."""
+        rec = tmp_path / "made.json"
+        rec.write_text(json.dumps({"db": ["Link"]}), encoding="utf-8")
+        sent = []
+        after = {"properties": {n: {"type": ty} for n, ty in
+                                dict(self.OLD, Next="rich_text").items()}}
+        monkeypatch.setattr(br, "_request", self._notion_patch(sent, after))
+        out, problems = br.ensure_columns(dict(self.OLD), "tok", "db", record=rec)
+        asked = set(sent[0][2]["properties"])
+        assert "Link" not in asked and "Next" in asked, asked
+        # NO SECOND SENTENCE. Losing Link costs one value on a row, so it earns no
+        # explanation of itself every morning. The ordinary "was not written" report
+        # still names it, exactly as it names any other column, and asserting silence
+        # here would have been asserting something false (round 7, minor).
+        assert not any("your removal" in x for x in problems), problems
+
+    def test_a_structural_column_he_deleted_is_named_every_run(self, monkeypatch, tmp_path):
+        """Losing `Notes` stops archiving entirely and losing `Bucket` hides every row.
+        Round 5 filtered those warnings out and the line still said "read-back ok",
+        which is silent degradation (round 6, major)."""
+        rec = tmp_path / "made.json"
+        rec.write_text(json.dumps({"db": ["Notes", "Bucket"]}), encoding="utf-8")
+        bare = {"Task": "title", "Item id": "rich_text"}
+        sent = []
+        after = {"properties": {n: {"type": ty} for n, ty in br.WRITES_TYPE.items()
+                                if n not in ("Notes", "Bucket")}}
+        monkeypatch.setattr(br, "_request", self._notion_patch(sent, after))
+        _, problems = br.ensure_columns(dict(bare), "tok", "db", record=rec)
+        asked = set(sent[0][2]["properties"])
+        assert "Notes" not in asked and "Bucket" not in asked, asked
+        joined = " ".join(problems)
+        assert "nothing is ever archived" in joined, problems
+        assert "invisible on the board" in joined, problems
+
+    def test_no_module_state_leaks_between_boards(self, monkeypatch, tmp_path):
+        """The round-5 fix kept this in a module global that was never cleared and was
+        unioned across every board id, so one board's report contaminated another's and
+        the suite went order-dependent (round 6, minor)."""
+        rec = tmp_path / "made.json"
+        rec.write_text(json.dumps({"board-a": ["Notes"]}), encoding="utf-8")
+        after = {"properties": {n: {"type": ty} for n, ty in br.WRITES_TYPE.items()}}
+        monkeypatch.setattr(br, "_request", self._notion_patch([], after))
+        _, a = br.ensure_columns({"Task": "title", "Item id": "rich_text"},
+                                 "tok", "board-a", record=rec)
+        _, b = br.ensure_columns({"Task": "title", "Item id": "rich_text"},
+                                 "tok", "board-b", record=rec)
+        assert any("archived" in x for x in a), a
+        assert not any("archived" in x for x in b), b
+
+    def test_a_column_never_created_here_is_still_offered(self, monkeypatch, tmp_path):
+        rec = tmp_path / "made.json"
+        rec.write_text(json.dumps({"other-board": ["Link"]}), encoding="utf-8")
+        sent = []
+        after = {"properties": {n: {"type": ty} for n, ty in self.COMPLETE.items()}}
+        monkeypatch.setattr(br, "_request", self._notion_patch(sent, after))
+        br.ensure_columns(dict(self.OLD), "tok", "db", record=rec)
+        assert "Link" in set(sent[0][2]["properties"]), sent
+
+    def test_an_unreadable_schema_creates_nothing(self, monkeypatch, tmp_path):
+        sent = []
+        monkeypatch.setattr(br, "_request", lambda *a, **k: sent.append(a))
+        assert br.ensure_columns(None, "tok", "db",
+                                 record=tmp_path / "made.json") == (None, ())
+        assert sent == [], sent
+
+    def test_the_identity_columns_are_never_created(self):
+        """A board with no `Item id` is not one this module should quietly reshape."""
+        assert "Item id" not in br.CREATABLE and "Task" not in br.CREATABLE
+
+    def test_every_column_it_writes_can_be_created_except_identity(self):
+        """Listing only Link and Next was a half-heal: a board missing `Notes` cannot
+        carry the `scope=` line, so nothing is ever archived, and one missing `Bucket`
+        shows rows in none of his three sections. Both reported no problem at all
+        (PR #332 reviewer round 3, major). Written out BY HAND so a column added to
+        WRITES_TYPE and forgotten cannot take this test with it."""
+        assert set(br.CREATABLE) == {"Notes", "Domain", "Priority", "Source",
+                                     "Bucket", "Status", "Link", "Next"}, br.CREATABLE
+
+    def test_a_board_missing_notes_and_bucket_is_healed_too(self, monkeypatch, tmp_path):
+        bare = {"Task": "title", "Item id": "rich_text"}
+        sent = []
+        after = {"properties": {n: {"type": t} for n, t in br.WRITES_TYPE.items()}}
+        monkeypatch.setattr(br, "_request", self._notion_patch(sent, after))
+        out, problems = br.ensure_columns(dict(bare), "tok", "db",
+                                          record=tmp_path / "made.json")
+        asked = set(sent[0][2]["properties"])
+        assert {"Notes", "Bucket"} <= asked, asked
+        assert out["Notes"] == "rich_text", out
+
+    def test_the_runner_checks_identity_before_it_heals(self, monkeypatch, tmp_path):
+        order = []
+        monkeypatch.setattr(br, "_schema_properties", lambda *a, **k: dict(self.OLD))
+        monkeypatch.setattr(br, "ensure_columns",
+                            lambda known, *a, **k: (order.append("heal") or dict(
+                                known, Link="url", Next="rich_text"), ()))
+        monkeypatch.setattr(br, "_refuse_without_identity",
+                            lambda known: order.append("identity"))
+        monkeypatch.setattr(br, "paint", lambda *a, **k: {
+            "created": 0, "updated": 0, "archived": 0, "kept": 0, "held": 0,
+            "wanted": 0, "moved": 0, "pinned": 0, "over_cap": 0, "unchanged": 0,
+            "deferred": 0, "deferred_new": 0, "dropped_columns": ()})
+        monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {})
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.delenv("KIPI_BRIEF_DRY_RUN", raising=False)
+        tf = tmp_path / "notion-token"; tf.write_text("t", encoding="utf-8")
+        dbf = tmp_path / "notion-board-db"; dbf.write_text("d", encoding="utf-8")
+        def no_network(*a, **k):
+            raise AssertionError("a test tried to reach Notion")
+        monkeypatch.setattr(br, "_request", no_network)
+        # NOT THE PRODUCTION LOCK (PR #332 reviewer, major). `collect` takes a flock on
+        # ~/.config/kipi/board-rows.lock, the same file the live painter holds, so the
+        # suite and the 07:40 job could each block the other. Tests get their own.
+        monkeypatch.setattr(br, "LOCK_FILE", tmp_path / "board-rows.lock")
+        br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
+        # IDENTITY BEFORE HEAL. The first version of this test asserted the opposite
+        # and called it correct, so the mistake shipped with a guard of its own: two
+        # columns were PATCHed onto a database this module then rejected as not its
+        # board (PR #332 reviewer, major).
+        assert order == ["identity", "heal"], order
+
+
+class TestAFailedColumnCreationReachesTheLine:
+    """Every test that reaches the morning line stubs `ensure_columns`, so the sentence
+    for a refused creation was asserted nowhere and deleting it left the suite green
+    (PR #332 reviewer round 3, minor)."""
+
+    COUNTS = {"created": 0, "updated": 0, "archived": 0, "kept": 0, "held": 0,
+              "wanted": 0, "moved": 0, "pinned": 0, "over_cap": 0, "unchanged": 0,
+              "deferred": 0, "deferred_new": 0, "dropped_columns": ()}
+
+    def _line(self, monkeypatch, tmp_path, problems):
+        monkeypatch.setattr(br, "_schema_properties",
+                            lambda *a, **k: {"Task": "title", "Item id": "rich_text"})
+        # NOT stubbed away this time: the whole point is the value it hands back.
+        monkeypatch.setattr(br, "ensure_columns",
+                            lambda known, *a, **k: (known, problems))
+        monkeypatch.setattr(br, "paint", lambda *a, **k: dict(self.COUNTS))
+        monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {})
+        def no_network(*a, **k):
+            raise AssertionError("a test tried to reach Notion")
+        monkeypatch.setattr(br, "_request", no_network)
+        monkeypatch.setattr(br, "LOCK_FILE", tmp_path / "board-rows.lock")
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.delenv("KIPI_BRIEF_DRY_RUN", raising=False)
+        tf = tmp_path / "notion-token"; tf.write_text("t", encoding="utf-8")
+        dbf = tmp_path / "notion-board-db"; dbf.write_text("d", encoding="utf-8")
+        rows, err = br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
+        assert err is None, err
+        return rows[0]
+
+    def test_a_refusal_is_named_on_the_line(self, monkeypatch, tmp_path):
+        line = self._line(monkeypatch, tmp_path, ("HTTPError: 403 restricted",))
+        assert "403 restricted" in line, line
+
+    def test_a_clean_run_says_nothing_about_it(self, monkeypatch, tmp_path):
+        line = self._line(monkeypatch, tmp_path, ())
+        assert "403" not in line and "restricted" not in line, line
+
+
+class TestACorruptRecordDoesNotKillTheBoardSection:
+    """`_remember_columns` refused a non-dict and `_columns_made` did not, so a file
+    holding a JSON list raised AttributeError out of `.get`, which no `collect` handler
+    catches, and the whole section died on a malformed file this module writes itself
+    (PR #332 reviewer round 5, minor)."""
+
+    def test_a_json_list_reads_empty_not_a_crash(self, tmp_path):
+        rec = tmp_path / "made.json"
+        rec.write_text("[1, 2, 3]", encoding="utf-8")
+        assert br._columns_made("db", rec) == set()
+
+    def test_a_json_string_reads_empty(self, tmp_path):
+        rec = tmp_path / "made.json"
+        rec.write_text('"not a mapping"', encoding="utf-8")
+        assert br._columns_made("db", rec) == set()
+
+    def test_a_board_entry_that_is_not_a_list_reads_empty(self, tmp_path):
+        rec = tmp_path / "made.json"
+        rec.write_text(json.dumps({"db": "Link"}), encoding="utf-8")
+        assert br._columns_made("db", rec) == set()
+
+    def test_broken_json_reads_empty(self, tmp_path):
+        rec = tmp_path / "made.json"
+        rec.write_text("{ not json", encoding="utf-8")
+        assert br._columns_made("db", rec) == set()
+
+    def test_an_absent_file_reads_empty(self, tmp_path):
+        assert br._columns_made("db", tmp_path / "never-written.json") == set()
+
+    def test_a_good_record_still_reads(self, tmp_path):
+        rec = tmp_path / "made.json"
+        rec.write_text(json.dumps({"db": ["Link", "Next"]}), encoding="utf-8")
+        assert br._columns_made("db", rec) == {"Link", "Next"}
+
+
+class TestNoTestCanWriteTheLiveColumnRecord:
+    """Three rounds of this PR found a test reaching something live, each fixed by hand.
+    A hand fix protects the tests that exist; this protects the ones nobody has written
+    yet (PR #332 reviewer round 7, minor)."""
+
+    def test_writing_without_a_record_path_raises_under_pytest(self):
+        with pytest.raises(AssertionError) as e:
+            br._remember_columns("db", ["Link"])
+        assert "live column record" in str(e.value)
+
+    def test_a_private_path_is_allowed(self, tmp_path):
+        rec = tmp_path / "made.json"
+        br._remember_columns("db", ["Link"], rec)
+        assert json.loads(rec.read_text())["db"] == ["Link"]
+
+    # DELETED, NOT WEAKENED: `test_the_live_record_does_not_exist_after_this_suite`.
+    # It asserted the absence of a file PRODUCTION writes, so the first morning the real
+    # job healed a column on his board the suite would have gone red on his machine and
+    # blamed itself for correct behaviour (PR #332 reviewer round 8, major). It was
+    # conflating "no test wrote this" with "this never exists", and only the first is a
+    # property of the suite. The chokepoint in `_remember_columns` is what actually
+    # holds the rule, and it holds it at the moment of the write rather than by
+    # inspecting the world afterwards.
+
+
+class TestARefusedCreateStillNamesWhatItCosts:
+    """The consequence belongs to the ABSENCE, not to the reason for it. It was
+    attached only to his deletion, so a board where Notion refused to create `Notes`
+    heard about the refusal and never that nothing would be archived (round 7)."""
+
+    BARE = {"Task": "title", "Item id": "rich_text"}
+
+    def test_a_refusal_names_the_cost(self, monkeypatch, tmp_path):
+        def boom(*a, **k):
+            raise RuntimeError("no permission")
+        monkeypatch.setattr(br, "_request", boom)
+        _, problems = br.ensure_columns(dict(self.BARE), "tok", "db",
+                                        record=tmp_path / "made.json")
+        joined = " ".join(problems)
+        assert "no permission" in joined, problems
+        assert "nothing is ever archived" in joined, problems
+        assert "invisible on the board" in joined, problems
+
+    def test_a_response_that_answers_but_lacks_the_column_is_not_a_success(
+            self, monkeypatch, tmp_path):
+        """Notion accepting the PATCH and quietly not adding the column read as a clean
+        run, while the empty and refused paths both reported it (round 8, minor)."""
+        after = {"properties": {"Task": {"type": "title"},
+                                "Item id": {"type": "rich_text"}}}
+        monkeypatch.setattr(br, "_request", lambda *a, **k: after)
+        _, problems = br.ensure_columns(dict(self.BARE), "tok", "db",
+                                        record=tmp_path / "made.json")
+        joined = " ".join(problems)
+        assert "does not carry them" in joined, problems
+        assert "nothing is ever archived" in joined, problems
+
+    def test_an_unconfirmed_create_names_the_cost(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(br, "_request",
+                            lambda *a, **k: {"properties": {}})
+        _, problems = br.ensure_columns(dict(self.BARE), "tok", "db",
+                                        record=tmp_path / "made.json")
+        joined = " ".join(problems)
+        assert "unconfirmed" in joined and "nothing is ever archived" in joined, problems

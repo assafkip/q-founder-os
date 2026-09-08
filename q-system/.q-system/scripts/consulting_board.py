@@ -111,8 +111,12 @@ _THEN_SEP = "·"
 #: The producer's own tail on that line: "+3 more, lowest-scoring, on the board".
 _MORE_SUMMARY = re.compile(r"^\+\s*\d+\s+more\b")
 #: "— 🔥 Portant (fire, v1 CRM: ...)" -- the person, out of the reach-out header's tail.
-#: A mail key built from sender+subject rather than a thread id. `collect_mail` uses
-#: "<sender>|<subject>" only when the model returned no id; a real id carries none.
+#: A mail key built from sender+subject rather than a thread id. NO PRODUCER EMITS ONE
+#: TODAY: that shape came from the model-era `collect_mail`, and ASK-1323 replaced it
+#: with a read of the consulting ledger, whose every row carries a real thread id. The
+#: pattern is kept because what it gates is an ARCHIVE authority (see the id-less
+#: branch in `buckets`), and a guard whose false branch is currently unreachable is
+#: cheap while the thing it protects is a deletion.
 _FALLBACK_KEY = re.compile(r"^[^|]+\|")
 #: `build_card`'s first line, always present. See `read_card` for why it decides.
 _BOOK_HEADER = re.compile(r"\*Your book today\*")
@@ -612,11 +616,21 @@ DONE_GTM_FALLBACK = "the step is done or you wrote down why it did not happen"
 #: worth saying gets it from whoever knows, and the writer never blanks it.
 GMAIL_THREAD = "https://mail.google.com/mail/u/0/#all/"
 
-#: A Gmail thread id is hex. The mail producer's documented FALLBACK key is
-#: `mail:<sender>|<subject>` (see `_FALLBACK_KEY`), and pasting that after the thread
-#: URL builds a link that opens nothing (PR reviewer round 10, minor). A dead link is
-#: worse than no link: it costs a click and teaches him the column lies. No id it can
-#: recognise means no link, and the row still carries its subject and its done signal.
+#: A Gmail thread id is hex, and a link is written only for something shaped like one.
+#:
+#: NO PRODUCER CAN EMIT A BAD ONE TODAY, and saying otherwise was wrong (PR reviewer
+#: round 11, minor: the round-10 comment cited `mail:<sender>|<subject>` as the mail
+#: producer's live fallback). That shape belonged to the MODEL-era collector, which
+#: ASK-1323 removed; the section now reads the consulting ledger, whose every row
+#: carries a real thread id. `_FALLBACK_KEY` still exists because the id-less answer it
+#: guards against decided an ARCHIVE, and that reasoning outlived the producer.
+#:
+#: The guard stays because the cost is asymmetric and the failure is silent: a link
+#: built from a non-id opens nothing, costs a click, and teaches him the column lies,
+#: which is the complaint this whole change came from. No id it recognises means no
+#: link, and the row still carries its subject and its done signal. Its tests drive a
+#: CONSTRUCTED key on purpose, so a future producer that starts emitting one finds a
+#: guard already there rather than shipping dead links first.
 _THREAD_ID = re.compile(r"^[0-9a-f]{8,24}$", re.I)
 
 
@@ -825,12 +839,18 @@ def buckets(now: dt.datetime, sources: dict, paths=None) -> dict:
                           "done": f"{label} reads again",
                           "bucket_reason": "error"})
             continue                      # scope deliberately NOT marked healthy
-        # AN ID-LESS ANSWER DOES NOT AUTHORISE ARCHIVING (round 13, major). When the
-        # model returns thread ids the key is the id; when it does not, the key falls
-        # back to sender+subject. Both are stable in themselves, but they are DIFFERENT
-        # ids for one thread, so a day where the model stops returning ids archives the
-        # row he pinned and recreates it at "Not started". The rows still paint; what
-        # is withheld is the authority to call the old ones gone.
+        # AN ID-LESS ANSWER DOES NOT AUTHORISE ARCHIVING (round 13, major). Written
+        # when a MODEL produced these rows: it returned a thread id most days and fell
+        # back to sender+subject otherwise, and those are two different ids for one
+        # thread, so the day it stopped returning ids the painter archived the row he
+        # had pinned and recreated it at "Not started".
+        #
+        # THAT PRODUCER IS GONE. ASK-1323 replaced it with a read of the consulting
+        # ledger, whose every row carries a real thread id, so this branch's false
+        # side is currently unreachable (PR #332 reviewer, minor: three copies of the
+        # old claim were still in the present tense). It stays because what it
+        # withholds is the authority to call rows GONE, and a cheap guard over a
+        # deletion outlives the producer that motivated it.
         if not any(_FALLBACK_KEY.match(getattr(r, "key", "") or "") for r in rows):
             healthy.add(f"inbox:{label}")
         for row in rows:

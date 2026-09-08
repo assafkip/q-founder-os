@@ -267,9 +267,16 @@ def _note_field(page, prefix: str) -> str:
 def _scope_of(page) -> str:
     """The scope a row was written under, read back off the row itself.
 
-    Stored in Notes rather than a new Notion property so the board's schema does not
-    change: a select option added by a writer is a schema edit the founder did not ask
-    for. Unknown scope is treated as UNHEALTHY by the caller, which fails safe: an
+    Stored in Notes rather than in a property of its own. The original reason was that
+    the board's schema should not change at all; that is no longer true, and saying so
+    was misleading (round 8, minor). `ensure_columns` now adds up to eight columns
+    deliberately, and tells him on the morning line when it does.
+
+    What survives the change is the narrower reason, which is why this still lives in
+    Notes: `scope=` is MACHINERY, read back by the painter to decide an archive. A
+    column for it would put an internal decision on his board as something to look at
+    and edit, and this file has spent a night removing exactly that kind of row.
+    Unknown scope is treated as UNHEALTHY by the caller, which fails safe: an
     unrecognised row is kept, never archived.
     """
     return _note_field(page, SCOPE_PREFIX)
@@ -564,6 +571,17 @@ WRITES_TYPE = {"Task": "title", "Item id": "rich_text", "Notes": "rich_text",
 #: that cannot take them stops the paint instead of half-writing it.
 UNDROPPABLE = ("Item id", "Task")
 
+#: Columns whose ABSENCE breaks the board rather than costing one value on a row. These
+#: are reported every run even when he removed them deliberately, because the failure is
+#: silent otherwise and this file's whole posture is that a silent half-working board is
+#: worse than a loud broken one.
+STRUCTURAL_COST = {
+    "Notes": ("without it no row carries its `scope=` line, so nothing is ever "
+              "archived and stale rows accumulate with no run able to clear them"),
+    "Bucket": ("without it every row lands in none of the three sections and is "
+               "invisible on the board"),
+}
+
 
 class MissingIdentityColumn(RuntimeError):
     """The board cannot take a column the painter cannot work without."""
@@ -580,20 +598,217 @@ def _only_known(props: dict, known):
     """
     if known is None:
         return props, ()
-    keep, dropped = {}, []
+    # TWO LISTS ON PURPOSE. `names` is what the code reasons about; `shown` is what he
+    # reads. Annotating the single list broke the undroppable check below, because
+    # "Item id" is not "Item id (it is select, this writes rich_text)" and the identity
+    # refusal silently stopped firing for the wrong-type case. A display string is not
+    # an identifier.
+    keep, names, shown = {}, [], []
     for k, v in props.items():
         want = WRITES_TYPE.get(k)
         if k in known and (want is None or known[k] == want):
             keep[k] = v
-        else:
-            dropped.append(k)
-    hard = [k for k in UNDROPPABLE if k in dropped]
+            continue
+        names.append(k)
+        # PRESENT, WRONG TYPE. Naming it as absent sends him looking for something that
+        # is there; naming the types tells him the one edit that fixes it.
+        shown.append(f"{k} (it is {known[k]}, this writes {want})"
+                     if k in known else k)
+    dropped = tuple(s for _, s in sorted(zip(names, shown)))
+    hard = [k for k in UNDROPPABLE if k in names]
     if hard:
         raise MissingIdentityColumn(
             f"the board cannot take {', '.join(hard)}, which the painter identifies "
             "rows by. Writing rows without it would create pages this module can never "
             "find or archive again, one per row per run. Fix the board's columns.")
-    return keep, tuple(sorted(dropped))
+    return keep, dropped
+
+
+#: Columns this module writes that it will CREATE on a board that lacks them:
+#: EVERYTHING IT WRITES except the identity pair. Listing only Link and Next was a
+#: half-heal (PR #332 reviewer round 3, major): a board missing `Notes` cannot carry
+#: the `scope=` line, so `_scope_of` reads unknown and no row is ever archived, and a
+#: board missing `Bucket` puts every row in none of his three sections. Both were
+#: "healed" boards reporting no problem at all.
+#:
+#: DERIVED, never restated. A column added to WRITES_TYPE and forgotten here would be
+#: the same silent half-heal again, one release later.
+CREATABLE = tuple(n for n in WRITES_TYPE if n not in UNDROPPABLE)
+
+
+#: Columns this module has created before, per board. A column in here that is now
+#: ABSENT was deleted by a person, and this module does not put it back.
+COLUMNS_MADE = STATE_DIR / "board-columns-created.json"
+
+
+
+def _columns_made(db, path=None):
+    """What this module created on `db` before. Unreadable or malformed reads EMPTY.
+
+    `_remember_columns` already refused a non-dict and this did not, so a file holding
+    a JSON list raised AttributeError out of `.get`, which no `collect` handler catches
+    (they take OSError and ValueError), and the entire board section died on a
+    malformed file this module writes itself (PR #332 reviewer round 5, minor). Empty
+    is the safe answer: the worst it costs is offering a column he removed once more,
+    and that is said on the line.
+    """
+    try:
+        data = json.loads(Path(path or COLUMNS_MADE).read_text("utf-8"))
+    except (OSError, ValueError):
+        return set()
+    if not isinstance(data, dict):
+        return set()
+    names = data.get(db)
+    return set(names) if isinstance(names, (list, tuple, set)) else set()
+
+
+def _remember_columns(db, names, path=None):
+    """Append to the record. A failure here is not fatal: the worst case is offering to
+    create a column he removed a second time, which is the behaviour before the record
+    existed, and it is still said out loud on the line.
+
+    THE LIVE RECORD IS NEVER WRITTEN BY A TEST, and that is a chokepoint rather than a
+    rule someone remembers (PR #332 reviewer round 7, minor). `collect` has had this
+    guard for the board itself; this file did not, so a test that simply forgot
+    `record=` wrote into ~/.config/kipi and taught the 07:40 job that he had deleted
+    columns he never touched. That happened, once, in this PR. Three separate rounds
+    of it found a test reaching something live and each was fixed by hand; a hand fix
+    protects the tests that exist today. This one protects the ones nobody has written.
+    """
+    if path is None and os.environ.get("PYTEST_CURRENT_TEST"):
+        raise AssertionError(
+            "a test tried to write the live column record; pass record=<tmp path>")
+    p = Path(path or COLUMNS_MADE)
+    try:
+        data = json.loads(p.read_text("utf-8")) or {}
+    except (OSError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    data[db] = sorted(set(data.get(db) or []) | set(names))
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(data, indent=1, sort_keys=True), "utf-8")
+    except OSError:
+        pass
+
+
+def ensure_columns(known, token, db, opener=None, budget=None, record=None):
+    """Add the optional columns this board is missing. Returns (schema, problems).
+
+    THE FEATURE WAS DEAD ON EVERY BOARD BUT ONE (PR reviewer round 12, major). Nothing
+    created `Link`, so `_only_known` dropped it on every run and the morning line said
+    the board could not take it and named no way to change that. The column had been
+    added by hand, once, on the founder's own board; a fresh instance would have
+    reported the same sentence every morning forever. Silent degradation with a
+    permanent explanation is not a fix.
+
+    Failure is not fatal: on a refusal the schema is returned unchanged and the drop
+    path reports it, which is exactly the behaviour before this existed.
+    """
+    if known is None:
+        return None, ()
+    missing = {name: WRITES_TYPE[name] for name in CREATABLE if name not in known}
+    # A COLUMN HE DELETED IS NOT A COLUMN THAT IS MISSING (PR #332 reviewer round 4,
+    # major). Without this the module re-created it every single morning and never said
+    # so: he would remove a column he did not want and find it back the next day, with
+    # no way to make it stop. That is the same "his choice wins" line the row painter
+    # holds everywhere else, one level down at the schema.
+    made_before = _columns_made(db, record)
+    removed = sorted(n for n in missing if n in made_before)
+    for n in removed:
+        del missing[n]
+
+    # A column PRESENT UNDER THE WRONG TYPE is deliberately not healed here (PR #332
+    # reviewer, minor). Creating an absent column adds nothing and loses nothing;
+    # retyping an existing one makes Notion convert every value in it, which is a data
+    # decision and not this module's to take. What was wrong was the message: it said
+    # the board "cannot take" the column, so he would go looking for something that is
+    # sitting right there. `_only_known`'s report now says which it is.
+    # A REMOVAL HE CAN AFFORD IS SILENT; ONE HE CANNOT IS SAID EVERY RUN.
+    #
+    # Round 5 tried to solve the double-naming by filtering these out of the
+    # dropped-columns sentence through a module global. That was worse than the problem
+    # twice over (round 6): the global was never cleared and unioned across every board
+    # id, so the report cross-contaminated and the suite went order-dependent; and it
+    # silenced the warning for `Notes` and `Bucket`, whose absence stops archiving
+    # entirely and hides every row from his three sections, WHILE the line still ended
+    # "read-back ok". Silent degradation is the one thing this file exists to refuse.
+    #
+    # The real distinction is consequence, and it needs no state at all. Losing `Notes`
+    # or `Bucket` breaks the board, so it is named every run, with what it costs, until
+    # he puts it back.
+    #
+    # NOT SILENCE, ONE MENTION (round 7, minor: the previous comment and its test both
+    # claimed silence and the dropped-columns sentence still named the column every
+    # run, so the claim was simply false). Losing `Link` or `Next` costs one value on a
+    # row, so it earns no SECOND sentence explaining itself, and the report that the
+    # value was not written stands as it does for any other column. Suppressing that
+    # too is what round 5 did, and it hid `Notes` and `Bucket` with it.
+    told = tuple(
+        f"{n} is gone and this module created it, so it is treated as your removal; "
+        + STRUCTURAL_COST[n] for n in removed if n in STRUCTURAL_COST)
+    if not missing:
+        return known, told
+    try:
+        data = _request(token, "PATCH", f"/databases/{db}",
+                        {"properties": {n: {t: {}} for n, t in missing.items()}},
+                        opener, budget)
+    except Exception as exc:
+        # A REFUSAL IS NOT AN ABSENCE (PR #332 reviewer, minor). Both used to end in
+        # the same sentence, so he could not tell "this board has no Link column" from
+        # "I tried to add one and Notion said no", and only the second is about
+        # permissions or a token. The reason is carried back and said.
+        #
+        # AND THE BODY, NOT JUST THE STATUS LINE (round 4, minor). "HTTPError: 400 Bad
+        # Request" is the half that says nothing; Notion puts what is actually wrong in
+        # the response body, which is the whole reason this branch exists.
+        detail = ""
+        try:
+            detail = " " + exc.read().decode("utf-8", "replace")[:200]
+        except Exception:
+            pass
+        # THE CONSEQUENCE BELONGS TO THE ABSENCE, NOT TO THE REASON (round 7, minor).
+        # It was attached only to his deletion, so a board where Notion REFUSED to
+        # create `Notes` reported the refusal and never that nothing would be archived,
+        # which is the half he needs.
+        cost = tuple(f"{n}: {STRUCTURAL_COST[n]}" for n in sorted(missing)
+                     if n in STRUCTURAL_COST)
+        return known, told + ((f"{type(exc).__name__}: {exc}{detail}")[:300],) + cost
+    # WHAT NOTION RETURNED, not what we asked for (PR #332 reviewer, minor). Synthesising
+    # `dict(known, **missing)` asserts the create took effect; if it did not, the next
+    # write carries the column anyway and takes the raw 400 this whole guard exists to
+    # prevent, losing the morning's paint. The PATCH response is the database, so its
+    # properties are the answer.
+    fresh = (data or {}).get("properties")
+    if isinstance(fresh, dict) and fresh:
+        made = sorted(n for n in missing if n in fresh)
+        if made:
+            _remember_columns(db, made, record)
+        # A RESPONSE THAT ANSWERS AND STILL LACKS THE COLUMN IS NOT A SUCCESS (round 8,
+        # minor). The empty-properties and refusal paths both report an unconfirmed
+        # create; this one returned no problem at all, so a Notion that accepts the
+        # PATCH and quietly does not add the column read as a clean run.
+        absent = sorted(n for n in missing if n not in fresh)
+        if absent:
+            return ({n: (p or {}).get("type") for n, p in fresh.items()},
+                    told + (f"asked Notion for {', '.join(absent)} and the schema it "
+                            "returned does not carry them, so they were not written",)
+                    + tuple(f"{n}: {STRUCTURAL_COST[n]}" for n in absent
+                            if n in STRUCTURAL_COST)
+                    + ((f"added the {', '.join(made)} "
+                        + ("columns" if len(made) > 1 else "column")
+                        + " to this board",) if made else ()))
+        # SAID OUT LOUD (round 4, major). Adding columns to his board is a change to
+        # his board, and a change he is not told about is one he cannot disagree with.
+        return ({n: (p or {}).get("type") for n, p in fresh.items()},
+                told + ((f"added the {', '.join(made)} "
+                         + ("columns" if len(made) > 1 else "column")
+                         + " to this board",) if made else ()))
+    unconfirmed = tuple(f"{n}: {STRUCTURAL_COST[n]}" for n in sorted(missing)
+                        if n in STRUCTURAL_COST)
+    return known, told + ("the schema PATCH returned no properties, so the new columns "
+                          "are unconfirmed and were not written",) + unconfirmed
 
 
 def _refuse_without_identity(known):
@@ -823,13 +1038,21 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
             # and `Next` would otherwise take a 400 on the first row and lose the
             # whole morning's paint to a column nobody noticed was missing.
             known = _schema_properties(token, db, opener, budget)
-            # BEFORE THE FIRST QUERY, not inside the write loop. `existing_rows`
-            # filters on `Item id`, so a board without that column takes a raw 400
-            # from Notion before `_only_known` is ever reached and the remediation
-            # sentence never fires (round 10, minor). Checked here, the one failure a
-            # person can fix is the one they are told about.
+            # IDENTITY FIRST, THEN HEAL (PR #332 reviewer, major). The first cut had
+            # these the other way round, so a database this module then rejected as
+            # "not our board" had already had two columns PATCHed onto it. Deciding
+            # whether a thing is ours has to come before writing to it. Worse, the
+            # test that shipped with it asserted the wrong order and called it
+            # correct, which is how a mistake gets a guard of its own.
+            #
+            # `_refuse_without_identity` also has to run BEFORE the first query:
+            # `existing_rows` filters on `Item id`, so a board without that column
+            # takes a raw 400 from Notion before `_only_known` is ever reached and the
+            # remediation sentence never fires (#327 round 10, minor).
             _refuse_without_identity(known)
+            known, column_problems = ensure_columns(known, token, db, opener, budget)
             counts = paint(buckets, token, db, opener, budget, known=known)
+            counts["column_problems"] = column_problems
         dupes = {}
         seen = len(existing_rows(token, db, opener, dupes_out=dupes, budget=budget))
         return counts, dupes, seen
@@ -853,8 +1076,10 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
     except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError) as exc:
         return [], f"board write failed: {type(exc).__name__}: {exc}"
 
+    notes = "".join(f"; {n}" for n in (counts.get("column_problems") or ()))
     if dupes:
-        return [], (f"duplicate board rows for {len(dupes)} item(s): "
+        return [], (notes.lstrip("; ") + ("; " if notes else "")
+                    + f"duplicate board rows for {len(dupes)} item(s): "
                     f"{', '.join(sorted(dupes))}. Two painters have run; the board "
                     "holds doubles and this run's counts cannot be trusted")
     # `kept` rows belong to a source that could not answer this run: they are on the
@@ -866,7 +1091,8 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
     if seen != expected:
         # The write-only-integration scar: a PATCH that returns 200 is not proof the
         # board holds what we think. The read-back is the proof.
-        return [], (f"read-back mismatch: expected {expected} row(s) "
+        return [], (notes.lstrip("; ") + ("; " if notes else "")
+                    + f"read-back mismatch: expected {expected} row(s) "
                     f"({counts['wanted']} written + {counts['kept']} kept from a quiet "
                     f"source + {counts['held']} held for you), board shows {seen}")
     line = (f"board: {counts['created']} new, {counts['updated']} refreshed, "
@@ -875,6 +1101,8 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
             f"{counts['kept']} kept (source quiet), {counts['pinned']} yours (untouched), "
             f"{counts['held']} yours (source stopped reporting it), "
             "read-back ok")
+    for note in counts.get("column_problems") or ():
+        line += f"; {note}"
     if counts["dropped_columns"]:
         # NEVER SILENT. The filter stops a missing column aborting the paint; it must
         # not also hide that the rows went out without it. A board missing `Link` wrote
