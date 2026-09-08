@@ -332,6 +332,35 @@ class TestTheBriefReadsTheCardBeforeTheCardIsWritten:
         _, err = cb.collect(self.BRIEF_SLOT, {}, _tree(tmp_path, date="2026-09-01"))
         assert err is not None and "2026-09-01" in err
 
+    def test_the_BOARD_says_it_too_not_just_the_slack_line(self, tmp_path):
+        """PR #335 reviewer, minor, and they were right. Accepting yesterday's card is
+        only safe because nothing reads it as today's, and I had written that safety
+        into the brief while the Notion board, which is the surface he opens, painted a
+        day-old book with no marker at all."""
+        b = cb.buckets(self.BRIEF_SLOT, {}, _tree(tmp_path, date="2026-09-02"))
+        card_rows = [r for r in b["top_of_mind"] if r["scope"] == "card"]
+        assert card_rows, "no client rows reached the board to check"
+        assert all("yesterday's card" in r["detail"] for r in card_rows), card_rows
+
+    def test_and_says_it_even_when_the_heartbeat_carries_no_counts(self, tmp_path):
+        """PR #335 reviewer, nit. The label rode on the counts line, which is optional,
+        so a heartbeat without counts rendered yesterday's rows unlabelled."""
+        paths = _tree(tmp_path, date="2026-09-02")
+        beat = json.loads(paths["heartbeat"].read_text())
+        beat["card"].pop("counts", None)
+        paths["heartbeat"].write_text(json.dumps(beat))
+        rows, err = cb.collect(self.BRIEF_SLOT, {}, paths)
+        assert err is None, err
+        assert any("yesterday's card" in r for r in rows), rows
+
+    def test_a_fresh_card_is_labelled_with_nothing(self, tmp_path):
+        """The marker is not decoration. On a normal day it must be absent, or it stops
+        carrying information."""
+        b = cb.buckets(self.BRIEF_SLOT, {}, _tree(tmp_path))
+        card_rows = [r for r in b["top_of_mind"] if r["scope"] == "card"]
+        assert card_rows
+        assert not any("yesterday's card" in r["detail"] for r in card_rows)
+
     def test_the_constant_matches_the_plist_that_writes_the_card(self):
         """A literal here would be a second copy of the schedule, free to drift from
         the job it describes. The consulting plist is not in this repo, so this pins

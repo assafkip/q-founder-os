@@ -26,10 +26,17 @@ reasons it is struck, and the second is the expensive one:
 
 ## STALENESS IS AN ERROR, never a quiet mirror
 
-The card is written at 07:30 and this runs after it. If the heartbeat's date is not
-today, this returns an ERROR naming the age rather than rendering yesterday's clients as
-though they were this morning's. A mirror whose source is stale and which still looks
-fresh is worse than a blank section: he would act on it.
+The card is written at 07:30 and THIS RUNS AT 07:00, thirty minutes before it. That
+inversion is real, it is not a typo, and the old text here asserted the opposite. See
+CARD_WRITTEN_AT.
+
+So a card stamped yesterday is two different facts depending on the hour. Before 07:30
+it is simply the newest card that exists, and it is used and LABELLED as yesterday's, on
+the brief and on the board. After 07:30 the 07:30 job has run or failed, so the same
+card is a real failure and returns an ERROR naming the age. What never happens either
+way is yesterday's clients rendered as though they were this morning's: a mirror whose
+source is stale and which still looks fresh is worse than a blank section, because he
+would act on it.
 
 That is the same law the rest of this brief already lives under -- an empty section and a
 broken section are different facts -- applied to a third case the fixed four never had,
@@ -544,15 +551,17 @@ def collect(now: dt.datetime, sources: dict, paths=None):
         return [], card_err
 
     rows = []
+    # NAMED, never silently substituted. The reader accepts yesterday's card before
+    # 07:30 because it is the newest one there is; the promise it must keep is that
+    # nobody reads it as today's. ITS OWN LINE, because the counts line is optional
+    # (PR #335 reviewer, nit) and a heartbeat with no counts rendered yesterday's client
+    # rows with nothing saying so.
+    if beat.get("card_is_yesterdays"):
+        rows.append("book: yesterday's card, today's is written at 07:30")
     counts = (beat.get("card") or {}).get("counts") or {}
     if counts:
-        # NAMED, never silently substituted. The reader accepts yesterday's card before
-        # 07:30 because it is the newest one there is; the promise it must keep is that
-        # nobody reads it as today's.
-        age = " (yesterday's card, today's is written at 07:30)" if beat.get(
-            "card_is_yesterdays") else ""
         rows.append(f"book: {counts.get('red', 0)} owed, "
-                    f"{counts.get('reach', 0)} to reach out{age}")
+                    f"{counts.get('reach', 0)} to reach out")
 
     shown = card_rows[:MAX_CLIENT_ROWS]
     for row in shown:
@@ -745,9 +754,18 @@ def buckets(now: dt.datetime, sources: dict, paths=None) -> dict:
         # reach-out action was silently dropped and read-back still said ok, because
         # `wanted` had already collapsed them before the count was taken. Two different
         # things about one person are two rows.
+        # THE LABEL HAS TO REACH THE BOARD, not just the brief (PR #335 reviewer,
+        # minor). Using yesterday's card is only safe because nothing reads it as
+        # today's, and that safety was written into the Slack line while the Notion
+        # board, which is the surface he actually opens, painted a day-old book with no
+        # marker at all. A safety condition the code states and does not carry on every
+        # surface is the documented-guard-that-does-not-exist shape.
+        detail = row["detail"]
+        if beat.get("card_is_yesterdays"):
+            detail = f"{detail} (from yesterday's card)" if detail else "From yesterday's card."
         item = {"title": f"{row['health']} {row['name']}",
                 "key": f"{row['kind']}:{row['name']}",
-                "detail": row["detail"], "source": "State card", "scope": "card",
+                "detail": detail, "source": "State card", "scope": "card",
                 "priority": PRIORITY_BY_HEALTH.get(row["health"], "P2"),
                 "domain": "Consulting",
                 "done": DONE_BY_KIND.get(row["kind"], DONE_DEFAULT),
