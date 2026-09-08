@@ -521,10 +521,18 @@ def collect(now: dt.datetime, sources: dict, paths=None):
     shown = card_rows[:MAX_CLIENT_ROWS]
     for row in shown:
         rows.append(f"{row['health']} {row['name']} · {row['detail']}")
-    withheld = len(card_rows) - len(shown)
+    # COUNT ONLY WHAT THE BOARD ACTUALLY CARRIES (PR reviewer round 5, minor). This
+    # said "more on the board" about every row past the cap, and since ⚪ and 🟢 stopped
+    # reaching the board at all, some of those rows are nowhere to go and look at. A
+    # pointer to a place the thing is not is worse than no pointer.
+    withheld = len([r for r in card_rows[MAX_CLIENT_ROWS:]
+                    if r["health"] not in ("⚪", "🟢")])
+    quiet = len(card_rows) - len(shown) - withheld
     if withheld:
         # Never a silent trim. The count is the founder's cue that the board has more.
         rows.append(f"...and {withheld} more on the board")
+    if quiet:
+        rows.append(f"...and {quiet} where the ball is not with you")
     move, gtm_err = read_gtm(paths)
     if gtm_err:
         # A missing GTM move does not void the clients. It is named and the section
@@ -578,13 +586,45 @@ PRIORITY_BY_HEALTH = {
 #: AUDHD rule A2 (next physical action) is the same requirement from the other side.
 DONE_DEFAULT = "you have acted on it"
 DONE_BY_KIND = {
-    "client": "you sent the thing you promised",
+    # NOT "you sent the thing you promised". DEC-30, founder-directed 2026-09-06
+    # ("nothing should be mine - Sana is the human"): the promises behind a client
+    # line are Sana's build queue, and a done signal addressed to him made them read
+    # as his to send. What is left for him on a client row is the act no agent can
+    # perform, or the ball moving to their side.
+    "client": "you did the act only you can do, or it moved to their side",
     "reach": "you sent the message",
 }
 #: A GTM step whose plan text carries no "done looks like". Deliberately vague,
 #: because inventing a specific completion test for a step nobody wrote one for would
 #: be this module making up the plan.
 DONE_GTM_FALLBACK = "the step is done or you wrote down why it did not happen"
+#: A row he cannot start from is not a task. The mail producer's key IS the Gmail
+#: thread id (`morning-brief.collect_mail` emits `mail:<thread id>`), so the link needs
+#: no new plumbing and no second source of truth: it is derived from the id the row
+#: already carries. Founder's standing rule: if he cannot copy-paste it, click it or
+#: check it off, it does not belong. Measured 2026-09-07: not one row on the board
+#: carried a URL, including the P0 intro he had to go find in Gmail by hand.
+#:
+#: NO `next` IS WRITTEN FOR AN INBOX ROW (PR reviewer, nit). A constant per source
+#: ("Open the thread and reply.") restates `DONE_BY_SOURCE` in the imperative, which
+#: is the duplication this same change removes from the Notes column. The link plus
+#: the subject is what makes the row startable; a row whose next step is genuinely
+#: worth saying gets it from whoever knows, and the writer never blanks it.
+GMAIL_THREAD = "https://mail.google.com/mail/u/0/#all/"
+
+#: A Gmail thread id is hex. The mail producer's documented FALLBACK key is
+#: `mail:<sender>|<subject>` (see `_FALLBACK_KEY`), and pasting that after the thread
+#: URL builds a link that opens nothing (PR reviewer round 10, minor). A dead link is
+#: worse than no link: it costs a click and teaches him the column lies. No id it can
+#: recognise means no link, and the row still carries its subject and its done signal.
+_THREAD_ID = re.compile(r"^[0-9a-f]{8,24}$", re.I)
+
+
+def gmail_link(key: str):
+    """The thread URL for a `mail:<thread id>` key, or None when the id is not one."""
+    _, _, rest = str(key or "").partition(":")
+    return GMAIL_THREAD + rest if _THREAD_ID.match(rest) else None
+
 DONE_BY_SOURCE = {
     "Gmail": "you replied in the thread",
     "GroupMe": "you answered in the chat",
@@ -676,16 +716,41 @@ def buckets(now: dt.datetime, sources: dict, paths=None) -> dict:
         phrase = my_side_phrase(rec, now) if rec else ""
         if phrase:
             item["detail"] = f"{item['detail']}\n{phrase}" if item["detail"] else phrase
-        # 🔴, 🟠 and 📞 are today. Everything else is this week. The split is the card's
-        # own health verdict, not a rule invented here.
+        # THERE IS NO LONGER A TODAY / THIS-WEEK SPLIT HERE, and the comment that
+        # described one is gone with it (PR reviewer round 3, minor). Every dot the
+        # card surfaces to this board is Top of Mind; the two that are not acts he can
+        # perform do not reach the board at all. What the dot still decides is
+        # PRIORITY_BY_HEALTH, which is the card's own verdict translated, never a
+        # second judgement made here.
         #
-        # 🟠 joined the today group in round 7 (minor): PRIORITY_BY_HEALTH calls it P0
-        # "answer them: a person is waiting on a reply" while this line sent it to This
-        # Week, so one module said today and not-today about the same row. The dot is
-        # not emitted by `state_card.py`, the only producer this reads -- `board_sync`
-        # uses it on the Clients board -- so this makes two tables in this file agree
-        # rather than changing a live path. `_CLIENT_LINE` has always parsed it.
-        (top if row["health"] in ("🔴", "🟠", "📞") else week).append(item)
+        # THE KNOWN COST, taken deliberately (PR reviewer round 3, major). A client
+        # going ⚪ drops its row from `wanted`, so an UNPINNED one is archived, and the
+        # flip back creates a fresh page: it loses the Status he set AND anything he
+        # typed into Link or Next, which this same change went to trouble never to
+        # blank on a live row (round 10, minor: the comment named only Status and that
+        # undersold it). Kept anyway: he asked for these rows gone in as many words,
+        # Status
+        # was measured unused on 2026-09-07 (12 of 12 rows read "Not started", the
+        # painter writes it create-only and nothing else moves it), and the only fix
+        # that preserves it is restoring the archived page instead of creating a new
+        # one, which needs the archived id kept somewhere because Notion's query
+        # returns no archived rows. That is real and is captured, not forgotten.
+        # ⚪ AND 🟢 NEVER REACH THE BOARD. Founder-directed 2026-09-07, verbatim:
+        # *"remove sana stuff from the board"*. ⚪ is "their move" or "Sana owes n" and
+        # 🟢 is "nothing to do"; neither is an act he can perform, so a row for one is
+        # a to-do he cannot start. He still sees them on the Slack card, which is
+        # DEC-30's design and does not change. Measured that evening: five ⚪ rows sat
+        # in This Week carrying his done signal over Sana's build work. DEC-34.
+        if row["health"] in ("⚪", "🟢"):
+            continue
+        # EVERYTHING THE CARD SURFACES IS TOP OF MIND. THE CARD no longer writes
+        # This Week; `read_week` still does, from the GTM queue and from deliverables
+        # due inside the window, and those are genuinely this week's committed work.
+        # What left the section is the client lane, which was eleven machine rows on
+        # 2026-09-07 in a section whose own text says nothing fills it automatically.
+        # Emptying it completely is not this change: the week rows would then have no
+        # home and would be invisible, which is the defect sp-772d21e9 is about.
+        top.append(item)
 
     # The dates failing is reported ONCE, as its own row, never as a line stapled to
     # every client. A test proves this module still delivers with no registry in the
@@ -789,6 +854,9 @@ def buckets(now: dt.datetime, sources: dict, paths=None) -> dict:
                     "Every inbox producer must emit morning-brief.Row(line, key); "
                     "keying on the rendered line is the PR #296 rounds 1-4 defect.")
             inbox.append({"title": text, "key": key, "detail": "",
+                          "link": (gmail_link(key)
+                                   if label == "Gmail" and key.startswith("mail:")
+                                   else None),
                           "source": label, "scope": f"inbox:{label}",
                           # Inbox rows are things a person is waiting on. P2: below a
                           # client he owes something to and below a broken source, above

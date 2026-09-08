@@ -8,6 +8,7 @@ import io
 import json
 import pathlib
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -198,13 +199,35 @@ class TestRound3:
                        _tree(tmp_path))["inbox"][0]["key"]
         assert a == b
 
-    def test_kept_rows_do_not_fake_a_read_back_mismatch(self):
-        """`kept` rows are on the board and deliberately not in `wanted`. Comparing
-        `seen` to `wanted` alone made every quiet source report a mismatch and mark the
-        brief degraded, which trains him to ignore the word."""
+    def test_every_row_on_the_board_is_a_term_of_the_read_back_sum(self):
+        """`kept` and `held` rows are on the board and deliberately not in `wanted`.
+        Comparing `seen` to `wanted` alone made every quiet source report a mismatch and
+        mark the brief degraded, which trains him to ignore the word.
+
+        WIDENED 2026-09-07. The old form matched the literal
+        `expected = counts["wanted"] + counts["kept"]`, which broke when that expression
+        wrapped across two lines even though the property was intact, and could not
+        express a THIRD term at all. `held` (a row he pinned whose producer went quiet)
+        is such a term: it is on the board, so leaving it out reported a mismatch every
+        run after any pinned row went quiet. This asserts the property -- every
+        on-board counter is added, and the deferred-create one is subtracted -- rather
+        than one spelling of it.
+
+        A SOURCE READ, and the reason is not "collect cannot run under pytest" (PR
+        reviewer round 6, minor: three tests in this file drive it, and that claim was
+        simply false). It is that the sum lives inline in `collect`, between a paint
+        and a read-back, so reaching it end to end means standing up a fake Notion for
+        both halves in order to assert one arithmetic expression. The expression is the
+        thing that can go wrong, and this reads it directly.
+        """
         src = (SCRIPTS / "board_rows.py").read_text(encoding="utf-8")
-        assert 'expected = counts["wanted"] + counts["kept"]' in src
-        assert "if seen != expected:" in src
+        m = re.search(r"expected = \(?(.+?)\n\s*if seen != expected:", src, re.S)
+        assert m, "the read-back sum is gone or was renamed"
+        expr = " ".join(m.group(1).split())
+        for on_board in ("wanted", "kept", "held"):
+            assert f'+ counts["{on_board}"]' in expr or expr.startswith(
+                f'counts["{on_board}"]'), (on_board, expr)
+        assert '- counts["deferred_new"]' in expr, expr
 
 
 class TestAQuietSourceNeverArchivesHisRows:
@@ -581,7 +604,16 @@ class TestRound4:
 
             def __call__(self, req, timeout):
                 method, url = req.get_method(), req.full_url
-                if "/databases/" in url and not self.calls:
+                # THE SCHEMA READ IS NOT THE QUERY (PR reviewer round 7, minor). A GET
+                # on /databases/<id> was added ahead of the paint, and it took this
+                # fake's "first call" slot, so the slow query below never ran and the
+                # abandoned-worker path this test exists for stopped being exercised.
+                # Matching on the METHOD keeps the two apart.
+                if method == "GET" and "/databases/" in url:
+                    self.calls.append(("schema", timeout))
+                    return io.BytesIO(b'{"properties": {}}')
+                if "/databases/" in url and not [c for c in self.calls
+                                                 if c[0] != "schema"]:
                     self.calls.append(("query-slow", timeout))
                     time.sleep(slow_first_query_s)
                     return io.BytesIO(b'{"results": [], "has_more": false}')

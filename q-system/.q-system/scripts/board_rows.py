@@ -311,6 +311,12 @@ def _prop_value(prop):
         return ((prop.get("select") or {}).get("name") or "") or None
     if "multi_select" in prop:
         return tuple(sorted((o.get("name") or "") for o in prop.get("multi_select") or []))
+    # `url` joined this list with `Link` (PR reviewer, major). Without it every row
+    # carrying a Link read as unreadable, `_already_holds` was always False, and the
+    # painter PATCHed every Gmail row on every run: a write budget spent re-writing
+    # values that had not changed, and a `last_edited_time` that lied about it.
+    if "url" in prop:
+        return prop.get("url") or None
     # A DISTINCT OBJECT, never None (round 13, minor). The docstring below promised
     # that an unreadable property compares unequal and fails toward writing, while
     # None == None made two unreadable shapes compare EQUAL and skip the write, so a
@@ -381,10 +387,17 @@ def _properties(item, bucket, iid, include_bucket: bool, *, status=None,
     # actionable; `scope=` and `bucket=` are machinery the painter reads back and
     # belong last.
     done = (item.get("done") or "").strip()
+    detail = (item.get("detail") or "").strip()
     note = ""
     if done:
         note += f"Done signal: {done}\n"
-    note += (item.get("detail") or "")[:1500]
+    # THE DETAIL IS NOT THE DONE SIGNAL REPEATED. Measured on the live board
+    # 2026-09-07: 6 of 12 rows carried "Done signal: X" followed by X character for
+    # character, because the GTM producer passes `done_looks_like` as both. The column
+    # truncates in his table view, so what he read was the opening fragment of a
+    # sentence he was about to read again.
+    if detail and detail != done:
+        note += detail[:1500]
     tail = f"{SCOPE_PREFIX}{item.get('scope') or 'card'}"
     tail += f"\n{BUCKET_PREFIX}{record_bucket if record_bucket is not None else bucket}"
     if pinned:
@@ -403,6 +416,24 @@ def _properties(item, bucket, iid, include_bucket: bool, *, status=None,
         # filtered on -- which is the only thing a domain column is for.
         "Domain": {"multi_select": [{"name": item.get("domain") or "Consulting"}]},
     }
+    # NO PRODUCER EMITS `next` TODAY and that is the point (PR reviewer round 3, nit).
+    # The constant one the inbox lane briefly had restated DONE_BY_SOURCE and was cut in
+    # round 1. The column is filled BY HAND, per row, in his own words -- which is the
+    # half of an actionable row nothing here can know -- and this writer's whole job for
+    # it is to refuse to blank what he wrote. A producer that learns a real next step
+    # later needs no change here.
+    #
+    # LINK AND NEXT ARE WRITTEN ONLY WHEN THE PRODUCER SUPPLIES THEM, never blanked.
+    # A row whose producer knows neither keeps whatever a human put there; clearing it
+    # every morning would make the two columns useless on exactly the rows that needed
+    # a person to fill them. Same posture as Size, which this module deliberately does
+    # not write (see the note above `buckets`).
+    link = item.get("link")
+    if link:
+        props["Link"] = {"url": str(link)[:2000]}
+    nxt = item.get("next")
+    if nxt:
+        props["Next"] = {"rich_text": [{"text": {"content": str(nxt)[:1900]}}]}
     priority = item.get("priority")
     if priority:
         props["Priority"] = {"select": {"name": priority}}
@@ -496,10 +527,111 @@ def _fair_share(rows, budget):
     return out
 
 
-def paint(buckets: dict, token, db, opener=None, budget=None) -> dict:
-    """Create, refresh and archive. Returns a counts dict. Never moves a row."""
+def _schema_properties(token, db, opener=None, budget=None):
+    """The property names this database actually carries, or None when unreadable.
+
+    None means "do not filter", which is the behaviour that shipped before this
+    existed. A board whose schema cannot be read is not a board whose columns are
+    gone, and refusing to write on a failed read would turn one bad response into a
+    blank morning.
+    """
+    try:
+        data = _request(token, "GET", f"/databases/{db}", None, opener, budget)
+    except Exception:
+        return None
+    props = (data or {}).get("properties")
+    if not isinstance(props, dict) or not props:
+        return None
+    # NAME AND TYPE, not name alone (PR reviewer round 7, minor). A board carrying a
+    # `Link` column that is rich_text rather than url still takes the 400 this guard
+    # exists to prevent, and the guard would have said the column was fine.
+    return {name: (p or {}).get("type") for name, p in props.items()}
+
+
+#: What `_properties` writes, per column, so a board whose column is a different TYPE
+#: is treated the same as a board that lacks it: dropped, and said out loud.
+WRITES_TYPE = {"Task": "title", "Item id": "rich_text", "Notes": "rich_text",
+               "Domain": "multi_select", "Priority": "select", "Source": "select",
+               "Bucket": "select", "Status": "select", "Link": "url",
+               "Next": "rich_text"}
+
+#: NEVER DROPPABLE (PR reviewer round 8, major). `Item id` is the row's identity: every
+#: lookup, every refresh and every archive decision keys on it, and `existing_rows`
+#: queries the board by its prefix. Dropping it does not degrade a row, it creates a
+#: row this module can never find again -- one more per wanted row per run, forever,
+#: with no error anywhere. `Task` is the title, so a row without it is untitled on his
+#: board. Losing either is worse than the 400 the filter exists to prevent, so a board
+#: that cannot take them stops the paint instead of half-writing it.
+UNDROPPABLE = ("Item id", "Task")
+
+
+class MissingIdentityColumn(RuntimeError):
+    """The board cannot take a column the painter cannot work without."""
+
+
+def _only_known(props: dict, known):
+    """(props this board can take, names dropped). `known` None -> unchanged, nothing
+    dropped, which is what shipped before the filter existed.
+
+    A column is dropped when the board does not have it OR has it under a different
+    type. The caller REPORTS what was dropped: silently writing a row without its link
+    and then printing "read-back ok" is the quiet half-write this whole file is built
+    to refuse (PR reviewer round 7, major).
+    """
+    if known is None:
+        return props, ()
+    keep, dropped = {}, []
+    for k, v in props.items():
+        want = WRITES_TYPE.get(k)
+        if k in known and (want is None or known[k] == want):
+            keep[k] = v
+        else:
+            dropped.append(k)
+    hard = [k for k in UNDROPPABLE if k in dropped]
+    if hard:
+        raise MissingIdentityColumn(
+            f"the board cannot take {', '.join(hard)}, which the painter identifies "
+            "rows by. Writing rows without it would create pages this module can never "
+            "find or archive again, one per row per run. Fix the board's columns.")
+    return keep, tuple(sorted(dropped))
+
+
+def _refuse_without_identity(known):
+    """Raise when the board cannot take a column the painter works by. `known` None
+    (schema unreadable) is not a verdict about the columns, so it passes."""
+    if known is None:
+        return
+    missing = [k for k in UNDROPPABLE
+               if k not in known or known[k] != WRITES_TYPE[k]]
+    if missing:
+        raise MissingIdentityColumn(
+            f"the board cannot take {', '.join(missing)}, which the painter "
+            "identifies rows by. Writing rows without it would create pages this "
+            "module can never find or archive again, one per row per run. Fix the "
+            "board's columns.")
+
+
+def _drop_and_note(props, known, sink: set):
+    """`_only_known`, recording what it dropped into `sink` for the caller to report."""
+    keep, dropped = _only_known(props, known)
+    sink.update(dropped)
+    return keep
+
+
+def paint(buckets: dict, token, db, opener=None, budget=None, known=None) -> dict:
+    """Create, refresh and archive. Returns a counts dict. Never moves a row.
+
+    `known` is the set of property names this board actually has, or None for "write
+    everything", which is what shipped before it existed. It is READ BY THE CALLER and
+    passed in rather than fetched here, so driving `paint` directly makes exactly the
+    requests it always made. See `_schema_properties` for why the filter exists.
+    """
     if buckets.get("error"):
         raise ValueError(buckets["error"])
+
+    #: Every column this run could not write, so the morning line can say so. A link
+    #: dropped in silence is worse than a crash: the crash gets looked at.
+    dropped_cols: set = set()
 
     wanted, scopes, over_cap, capped = {}, {}, 0, set()
     for key, bucket in BUCKET_OF.items():
@@ -540,6 +672,13 @@ def paint(buckets: dict, token, db, opener=None, budget=None) -> dict:
 
     have = existing_rows(token, db, opener, budget=budget)
     created = updated = archived = moved = pinned = unchanged = deferred = 0
+    #: Rows HE pinned whose producer went quiet: kept because he placed them, and
+    #: counted apart from `kept` (a quiet source) and `pinned` (a live row he moved),
+    #: because the morning line reports all three and they are three different facts.
+    #: It is a term of the read-back sum below: a held row IS on the board, so leaving
+    #: it out made the proof report a mismatch every run after any pinned row's
+    #: producer went quiet (PR reviewer round 4, major).
+    held = 0
     deferred_new = 0
 
     def out_of_write_budget() -> bool:
@@ -563,8 +702,9 @@ def paint(buckets: dict, token, db, opener=None, budget=None) -> dict:
                 continue
             _request(token, "POST", "/pages",
                      {"parent": {"database_id": db},
-                      "properties": _properties(item, bucket, iid, include_bucket=True,
-                                                status="Not started")},
+                      "properties": _drop_and_note(
+                          _properties(item, bucket, iid, include_bucket=True,
+                                      status="Not started"), known, dropped_cols)},
                      opener, budget)
             created += 1
         else:
@@ -573,8 +713,14 @@ def paint(buckets: dict, token, db, opener=None, budget=None) -> dict:
             # `_bucket_decision` and the module docstring for how his drag is told from
             # our own stale paint.
             write, record, pin = _bucket_decision(page, bucket)
-            props = _properties(item, record, iid, include_bucket=write,
-                                record_bucket=record, pinned=pin)
+            # FILTERED BEFORE THE COMPARISON, not after (PR reviewer round 6, minor).
+            # Comparing the full property set against a board that cannot hold `Link`
+            # made the row differ forever: it was PATCHed every run, `unchanged` stayed
+            # at zero, and the write budget went on rewriting values nobody changed.
+            # What is compared has to be what is written.
+            props = _drop_and_note(
+                _properties(item, record, iid, include_bucket=write,
+                            record_bucket=record, pinned=pin), known, dropped_cols)
             pinned += 1 if pin else 0
             if _already_holds(page, props):
                 unchanged += 1
@@ -597,6 +743,32 @@ def paint(buckets: dict, token, db, opener=None, budget=None) -> dict:
         if _scope_of(page) not in healthy:
             kept += 1                      # its source could not answer; leave it alone
             continue
+        if _note_field(page, PINNED_LINE.split("=")[0] + "="):
+            # HIS DRAG SURVIVES THE PRODUCER DROPPING THE ROW (PR reviewer, major).
+            # The module's contract is that a row a human moved is never moved or
+            # re-bucketed by the machine, and this loop was the hole in it: a row he
+            # had pinned was still archived the moment its producer stopped emitting
+            # it, taking his placement and his Status with it and recreating the row
+            # at "Not started" when the producer came back. Filtering white client
+            # lines out of the board (DEC-34) makes that flip ordinary rather than
+            # rare, which is how the reviewer found it.
+            #
+            # HIS EXIT IS HIS OWN ARCHIVE, and that is the whole answer to "a pinned
+            # row has no exit" (PR reviewer round 2, major). The first answer was a
+            # stamp written into the row's Notes saying its source had gone quiet. It
+            # cost three findings across two rounds and the last of them was serious:
+            # the note's machinery lines (`scope=`, `bucket=`, `pinned=`) live at the
+            # END, so truncating the note to make room for the stamp deleted the pin
+            # the stamp existed to protect. The file already warns about exactly that
+            # above NOTE_CAP, and the fix walked into it anyway.
+            #
+            # A row he pinned is a row he placed. This module's contract is that the
+            # machine never moves or removes it; removing it is his, in the UI, the
+            # same exit he has for every other row he ever pinned. Counted as `held`
+            # rather than folded into `kept`, because `kept` means the SOURCE went
+            # quiet and this source answered fine.
+            held += 1
+            continue
         if out_of_write_budget():
             # An unarchived row is on the board, so it counts as kept for the read-back
             # or the proof would report a mismatch about a row we deliberately left.
@@ -607,6 +779,7 @@ def paint(buckets: dict, token, db, opener=None, budget=None) -> dict:
         archived += 1
 
     return {"created": created, "updated": updated, "archived": archived,
+            "held": held, "dropped_columns": tuple(sorted(dropped_cols)),
             "kept": kept, "wanted": len(wanted), "moved": moved, "pinned": pinned,
             "over_cap": over_cap, "unchanged": unchanged, "deferred": deferred,
             # Rows we WANTED but never created: they are not on the board, so the
@@ -645,7 +818,18 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
         # The lock is held INSIDE the budget: a painter that runs out of time also
         # lets go, so the 07:40 job is not refused by a worker the brief abandoned.
         with exclusive():
-            counts = paint(buckets, token, db, opener, budget)
+            # The schema read happens HERE, once per run, and its answer is handed
+            # to the painter. See `_schema_properties`: a board that predates `Link`
+            # and `Next` would otherwise take a 400 on the first row and lose the
+            # whole morning's paint to a column nobody noticed was missing.
+            known = _schema_properties(token, db, opener, budget)
+            # BEFORE THE FIRST QUERY, not inside the write loop. `existing_rows`
+            # filters on `Item id`, so a board without that column takes a raw 400
+            # from Notion before `_only_known` is ever reached and the remediation
+            # sentence never fires (round 10, minor). Checked here, the one failure a
+            # person can fix is the one they are told about.
+            _refuse_without_identity(known)
+            counts = paint(buckets, token, db, opener, budget, known=known)
         dupes = {}
         seen = len(existing_rows(token, db, opener, dupes_out=dupes, budget=budget))
         return counts, dupes, seen
@@ -659,6 +843,13 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
         # call refuses. Partial writes up to that point are ordinary rows the next
         # paint reconciles; what cannot happen is a write after the brief moved on.
         return [], f"board write timed out: {exc}; no further write lands"
+    except MissingIdentityColumn as exc:
+        # ITS OWN ARM, ahead of the generic one (PR reviewer round 9, minor). This is
+        # the one failure here that a person can actually fix, and the whole point of
+        # raising it is the sentence it carries. Falling through to the generic arm
+        # printed "MissingIdentityColumn" and threw the remediation away, which is the
+        # class-name-instead-of-help shape this file refuses everywhere else.
+        return [], str(exc)
     except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError) as exc:
         return [], f"board write failed: {type(exc).__name__}: {exc}"
 
@@ -670,18 +861,34 @@ def collect(now, sources: dict, opener=None, token_file=None, db_file=None,
     # board and deliberately not in `wanted`. Round 3 (major): comparing `seen` to
     # `wanted` alone made every quiet source report a false read-back mismatch and mark
     # the whole brief degraded, which would have trained him to ignore the word.
-    expected = counts["wanted"] + counts["kept"] - counts["deferred_new"]
+    expected = (counts["wanted"] + counts["kept"] + counts["held"]
+                - counts["deferred_new"])
     if seen != expected:
         # The write-only-integration scar: a PATCH that returns 200 is not proof the
         # board holds what we think. The read-back is the proof.
         return [], (f"read-back mismatch: expected {expected} row(s) "
                     f"({counts['wanted']} written + {counts['kept']} kept from a quiet "
-                    f"source), board shows {seen}")
+                    f"source + {counts['held']} held for you), board shows {seen}")
     line = (f"board: {counts['created']} new, {counts['updated']} refreshed, "
             f"{counts['unchanged']} unchanged, "
             f"{counts['moved']} rebucketed, {counts['archived']} cleared, "
             f"{counts['kept']} kept (source quiet), {counts['pinned']} yours (untouched), "
+            f"{counts['held']} yours (source stopped reporting it), "
             "read-back ok")
+    if counts["dropped_columns"]:
+        # NEVER SILENT. The filter stops a missing column aborting the paint; it must
+        # not also hide that the rows went out without it. A board missing `Link` wrote
+        # every row without its link and still said "read-back ok" (round 7, major).
+        #
+        # "cannot take", not "has no": the column may be present under the wrong TYPE,
+        # and telling him it is missing sends him looking for something that is there
+        # (round 8, minor). The plural is counted rather than assumed for the same
+        # reason: a line that says "column" about three of them reads as one.
+        names = counts["dropped_columns"]
+        line += ("; this board cannot take the "
+                 + ", ".join(names)
+                 + (" columns" if len(names) > 1 else " column")
+                 + ", so those values were not written")
     if counts["over_cap"]:
         line += f"; {counts['over_cap']} row(s) over the {BUDGET_ROWS}-row cap, not written"
     if counts["deferred"]:
