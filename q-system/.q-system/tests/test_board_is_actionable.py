@@ -939,6 +939,27 @@ class TestNoTestCanWriteTheLiveColumnRecord:
         br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
         assert seen.get("record") == br.COLUMNS_MADE, seen
 
+    def test_the_live_path_is_refused_even_when_collect_names_it(self, monkeypatch):
+        """THE REGRESSION THIS GUARD EXISTS FOR. Requiring an explicit `record=` closed
+        the direct callers and opened the one that mattered: `collect` names
+        COLUMNS_MADE itself, so any test reaching `collect` sailed through a check the
+        previous commit would have failed (round 3, major). The signal is `sys.modules`,
+        because every collect-level test here deletes PYTEST_CURRENT_TEST to get past
+        the board's own chokepoint."""
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        with pytest.raises(AssertionError) as e:
+            br._remember_columns("db", ["Link"], br._LIVE_RECORD)
+        assert "live column record" in str(e.value)
+        with pytest.raises(AssertionError):
+            br._columns_made("db", br._LIVE_RECORD)
+
+    def test_redirecting_columns_made_is_how_a_test_opts_in(self, monkeypatch, tmp_path):
+        """The escape hatch is the same one LOCK_FILE already uses, so the habit is
+        one habit rather than two."""
+        monkeypatch.setattr(br, "COLUMNS_MADE", tmp_path / "made.json")
+        br._remember_columns("db", ["Link"], br.COLUMNS_MADE)
+        assert br._columns_made("db", br.COLUMNS_MADE) == {"Link"}
+
     def test_ensure_columns_cannot_be_called_without_a_record(self):
         """The refusal used to arrive from two frames down, as an AssertionError no
         `collect` arm catches, instead of from the call a person was looking at

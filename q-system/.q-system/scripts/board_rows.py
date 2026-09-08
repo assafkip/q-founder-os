@@ -71,6 +71,7 @@ import fcntl
 import hashlib
 import json
 import os
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -640,6 +641,38 @@ CREATABLE = tuple(n for n in WRITES_TYPE if n not in UNDROPPABLE)
 #: ABSENT was deleted by a person, and this module does not put it back.
 COLUMNS_MADE = STATE_DIR / "board-columns-created.json"
 
+#: THE REAL LOCATION, frozen. Tests redirect `COLUMNS_MADE`; nothing redirects this, so
+#: it is what "am I about to touch the founder's live file" is measured against.
+_LIVE_RECORD = STATE_DIR / "board-columns-created.json"
+
+
+def _refuse_live_record_under_test(path):
+    """Refuse the founder's real record file while a test is running.
+
+    THE GUARD HAS TO SURVIVE `collect` NAMING THE PATH (PR #334 reviewer round 3,
+    major). Requiring an explicit `record=` closed the direct callers and opened the
+    one that mattered: `collect` names COLUMNS_MADE itself, so any test reaching
+    `collect` sailed through a check the previous commit would have failed. My fix made
+    the exact incident case worse while the commit message said it was closed.
+
+    And it cannot key on PYTEST_CURRENT_TEST, because every collect-level test in this
+    suite deletes that variable to get past the board's own chokepoint. `sys.modules`
+    is the honest signal: pytest is imported for the whole run and no test removes it.
+    A test that wants this path redirects `COLUMNS_MADE`, which is what the others
+    already do for `LOCK_FILE`.
+    """
+    if "pytest" not in sys.modules:
+        return
+    try:
+        same = Path(path).resolve() == _LIVE_RECORD.resolve()
+    except OSError:
+        same = str(path) == str(_LIVE_RECORD)
+    if same:
+        raise AssertionError(
+            f"a test reached the live column record at {_LIVE_RECORD}. Redirect it "
+            "with monkeypatch.setattr(board_rows, 'COLUMNS_MADE', tmp_path / ...), "
+            "the way LOCK_FILE is redirected.")
+
 
 
 def _columns_made(db, path=None):
@@ -660,6 +693,7 @@ def _columns_made(db, path=None):
         raise AssertionError(
             "no record path given. Production passes record=COLUMNS_MADE explicitly; "
             "a test passes its own tmp path. There is no default.")
+    _refuse_live_record_under_test(path)
     try:
         data = json.loads(Path(path).read_text("utf-8"))
     except (OSError, ValueError):
@@ -707,6 +741,7 @@ def _remember_columns(db, names, path=None):
         raise AssertionError(
             "no record path given. Production passes record=COLUMNS_MADE explicitly; "
             "a test passes its own tmp path. There is no default.")
+    _refuse_live_record_under_test(path)
     p = Path(path)
     try:
         data = json.loads(p.read_text("utf-8")) or {}
