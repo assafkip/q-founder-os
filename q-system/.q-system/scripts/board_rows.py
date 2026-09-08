@@ -722,8 +722,21 @@ def _remember_columns(db, names, path=None):
         pass
 
 
-def ensure_columns(known, token, db, opener=None, budget=None, record=None):
+def ensure_columns(known, token, db, opener=None, budget=None, *, record):
     """Add the optional columns this board is missing. Returns (schema, problems).
+
+    `record` IS REQUIRED, and keyword-only so it cannot be passed by accident (PR #334
+    reviewer round 2, minor). The inner reader and writer both refuse a missing path,
+    and this signature still offered `record=None`, so the refusal arrived from two
+    frames down as an AssertionError no `collect` arm catches, instead of from the call
+    a person was looking at. A default whose only outcome is a crash is not a default.
+    `opener` and `budget` keep theirs: those are genuinely optional and every test in
+    the suite omits them.
+
+    A REFUSED OR UNCONFIRMED CREATE is not fatal and degrades with its reason on the
+    line. A missing `record` is a programming error and is meant to be loud; the old
+    docstring flattened both into "failure here is not fatal", which was true of one of
+    them.
 
     THE FEATURE WAS DEAD ON EVERY BOARD BUT ONE (PR reviewer round 12, major). Nothing
     created `Link`, so `_only_known` dropped it on every run and the morning line said

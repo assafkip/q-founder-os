@@ -939,6 +939,13 @@ class TestNoTestCanWriteTheLiveColumnRecord:
         br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
         assert seen.get("record") == br.COLUMNS_MADE, seen
 
+    def test_ensure_columns_cannot_be_called_without_a_record(self):
+        """The refusal used to arrive from two frames down, as an AssertionError no
+        `collect` arm catches, instead of from the call a person was looking at
+        (round 2, minor). It is a TypeError at the call site now."""
+        with pytest.raises(TypeError):
+            br.ensure_columns({"Task": "title"}, "tok", "db")
+
     def test_reading_without_a_record_path_also_raises(self, monkeypatch):
         """The write lost its default and the comment said there was none left, while
         the READ still had one, so a caller that omitted `record=` quietly consulted
