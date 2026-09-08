@@ -624,6 +624,14 @@ ENGINEERING_SECTIONS = (
     ("overnight", "Overnight jobs"),
 )
 
+#: THE CLOCK WARNING IS ROUTED SEPARATELY and is deliberately NOT in the tuple above.
+#: That tuple means "collected by collect_all", and `engineering_route.route` treats a
+#: missing key there as degraded, correctly: a section that vanished from collection is
+#: news. This one is INJECTED, so adding it there made every partial-sources caller page
+#: Sana about a section nobody had collected. Three tests caught it, which is the
+#: contract working. Same machinery, its own one-entry section list.
+CLOCK_SECTION = (("board_clock", "Board clock"),)
+
 
 # Optional sections live in their OWN sibling modules and register here, once.
 # Each module exposes `collect(now, sources) -> (rows, error)` and receives the
@@ -784,6 +792,25 @@ def route_engineering(sources: dict, notify=None) -> list:
     """
     mod = _load_sibling("engineering_route", "engineering_route.py")
     return mod.route(sources, ENGINEERING_SECTIONS, notify=notify)   # (filed, failed)
+
+
+def route_clock(now: dt.datetime, notify=None) -> tuple:
+    """(filed, failed) for the one signal that says this brief ran too early.
+
+    Its own route rather than a third ENGINEERING_SECTIONS entry: see CLOCK_SECTION.
+    Silent unless `consulting_board.clock_warning` returns an error, and never at the
+    cost of his brief, which is why the module absence and the call both fall back to a
+    clean answer rather than raising.
+    """
+    board = _optional_module("consulting_board")
+    if board is None:
+        return [], []
+    try:
+        entry = board.clock_warning(now)
+    except Exception as exc:                            # noqa: BLE001
+        entry = ([], f"clock_warning failed: {exc}")
+    mod = _load_sibling("engineering_route", "engineering_route.py")
+    return mod.route({"board_clock": entry}, CLOCK_SECTION, notify=notify)
 
 
 #: What the hourly run collects. Mail and GroupMe are the inbox; board_rows paints it.
@@ -958,8 +985,13 @@ def main(argv=None) -> int:
     sources = collect_all(now)
     # Engineering leaves BEFORE the founder's message is built, so a routing failure
     # cannot silently become a section he reads.
-    filed, failed = route_engineering(
-        sources, notify=(lambda _m: None) if args.dry_run else None)
+    _quiet = (lambda _m: None) if args.dry_run else None
+    filed, failed = route_engineering(sources, notify=_quiet)
+    # THE DRIFT SIGNAL. It replaces a P0 row on his board with one line in Sana's queue,
+    # so deleting that row did not make an early brief silent.
+    clock_filed, clock_failed = route_clock(now, notify=_quiet)
+    filed = list(filed) + list(clock_filed)
+    failed = list(failed) + list(clock_failed)
     for line in filed:
         # DRY RUN SAYS SO (round 11, minor). The notifier injected above sends
         # nothing, and this printed the same "[to sana]" either way, so a dry run

@@ -330,11 +330,48 @@ class TestTheBriefReadsTheCardBeforeTheCardIsWritten:
         assert cb.collect(before, {}, _tree(tmp_path, date="2026-09-02"))[1] is None
         assert cb.collect(at, {}, _tree(tmp_path, date="2026-09-02"))[1] is not None
 
-    def test_a_card_older_than_yesterday_is_refused_at_any_hour(self, tmp_path):
+    @pytest.mark.parametrize("hour_utc,label", [(14, "07:00 PT, before the card"),
+                                                (14 + 1, "08:00 PT, after it")])
+    def test_a_card_older_than_yesterday_is_refused_at_any_hour(self, tmp_path,
+                                                                hour_utc, label):
         """The window is one day wide on purpose. Two days means a job has been dead
-        through a run that should have fixed it."""
-        _, err = cb.collect(self.EARLY, {}, _tree(tmp_path, date="2026-09-01"))
-        assert err is not None and "2026-09-01" in err
+        through a run that should have fixed it.
+
+        BOTH HOURS, because the name said "at any hour" and the body drove one (PR #335
+        reviewer round 6, nit). A test whose name claims a range and whose body checks a
+        point is the kind of coverage that reads as proof and is not."""
+        when = dt.datetime(2026, 9, 3, hour_utc, 0, tzinfo=dt.timezone.utc)
+        _, err = cb.collect(when, {}, _tree(tmp_path, date="2026-09-01"))
+        assert err is not None and "2026-09-01" in err, label
+
+    def test_a_heartbeat_whose_card_is_not_an_object_is_refused(self, tmp_path):
+        """PR #335 reviewer round 6, nit. The new isinstance guard proved `beat` was an
+        object and the next line called .get on whatever `card` was."""
+        paths = _tree(tmp_path)
+        paths["heartbeat"].write_text(json.dumps({"at": "x", "card": "yesterday"}))
+        _, err = cb.read_heartbeat(self.EARLY, paths)
+        assert err and "not an object" in err
+
+    def test_a_heartbeat_that_is_not_an_object_at_all_is_refused(self, tmp_path):
+        paths = _tree(tmp_path)
+        paths["heartbeat"].write_text(json.dumps(["not", "a", "dict"]))
+        _, err = cb.read_heartbeat(self.EARLY, paths)
+        assert err and "not an object" in err
+
+    def test_an_early_run_tells_SANA_since_it_no_longer_tells_him(self, tmp_path):
+        """THE SIGNAL CHANGED AUDIENCE, it did not disappear (PR #335 reviewer round 6,
+        minor). Deleting the P0 alarm row without this would have made a real
+        misconfiguration silent, which is worse than the noisy version."""
+        rows, err = cb.clock_warning(self.EARLY, _tree(tmp_path, date="2026-09-02"))
+        assert rows == []
+        assert err and "drifted early" in err
+
+    def test_and_says_nothing_on_a_normal_run(self, tmp_path):
+        """An engineering channel that fires every morning is an engineering channel
+        that gets muted."""
+        assert cb.clock_warning(self.EARLY, _tree(tmp_path)) == ([], None)
+        after = dt.datetime(2026, 9, 3, 15, 0, tzinfo=dt.timezone.utc)
+        assert cb.clock_warning(after, _tree(tmp_path)) == ([], None)
 
     def test_the_BOARD_says_it_too_not_just_the_slack_line(self, tmp_path):
         """PR #335 reviewer, minor, and they were right. Accepting yesterday's card is
@@ -643,6 +680,24 @@ class TestEngineeringLeavesHisBrief:
             notify=broken)
         assert filed == []
         assert len(failed) == 2 and all("notifier down" in why for _l, why in failed)
+
+    def test_the_clock_signal_is_NOT_in_the_collected_tuple(self):
+        """The contract I broke and three tests caught. ENGINEERING_SECTIONS means
+        "collected by collect_all", and `route` treats a missing key there as degraded,
+        correctly. The clock signal is injected, so listing it there made every caller
+        with a partial sources dict page Sana about a section nobody collected."""
+        mb = self._brief()
+        assert {k for k, _ in mb.ENGINEERING_SECTIONS} == {"owed", "overnight"}
+        assert {k for k, _ in mb.CLOCK_SECTION} == {"board_clock"}
+
+    def test_the_clock_route_is_silent_on_a_normal_run(self):
+        """It fires only when this brief ran before the card, which the committed
+        schedule makes impossible. An engineering channel that speaks every morning is
+        one that gets muted."""
+        mb = self._brief()
+        sent = []
+        filed, failed = mb.route_clock(NOW, notify=sent.append)
+        assert sent == [] and filed == [] and failed == []
 
     def test_a_healthy_section_pages_nobody(self):
         """A ticket every morning is how an alert channel gets muted."""

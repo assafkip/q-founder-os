@@ -366,7 +366,14 @@ def read_heartbeat(now: dt.datetime, paths=None) -> tuple[dict, str | None]:
         return beat, (f"the {CARD_WRITTEN_AT.strftime('%H:%M')} state card crashed: "
                       f"{beat['crash']}")
 
-    stamped = (beat.get("card") or {}).get("date")
+    # A MALFORMED `card` VALUE IS A REFUSAL, NOT A CRASH (PR #335 reviewer round 6,
+    # nit). The isinstance check above proved `beat` is an object and then this line
+    # called .get on whatever `card` happened to be, so a heartbeat carrying a string
+    # there raised AttributeError two frames from anything that reads like a cause.
+    card = beat.get("card")
+    if card is not None and not isinstance(card, dict):
+        return beat, f"{path.name} carries a 'card' that is not an object"
+    stamped = (card or {}).get("date")
     local = now.astimezone(PT)
     today = local.date().isoformat()
     if stamped == today:
@@ -388,6 +395,35 @@ def read_heartbeat(now: dt.datetime, paths=None) -> tuple[dict, str | None]:
 
     return beat, (f"the state card is from {stamped}, not {today}. "
                   "Showing it as today's book would be wrong, so it is withheld")
+
+
+def clock_warning(now: dt.datetime, paths=None) -> tuple[list, str | None]:
+    """(rows, error) shaped for the brief's ENGINEERING route, never for his message.
+
+    THE SIGNAL THAT FOUND THE DRIFT MUST NOT DIE WITH THE ROW THAT CARRIED IT (PR #335
+    reviewer round 6, minor, and they were right). Before this PR the only thing that
+    reacted to a brief running early was a P0 alarm row on the founder's board. That row
+    was unactionable, pointed at the wrong cause, and appeared every morning, so it had
+    to go. Removing it without replacing it would have made a real misconfiguration
+    silent, which is a worse defect than the noisy one.
+
+    So the signal changes AUDIENCE rather than disappearing. On the committed schedule
+    the brief runs at 07:40 and this never fires. If it fires, either the loaded job has
+    drifted early, which is exactly what happened for four days, or someone ran the
+    brief by hand. `founder-notifications.md`, founder-directed 2026-08-10: engineering
+    signal goes to Sana's Linear triage and never to him.
+
+    It re-reads the heartbeat rather than being handed one, so the route stays a pure
+    function of the same file `collect` reads. That is one extra small file read per
+    run, and the alternative is threading a control flag through a second caller.
+    """
+    beat, err = read_heartbeat(now, paths)
+    if err is None and beat.get("card_is_yesterdays"):
+        return [], ("the brief read a state card stamped yesterday, which the committed "
+                    f"{CARD_WRITTEN_AT.strftime('%H:%M')} card and "
+                    "07:40 brief make impossible: com.kipi.morning-brief has drifted "
+                    "early in ~/Library/LaunchAgents, or this was a hand run")
+    return [], None
 
 
 def read_gtm(paths=None) -> tuple[dict | None, str | None]:
