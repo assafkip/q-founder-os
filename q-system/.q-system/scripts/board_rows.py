@@ -606,10 +606,16 @@ def _only_known(props: dict, known):
     return keep, dropped
 
 
-#: Columns this module writes that it will CREATE on a board that lacks them. The
-#: identity columns are NOT here on purpose: a board with no `Item id` is not a board
-#: this module should quietly reshape, it is a board someone should look at.
-CREATABLE = ("Link", "Next")
+#: Columns this module writes that it will CREATE on a board that lacks them:
+#: EVERYTHING IT WRITES except the identity pair. Listing only Link and Next was a
+#: half-heal (PR #332 reviewer round 3, major): a board missing `Notes` cannot carry
+#: the `scope=` line, so `_scope_of` reads unknown and no row is ever archived, and a
+#: board missing `Bucket` puts every row in none of his three sections. Both were
+#: "healed" boards reporting no problem at all.
+#:
+#: DERIVED, never restated. A column added to WRITES_TYPE and forgotten here would be
+#: the same silent half-heal again, one release later.
+CREATABLE = tuple(n for n in WRITES_TYPE if n not in UNDROPPABLE)
 
 
 def ensure_columns(known, token, db, opener=None, budget=None):

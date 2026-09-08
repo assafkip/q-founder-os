@@ -620,8 +620,13 @@ class TestTheBoardHealsItsOwnOptionalColumns:
     dropped on each run and the line said the board could not take it, forever, with
     no way given to change that (PR reviewer round 12, major)."""
 
+    #: A board from before Link and Next existed: everything else, right types. Written
+    #: out BY HAND rather than derived from WRITES_TYPE, so a column added there and
+    #: forgotten in CREATABLE cannot quietly make this fixture agree with itself.
     OLD = {"Task": "title", "Item id": "rich_text", "Notes": "rich_text",
-           "Domain": "multi_select", "Priority": "select", "Source": "select"}
+           "Domain": "multi_select", "Priority": "select", "Source": "select",
+           "Bucket": "select", "Status": "select"}
+    COMPLETE = dict(OLD, Link="url", Next="rich_text")
 
     def _notion_patch(self, sent, returns):
         """Notion answers a schema PATCH with the whole database. The fake has to as
@@ -634,8 +639,7 @@ class TestTheBoardHealsItsOwnOptionalColumns:
 
     def test_a_missing_column_is_created_and_then_usable(self, monkeypatch):
         sent = []
-        after = {"properties": {n: {"type": t} for n, t in
-                                dict(self.OLD, Link="url", Next="rich_text").items()}}
+        after = {"properties": {n: {"type": t} for n, t in self.COMPLETE.items()}}
         monkeypatch.setattr(br, "_request", self._notion_patch(sent, after))
         out, problems = br.ensure_columns(dict(self.OLD), "tok", "db")
         assert problems == (), problems
@@ -648,8 +652,8 @@ class TestTheBoardHealsItsOwnOptionalColumns:
         sent = []
         monkeypatch.setattr(br, "_request",
                             lambda *a, **k: sent.append(a))
-        board = dict(self.OLD, Link="url", Next="rich_text")
-        assert br.ensure_columns(dict(board), "tok", "db") == (board, ())
+        assert br.ensure_columns(dict(self.COMPLETE), "tok", "db") == (
+            self.COMPLETE, ())
         assert sent == [], sent
 
     def test_a_create_notion_does_not_confirm_is_not_believed(self, monkeypatch):
@@ -679,6 +683,25 @@ class TestTheBoardHealsItsOwnOptionalColumns:
     def test_the_identity_columns_are_never_created(self):
         """A board with no `Item id` is not one this module should quietly reshape."""
         assert "Item id" not in br.CREATABLE and "Task" not in br.CREATABLE
+
+    def test_every_column_it_writes_can_be_created_except_identity(self):
+        """Listing only Link and Next was a half-heal: a board missing `Notes` cannot
+        carry the `scope=` line, so nothing is ever archived, and one missing `Bucket`
+        shows rows in none of his three sections. Both reported no problem at all
+        (PR #332 reviewer round 3, major). Written out BY HAND so a column added to
+        WRITES_TYPE and forgotten cannot take this test with it."""
+        assert set(br.CREATABLE) == {"Notes", "Domain", "Priority", "Source",
+                                     "Bucket", "Status", "Link", "Next"}, br.CREATABLE
+
+    def test_a_board_missing_notes_and_bucket_is_healed_too(self, monkeypatch):
+        bare = {"Task": "title", "Item id": "rich_text"}
+        sent = []
+        after = {"properties": {n: {"type": t} for n, t in br.WRITES_TYPE.items()}}
+        monkeypatch.setattr(br, "_request", self._notion_patch(sent, after))
+        out, problems = br.ensure_columns(dict(bare), "tok", "db")
+        asked = set(sent[0][2]["properties"])
+        assert {"Notes", "Bucket"} <= asked, asked
+        assert problems == () and out["Notes"] == "rich_text", (out, problems)
 
     def test_the_runner_checks_identity_before_it_heals(self, monkeypatch, tmp_path):
         order = []
@@ -710,3 +733,41 @@ class TestTheBoardHealsItsOwnOptionalColumns:
         # columns were PATCHed onto a database this module then rejected as not its
         # board (PR #332 reviewer, major).
         assert order == ["identity", "heal"], order
+
+
+class TestAFailedColumnCreationReachesTheLine:
+    """Every test that reaches the morning line stubs `ensure_columns`, so the sentence
+    for a refused creation was asserted nowhere and deleting it left the suite green
+    (PR #332 reviewer round 3, minor)."""
+
+    COUNTS = {"created": 0, "updated": 0, "archived": 0, "kept": 0, "held": 0,
+              "wanted": 0, "moved": 0, "pinned": 0, "over_cap": 0, "unchanged": 0,
+              "deferred": 0, "deferred_new": 0, "dropped_columns": ()}
+
+    def _line(self, monkeypatch, tmp_path, problems):
+        monkeypatch.setattr(br, "_schema_properties",
+                            lambda *a, **k: {"Task": "title", "Item id": "rich_text"})
+        # NOT stubbed away this time: the whole point is the value it hands back.
+        monkeypatch.setattr(br, "ensure_columns",
+                            lambda known, *a, **k: (known, problems))
+        monkeypatch.setattr(br, "paint", lambda *a, **k: dict(self.COUNTS))
+        monkeypatch.setattr(br, "existing_rows", lambda *a, **k: {})
+        def no_network(*a, **k):
+            raise AssertionError("a test tried to reach Notion")
+        monkeypatch.setattr(br, "_request", no_network)
+        monkeypatch.setattr(br, "LOCK_FILE", tmp_path / "board-rows.lock")
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.delenv("KIPI_BRIEF_DRY_RUN", raising=False)
+        tf = tmp_path / "notion-token"; tf.write_text("t", encoding="utf-8")
+        dbf = tmp_path / "notion-board-db"; dbf.write_text("d", encoding="utf-8")
+        rows, err = br.collect(NOW, {}, token_file=str(tf), db_file=str(dbf))
+        assert err is None, err
+        return rows[0]
+
+    def test_a_refusal_is_named_on_the_line(self, monkeypatch, tmp_path):
+        line = self._line(monkeypatch, tmp_path, ("HTTPError: 403 restricted",))
+        assert "could not add a column" in line and "403 restricted" in line, line
+
+    def test_a_clean_run_says_nothing_about_it(self, monkeypatch, tmp_path):
+        line = self._line(monkeypatch, tmp_path, ())
+        assert "could not add a column" not in line, line
