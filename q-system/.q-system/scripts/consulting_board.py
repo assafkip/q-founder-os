@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import plistlib
 import os
 import re
 from pathlib import Path
@@ -397,33 +398,60 @@ def read_heartbeat(now: dt.datetime, paths=None) -> tuple[dict, str | None]:
                   "Showing it as today's book would be wrong, so it is withheld")
 
 
-def clock_warning(now: dt.datetime, paths=None) -> tuple[list, str | None]:
+#: The job whose schedule this checks, and where launchd actually reads it from.
+BRIEF_LABEL = "com.kipi.morning-brief"
+LAUNCH_AGENTS = Path.home() / "Library" / "LaunchAgents"
+
+
+def clock_warning(now: dt.datetime, agents_dir=None) -> tuple[list, str | None]:
     """(rows, error) shaped for the brief's ENGINEERING route, never for his message.
 
     THE SIGNAL THAT FOUND THE DRIFT MUST NOT DIE WITH THE ROW THAT CARRIED IT (PR #335
-    reviewer round 6, minor, and they were right). Before this PR the only thing that
-    reacted to a brief running early was a P0 alarm row on the founder's board. That row
-    was unactionable, pointed at the wrong cause, and appeared every morning, so it had
-    to go. Removing it without replacing it would have made a real misconfiguration
-    silent, which is a worse defect than the noisy one.
+    reviewer round 6). Before this PR the only thing that reacted to a brief running
+    early was a P0 alarm row on the founder's board: unactionable, wrong about the
+    cause, and painted every morning, so it had to go. Removing it with nothing in its
+    place would have made a real misconfiguration silent, which is the worse defect.
+    The drift found on 2026-09-08 had run four days and that row is what exposed it.
+    So the signal changes AUDIENCE. `founder-notifications.md`, founder-directed
+    2026-08-10: engineering signal goes to Sana's Linear triage and never to him.
 
-    So the signal changes AUDIENCE rather than disappearing. On the committed schedule
-    the brief runs at 07:40 and this never fires. If it fires, either the loaded job has
-    drifted early, which is exactly what happened for four days, or someone ran the
-    brief by hand. `founder-notifications.md`, founder-directed 2026-08-10: engineering
-    signal goes to Sana's Linear triage and never to him.
+    IT READS THE LOADED JOB, not the heartbeat, and that is the third design (round 7).
+    Reading the heartbeat a second time raced the 07:30 card job: a run straddling
+    07:30 would see yesterday's card in `collect`, today's here, and report nothing,
+    losing exactly the run the signal exists for. Caching the first verdict on the
+    module looked like the fix and was DEAD ON ARRIVAL: morning-brief's `_load_sibling`
+    execs a fresh module per call, so the cache is always empty and the fallback read
+    always runs. My own test caught that, not review.
 
-    It re-reads the heartbeat rather than being handed one, so the route stays a pure
-    function of the same file `collect` reads. That is one extra small file read per
-    run, and the alternative is threading a control flag through a second caller.
+    So it asks the question directly. The condition is not "was the card stale on this
+    run", it is "is this job scheduled before the card it mirrors", which is a fact
+    about the machine, has no clock in it, and cannot race. It also does not fire on a
+    hand run before 07:30, which the time-based version would have, and an engineering
+    channel that speaks every time someone runs the brief by hand is one that gets
+    muted.
     """
-    beat, err = read_heartbeat(now, paths)
-    if err is None and beat.get("card_is_yesterdays"):
-        return [], ("the brief read a state card stamped yesterday, which the committed "
-                    f"{CARD_WRITTEN_AT.strftime('%H:%M')} card and "
-                    "07:40 brief make impossible: com.kipi.morning-brief has drifted "
-                    "early in ~/Library/LaunchAgents, or this was a hand run")
-    return [], None
+    path = Path(agents_dir or LAUNCH_AGENTS) / f"{BRIEF_LABEL}.plist"
+    if not path.is_file():
+        # No loaded job means nobody scheduled this run. Not news.
+        return [], None
+    try:
+        cal = plistlib.loads(path.read_bytes()).get("StartCalendarInterval")
+    except Exception:                                   # noqa: BLE001
+        # A plist this cannot parse is a machine problem, but it is not THIS signal,
+        # and guessing would file a wrong ticket. Silent by design.
+        return [], None
+    slots = cal if isinstance(cal, list) else [cal] if isinstance(cal, dict) else []
+    card = CARD_WRITTEN_AT.hour * 60 + CARD_WRITTEN_AT.minute
+    early = sorted(
+        "%02d:%02d" % (e.get("Hour", 0), e.get("Minute", 0)) for e in slots
+        if isinstance(e, dict)
+        and (e.get("Hour", 0) * 60 + e.get("Minute", 0)) < card)
+    if not early:
+        return [], None
+    return [], (f"{BRIEF_LABEL} is loaded at {', '.join(early)}, before the "
+                f"{CARD_WRITTEN_AT.strftime('%H:%M')} state card it mirrors. The "
+                "committed template runs after the card; the loaded copy has drifted. "
+                f"Reinstall it: install-plist.sh {BRIEF_LABEL}")
 
 
 def read_gtm(paths=None) -> tuple[dict | None, str | None]:

@@ -358,20 +358,51 @@ class TestTheBriefReadsTheCardBeforeTheCardIsWritten:
         _, err = cb.read_heartbeat(self.EARLY, paths)
         assert err and "not an object" in err
 
-    def test_an_early_run_tells_SANA_since_it_no_longer_tells_him(self, tmp_path):
-        """THE SIGNAL CHANGED AUDIENCE, it did not disappear (PR #335 reviewer round 6,
-        minor). Deleting the P0 alarm row without this would have made a real
-        misconfiguration silent, which is worse than the noisy version."""
-        rows, err = cb.clock_warning(self.EARLY, _tree(tmp_path, date="2026-09-02"))
-        assert rows == []
-        assert err and "drifted early" in err
+    @staticmethod
+    def _agents(tmp_path, hour, minute):
+        """A LaunchAgents dir holding one brief plist at the given slot."""
+        import plistlib
+        d = tmp_path / "LaunchAgents"
+        d.mkdir(exist_ok=True)
+        (d / f"{cb.BRIEF_LABEL}.plist").write_bytes(plistlib.dumps(
+            {"Label": cb.BRIEF_LABEL,
+             "StartCalendarInterval": {"Hour": hour, "Minute": minute}}))
+        return d
 
-    def test_and_says_nothing_on_a_normal_run(self, tmp_path):
-        """An engineering channel that fires every morning is an engineering channel
-        that gets muted."""
-        assert cb.clock_warning(self.EARLY, _tree(tmp_path)) == ([], None)
-        after = dt.datetime(2026, 9, 3, 15, 0, tzinfo=dt.timezone.utc)
-        assert cb.clock_warning(after, _tree(tmp_path)) == ([], None)
+    def test_a_job_loaded_before_the_card_tells_SANA(self, tmp_path):
+        """THE SIGNAL CHANGED AUDIENCE, it did not disappear (round 6, minor). Deleting
+        the P0 alarm row without this would have made a real misconfiguration silent,
+        which is worse than the noisy version it replaced."""
+        rows, err = cb.clock_warning(NOW, self._agents(tmp_path, 7, 0))
+        assert rows == []
+        assert err and "07:00" in err and "drifted" in err
+
+    def test_the_committed_slot_says_nothing(self, tmp_path):
+        """An engineering channel that fires every morning is one that gets muted. 07:40
+        is the committed slot and is after the card."""
+        assert cb.clock_warning(NOW, self._agents(tmp_path, 7, 40)) == ([], None)
+
+    def test_the_boundary_is_the_card_again(self, tmp_path):
+        """One minute either side, so CARD_WRITTEN_AT decides and not a chosen slot."""
+        assert cb.clock_warning(NOW, self._agents(tmp_path, 7, 29))[1] is not None
+        assert cb.clock_warning(NOW, self._agents(tmp_path, 7, 30)) == ([], None)
+
+    def test_it_does_not_fire_on_a_hand_run(self, tmp_path):
+        """The earlier time-based version reported every hand run before 07:30. This
+        asks about the JOB, so the hour the question is asked cannot change the answer."""
+        early = dt.datetime(2026, 9, 3, 14, 0, tzinfo=dt.timezone.utc)   # 07:00 PT
+        assert cb.clock_warning(early, self._agents(tmp_path, 7, 40)) == ([], None)
+
+    def test_no_loaded_job_is_not_news(self, tmp_path):
+        """Nobody scheduled this run, so there is no schedule to be wrong."""
+        empty = tmp_path / "LaunchAgents"; empty.mkdir()
+        assert cb.clock_warning(NOW, empty) == ([], None)
+
+    def test_an_unparseable_plist_files_no_ticket(self, tmp_path):
+        """A machine problem, but not THIS one, and guessing files a wrong ticket."""
+        d = tmp_path / "LaunchAgents"; d.mkdir()
+        (d / f"{cb.BRIEF_LABEL}.plist").write_bytes(b"not a plist")
+        assert cb.clock_warning(NOW, d) == ([], None)
 
     def test_the_BOARD_says_it_too_not_just_the_slack_line(self, tmp_path):
         """PR #335 reviewer, minor, and they were right. Accepting yesterday's card is
@@ -690,14 +721,37 @@ class TestEngineeringLeavesHisBrief:
         assert {k for k, _ in mb.ENGINEERING_SECTIONS} == {"owed", "overnight"}
         assert {k for k, _ in mb.CLOCK_SECTION} == {"board_clock"}
 
-    def test_the_clock_route_is_silent_on_a_normal_run(self):
-        """It fires only when this brief ran before the card, which the committed
-        schedule makes impossible. An engineering channel that speaks every morning is
-        one that gets muted."""
+    def test_the_clock_route_reports_an_early_run_and_only_an_early_run(self, tmp_path,
+                                                                        monkeypatch):
+        """PR #335 reviewer round 7, nit, and it was the worst finding of the round. The
+        first version called `route_clock` with no argument, so it read the FOUNDER'S
+        LIVE LaunchAgents, and it stayed green under a mutation deleting the condition.
+        A test that touches live state and cannot fail is two defects.
+
+        BOTH directions are asserted against a tmp agents dir, so deleting the check
+        turns this red."""
+        import plistlib
         mb = self._brief()
+
+        def agents(hour, minute):
+            d = tmp_path / f"la-{hour}{minute}"
+            d.mkdir()
+            (d / f"{cb.BRIEF_LABEL}.plist").write_bytes(plistlib.dumps(
+                {"Label": cb.BRIEF_LABEL,
+                 "StartCalendarInterval": {"Hour": hour, "Minute": minute}}))
+            return d
+
+        monkeypatch.setattr(cb, "LAUNCH_AGENTS", agents(7, 0))
+        monkeypatch.setattr(mb, "_optional_module", lambda _stem: cb)
         sent = []
-        filed, failed = mb.route_clock(NOW, notify=sent.append)
-        assert sent == [] and filed == [] and failed == []
+        filed, _failed = mb.route_clock(NOW, notify=sent.append)
+        assert len(sent) == 1 and "drifted" in sent[0], sent
+        assert filed and "Board clock" in filed[0], filed
+
+        monkeypatch.setattr(cb, "LAUNCH_AGENTS", agents(7, 40))
+        quiet = []
+        assert mb.route_clock(NOW, notify=quiet.append) == ([], [])
+        assert quiet == [], quiet
 
     def test_a_healthy_section_pages_nobody(self):
         """A ticket every morning is how an alert channel gets muted."""

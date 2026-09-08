@@ -665,7 +665,7 @@ OPTIONAL_SECTIONS = (
 ERROR_LOG = STATE_DIR / "logs" / "morning-brief-errors.log"
 COLLECT_BUDGET_S = 20.0
 # The fixed four are bounded too (PR #294 review, major: `fixed_budget_s=None`
-# meant one hung calendar or mail call held the 07:00 brief, its Slack send and
+# meant one hung calendar or mail call held the morning brief, its Slack send and
 # its receipt forever, and the 09:00 deadman was the first thing to notice).
 # Calendar shells `claude -p` under CLAUDE_TIMEOUT and mail shells the ledger under
 # LEDGER_TIMEOUT_S (clamped below it, ASK-1323), so the thread bound sits one minute
@@ -725,7 +725,7 @@ def _guarded(key: str, fn, budget_s: float, log_path) -> tuple:
     # A DAEMON thread, not a ThreadPoolExecutor. Codex review of this issue
     # (findings 1 and 2, 2026-09-01): pool workers are non-daemon and the
     # interpreter joins them at exit, so a collector that never returns would
-    # keep the 07:00 process alive forever after the brief had "moved on". A
+    # keep the brief's process alive forever after the brief had "moved on". A
     # daemon thread is abandoned at exit; the brief, the send and the receipt
     # all complete on schedule.
     box: dict = {}
@@ -945,7 +945,7 @@ def main(argv=None) -> int:
         # writes at 08:00 is invisible until tomorrow.
         #
         # NO SLACK SEND, on purpose. Twelve messages a day is how a channel gets
-        # muted, and the 07:00 brief already carries the daily read. This run only
+        # muted, and the morning brief already carries the daily read. This run only
         # repaints the board.
         #
         # consulting_board IS collected even though nothing here changes its rows,
