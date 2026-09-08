@@ -1224,9 +1224,23 @@ def _reject_unrunnable_gate(command: str) -> None:
             continue
         break
     stripped = probe_cmd.lstrip()
-    # `(`, `{`, `!` and a leading redirect open shell GRAMMAR, not a command name.
-    # `bash -n` above already accepted the whole line, which is the real check.
-    if stripped[:1] in ("(", "{", "!", "<", ">"):
+    # `!` IS NOT AN ACCEPT, and grouping it with the others was a hole I opened
+    # (review of PR #330 round 3, MINOR). `!` NEGATES the pipeline's status, so
+    # `! check:the ledger is append-only` runs a command that does not exist, gets
+    # 127, and the negation turns that into exit 0 -- a gate that passes forever,
+    # in an append-only registry. It is stripped and probing continues, so the
+    # prose behind it is still caught.
+    while stripped[:1] == "!":
+        stripped = stripped[1:].lstrip()
+        if not stripped:
+            raise ValueError(
+                "gate command is only a negation, so it runs no check.\n"
+                f"  command: {cmd[:160]}")
+    # `(`, `{` and a leading redirect open shell GRAMMAR, not a command name, and
+    # `bash -n` above already accepted the whole line. Prose inside a subshell
+    # still fails LOUDLY at run time (127), which is the tolerable direction; the
+    # negation above was the one that fails silently green.
+    if stripped[:1] in ("(", "{", "<", ">"):
         return
     first = stripped.split()[0]
     probe = _sp.run(["bash", "-lc", f"command -v {shlex.quote(first)} >/dev/null 2>&1"],
@@ -3029,9 +3043,18 @@ def cmd_gates(cfg: Config, args) -> int:
         print(f"[WARN] gates: {registered_total} gate(s) registered, NONE "
               f"executed -- {why}, so no regression check ran. "
               f"Exit 0 below covers the spillover verdict ONLY.")
-    print(f"all {len(records)} regression gates green "
-          f"({registered_total} registered); "
-          f"{len(blocking)} blocking spillover item(s)")
+    # THE FINAL LINE MUST NOT CONTRADICT THE WARN (review of PR #330 round 3,
+    # MINOR). It printed "all 0 regression gates green" immediately under a WARN
+    # saying nothing executed -- which is the exact ASK-1038 sentence, still
+    # there, three lines below its own alarm. A reader who scrolls to the last
+    # line, or a script that greps it, sees the reassurance and not the warning.
+    if executed <= 0:
+        print(f"NO regression gate executed ({registered_total} registered); "
+              f"{len(blocking)} blocking spillover item(s)")
+    else:
+        print(f"all {executed} regression gates green "
+              f"({registered_total} registered); "
+              f"{len(blocking)} blocking spillover item(s)")
     return 0
 
 

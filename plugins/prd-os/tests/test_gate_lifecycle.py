@@ -154,6 +154,48 @@ def test_a_command_bash_can_run_is_not_called_prose(cmd):
     _runner_module()._reject_unrunnable_gate(cmd)
 
 
+def test_a_NEGATED_prose_command_is_refused(repo):
+    """`!` inverts, so accepting it makes a gate that passes forever.
+
+    Round 3 of the PR #330 review found this hole, which I opened myself by
+    grouping `!` with `(` and `{` as "shell grammar, bash already parsed it".
+    The difference is the direction of failure: prose inside a subshell exits 127
+    and the gate goes RED loudly, but `! <prose>` runs the same missing command,
+    gets 127, and the negation turns it into exit 0. In an append-only registry
+    that is a permanent green gate that never executed anything.
+    """
+    mod = _runner_module()
+    with pytest.raises(ValueError, match="does not start with a runnable command"):
+        mod._reject_unrunnable_gate("! check:the ledger is append-only")
+    # A BARE `!` is refused, but by bash's own parser at step 1, not by the
+    # negation branch -- `bash -n -c '!'` is a syntax error. Asserting the
+    # branch's own wording here failed, and the honest fix is to assert the
+    # OUTCOME and name which guard actually produces it. The branch stays as
+    # belt-and-braces so the strip loop cannot hand an empty string to
+    # `.split()[0]`; it is deliberately not claimed to be covered.
+    with pytest.raises(ValueError, match="not valid shell"):
+        mod._reject_unrunnable_gate("!")
+    # and a genuinely negated REAL command still passes, so the fix is not a ban
+    mod._reject_unrunnable_gate("! false")
+
+
+def test_a_run_that_executed_nothing_never_prints_the_green_sentence(repo):
+    """The last line must not contradict the WARN three lines above it.
+
+    It printed "all 0 regression gates green" directly under a WARN saying
+    nothing executed. That is the ASK-1038 sentence itself, still present, under
+    its own alarm -- and a reader who scrolls to the end, or a script that greps
+    the last line, sees only the reassurance.
+    """
+    write_gates(repo, [{"gate_id": "inert", "command": "exit 1",
+                        "lifecycle": "historical-receipt"}])
+    result = run(repo, "gates", "run")
+    out = result.stdout + result.stderr
+    assert "NO regression gate executed" in out, out
+    assert "regression gates green" not in out, (
+        "the run executed nothing and still printed the green sentence:\n" + out)
+
+
 def test_prose_is_STILL_refused_after_the_assignment_fix():
     """The negative half: widening the door must not open it (MAJOR 1 fix control).
 
